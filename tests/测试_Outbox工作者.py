@@ -418,7 +418,7 @@ async def test_successful_handler_is_not_retried_when_post_handler_idempotency_w
 
 
 @pytest.mark.asyncio
-async def test_successful_handler_is_not_retried_when_done_update_fails(monkeypatch):
+async def test_external_handler_becomes_uncertain_when_durable_finalize_fails(monkeypatch):
     from app.domains.messaging import idempotency
     from app.services import outbox_worker
 
@@ -474,8 +474,8 @@ async def test_successful_handler_is_not_retried_when_done_update_fails(monkeypa
     mark_failed.assert_not_awaited()
     db.rollback.assert_awaited_once()
     db.commit.assert_awaited_once()
-    done_stmt = db.execute.await_args_list[-1].args[0]
-    assert "DONE" in [str(v) for v in done_stmt.compile().params.values()]
+    uncertain_stmt = db.execute.await_args_list[-1].args[0]
+    assert "UNCERTAIN" in [str(v) for v in uncertain_stmt.compile().params.values()]
 
 
 @pytest.mark.asyncio
