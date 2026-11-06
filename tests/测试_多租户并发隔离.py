@@ -22,7 +22,7 @@ async def test_deduct_stock_rejects_other_store_product():
         seen.append(sql)
         res = MagicMock()
         if "from products" in sql and "for update" in sql:
-            res.first.return_value = (2,)
+            res.first.return_value = (2, "ON_SALE")
             return res
         res.rowcount = 1
         return res
