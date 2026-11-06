@@ -204,6 +204,20 @@ async def test_external_side_effect_read_timeout_is_uncertain_but_connect_error_
     with pytest.raises(httpx.ConnectError):
         await _call_external_side_effect("confirm_order", "MEITUAN", "7788", connect_error)
 
+    async def server_error():
+        response = httpx.Response(503, request=request)
+        raise httpx.HTTPStatusError("upstream unavailable", request=request, response=response)
+
+    with pytest.raises(ExternalSideEffectUncertain):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", server_error)
+
+    async def client_error():
+        response = httpx.Response(400, request=request)
+        raise httpx.HTTPStatusError("invalid request", request=request, response=response)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", client_error)
+
 
 def test_unknown_external_result_requires_explicit_reconciliation_before_replay():
     from app.api.outbox_admin import (
