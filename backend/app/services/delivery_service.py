@@ -1103,18 +1103,34 @@ class DeliveryService:
     @classmethod
     async def cancel_by_merchant(cls, db: AsyncSession, delivery_order_id: int, reason: str) -> dict:
         """商家取消采用事务型 Outbox：先持久化意图，再由 worker 调用平台。"""
+        # 统一采用 Order → DeliveryOrder 的加锁顺序。
+        # 配送回调先锁 Order 再更新 DeliveryOrder；反过来锁会形成死锁环。
+        order_id = (
+            await db.execute(
+                select(DeliveryOrder.order_id).where(DeliveryOrder.id == int(delivery_order_id))
+            )
+        ).scalar_one_or_none()
+        if not order_id:
+            raise AppException(40454, "外卖订单不存在")
+        order = (
+            await db.execute(
+                select(Order).where(Order.id == int(order_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not order:
+            raise AppException(40454, "关联订单不存在，无法取消外卖单")
         d_order = (
             await db.execute(
                 select(DeliveryOrder)
-                .where(DeliveryOrder.id == int(delivery_order_id))
+                .where(
+                    DeliveryOrder.id == int(delivery_order_id),
+                    DeliveryOrder.order_id == int(order.id),
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()
         if not d_order:
-            raise AppException(40454, "外卖订单不存在")
-        order = await db.get(Order, d_order.order_id, with_for_update=True)
-        if not order:
-            raise AppException(40454, "关联订单不存在，无法取消外卖单")
+            raise AppException(40954, "外卖订单关联关系已变化，请刷新后重试")
         if order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
             raise AppException(40054, "订单已结束，无法取消")
 
