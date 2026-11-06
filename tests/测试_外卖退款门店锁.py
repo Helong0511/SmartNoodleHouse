@@ -217,7 +217,7 @@ async def test_process_refund_rejects_when_cancel_outbox_is_active():
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund lock
         MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
-            '{"action":"cancel_order","platform":"MEITUAN","platform_order_id":"po-51","order_id":999}',
+            '{"action":"cancel_order","platform":"MEITUAN","platform_order_id":"po-51","store_id":7,"order_id":999}',
         ])))),  # callback-originated cancel task uses inbox id, not delivery_order_id
     ])
     db.commit = AsyncMock()
