@@ -29,7 +29,7 @@ async def _call_external_side_effect(
     try:
         return await operation()
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code >= 500:
+        if exc.response.status_code in (408, 409) or exc.response.status_code >= 500:
             raise ExternalSideEffectUncertain(
                 f"{platform} {action} order={platform_order_id}: HTTP {exc.response.status_code}; "
                 "平台可能已执行，请核实平台订单状态后再处理"
