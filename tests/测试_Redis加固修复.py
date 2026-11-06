@@ -586,14 +586,17 @@ async def test_menu_cache_read_rejects_version_mismatch():
 
 
 @pytest.mark.asyncio
-async def test_menu_version_migrates_legacy_key_without_expiry():
+async def test_menu_version_uses_only_current_key():
     from app.core import menu_cache
     fake = FakeRedis()
+    # 项目按统一当前版本运行；不读取或迁移任何历史键。
     fake.store["snh:menu:ver:10"] = "23"
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
-        assert await menu_cache.get_menu_version(10) == 23
-        assert fake.store[menu_cache.menu_version_key(10)] == "23"
-        assert "{s10}" in menu_cache.menu_version_key(10)
+        assert await menu_cache.get_menu_version(10) == 0
+        assert menu_cache.menu_version_key(10) not in fake.store
+        assert await menu_cache.bump_menu_version(10) == 1
+        assert fake.store[menu_cache.menu_version_key(10)] == "1"
+        assert fake.store["snh:menu:ver:10"] == "23"
 
 
 @pytest.mark.asyncio
