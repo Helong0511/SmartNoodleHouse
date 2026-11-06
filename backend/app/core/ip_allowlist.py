@@ -126,12 +126,13 @@ class WebhookAllowlistMiddleware(BaseHTTPMiddleware):
         )
         allowlist = _parse_allowlist(raw)
         if not allowlist:
-            # 生产必须 fail-closed：动态配置被清空或包含非法项时，不得静默放行支付/外卖回调。
+            # 仅在显式要求白名单时 fail-closed。生产可对没有稳定官方出口 IP 的平台
+            # 关闭 IP 白名单，但回调仍必须通过签名、商户身份、金额/订单与幂等校验。
             require = SystemSettingsService.resolved_bool_sync(
                 "webhook_require_allowlist",
                 bool(getattr(settings, "webhook_require_allowlist", False)),
             )
-            if settings.is_production or require:
+            if require:
                 logger.error("Webhook IP 白名单为空或无有效项，拒绝回调 path=%s", path)
                 return json_error_response(
                     request,
