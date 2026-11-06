@@ -151,7 +151,7 @@ async def try_acquire_reco_lock(
     try:
         r = await get_redis()
         acquired = await r.set(
-            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, limit),
             token,
             nx=True,
             ex=_REBUILD_LOCK_TTL,
@@ -180,7 +180,7 @@ async def release_reco_lock(
         await r.eval(
             _RELEASE_LOCK_SCRIPT,
             1,
-            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, limit),
             owner_token,
         )
     except Exception:
