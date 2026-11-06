@@ -30,7 +30,9 @@ def test_canonical_schema_has_unique_columns_and_resolvable_foreign_keys():
         columns = re.findall(r"^  \x60([^\x60]+)\x60\s+", definition, re.MULTILINE)
         duplicates = [name for name, count in Counter(columns).items() if count > 1]
         assert not duplicates, f"{table_name} defines duplicate columns: {duplicates}"
-        assert "id" in columns, f"{table_name} is missing its expected primary id column"
+        assert re.search(r"^  PRIMARY KEY\s*\(", definition, re.MULTILINE), (
+            f"{table_name} is missing a primary key definition"
+        )
         tables[table_name] = set(columns)
 
     assert tables, "canonical schema contains no CREATE TABLE statements"
