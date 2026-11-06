@@ -1815,7 +1815,6 @@ CREATE TABLE IF NOT EXISTS `marketing_campaigns` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店；NULL=总部',
   `code` varchar(64) NOT NULL COMMENT '业务键',
-  `code_key` varchar(96) NULL DEFAULT NULL COMMENT 'HQ:CODE 或 store_id:CODE（跨库唯一）',
   `code_key` varchar(96) NULL DEFAULT NULL COMMENT 'HQ:{CODE} 或 {store_id}:{CODE}，跨库唯一',
   `name` varchar(100) NOT NULL COMMENT '活动名',
   `campaign_type` varchar(30) NOT NULL DEFAULT 'MEMBER_DAY' COMMENT 'FESTIVAL/MEMBER_DAY/TIME_SLOT/SOCIAL/...',
