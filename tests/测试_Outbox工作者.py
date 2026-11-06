@@ -146,6 +146,7 @@ async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
     # 单条 UPDATE + CASE 原子区分可重试与耗尽行，避免两次 UPDATE 之间发生状态竞争。
     assert "CASE" in str(stmt).upper()
     assert "FAILED" in [str(v) for v in compiled.params.values()]
+    assert "UNCERTAIN" in [str(v) for v in compiled.params.values()]
     assert "PENDING" in [str(v) for v in compiled.params.values()]
     # 外部平台/设备副作用事件不能在 worker 崩溃后盲目回到 PENDING。
     assert "delivery_manual" in [str(v) for v in compiled.params.values()]
@@ -176,10 +177,10 @@ async def test_mark_uncertain_moves_event_to_dead_letter_without_retry():
     stmt = db.execute.await_args.args[0]
     compiled = stmt.compile()
     assert "EXTERNAL_RESULT_UNKNOWN" in str(compiled.params.values())
-    assert "FAILED" in [str(v) for v in compiled.params.values()]
+    assert "UNCERTAIN" in [str(v) for v in compiled.params.values()]
     assert "PROCESSING" in [str(v) for v in compiled.params.values()]
     assert "worker-1" in [str(v) for v in compiled.params.values()]
-    assert "attempt_count" in str(stmt)
+    assert "last_error" in str(stmt)
     db.commit.assert_awaited_once()
 
 
