@@ -295,6 +295,10 @@ class MeituanProvider(DeliveryProvider):
             raise DeliveryPlatformResultUnknown(
                 f"MEITUAN {path}: response has neither data nor explicit error"
             )
+        if data.get("data") != "ok" and not data.get("error"):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: response data is not a recognized success or explicit rejection"
+            )
         if data.get("data") != "ok" and data.get("error"):
             logger.error("美团 API 失败 %s: %s", path, data)
         return data
