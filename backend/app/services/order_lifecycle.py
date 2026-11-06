@@ -251,6 +251,10 @@ async def _restore_order_stock(db: AsyncSession, order: Order) -> None:
         aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
     for product_id, qty in aggregated.items():
         await restore_stock(db, product_id, qty, store_id=order.store_id)
+    if aggregated:
+        from app.services.stock_service import _enqueue_menu_cache_invalidation
+
+        await _enqueue_menu_cache_invalidation(db, order.store_id)
 
 
 async def _deduct_order_stock(db: AsyncSession, order: Order) -> None:
@@ -264,3 +268,7 @@ async def _deduct_order_stock(db: AsyncSession, order: Order) -> None:
         aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
     for product_id, qty in aggregated.items():
         await deduct_stock(db, product_id, qty, store_id=order.store_id)
+    if aggregated:
+        from app.services.stock_service import _enqueue_menu_cache_invalidation
+
+        await _enqueue_menu_cache_invalidation(db, order.store_id)
