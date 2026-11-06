@@ -354,6 +354,63 @@ async def test_unknown_claim_completion_rowcount_fails_closed():
 
 
 @pytest.mark.asyncio
+async def test_successful_handler_is_not_retried_when_post_handler_idempotency_write_fails(monkeypatch):
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=903,
+        aggregate_type="test_external",
+        aggregate_id=99,
+        event_kind="notify",
+        locked_by="worker:external-token",
+        payload="{}",
+        sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *args):
+            return False
+
+    handler = AsyncMock()
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("test_external", "notify"))
+    outbox_worker.OUTBOX_HANDLERS[("test_external", "notify")] = handler
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        idempotency, "try_acquire",
+        AsyncMock(side_effect=RuntimeError("idempotency database unavailable")),
+    )
+
+    async def _run_handler(handler_fn, _db, _row, **kwargs):
+        await handler_fn(_db, _row)
+        return True
+
+    monkeypatch.setattr(outbox_worker, "_run_handler_with_lease", AsyncMock(side_effect=_run_handler))
+    try:
+        assert await outbox_worker.process_outbox_item(903) is True
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("test_external", "notify"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("test_external", "notify")] = old_handler
+
+    handler.assert_awaited_once()
+    db.rollback.assert_awaited_once()
+    db.commit.assert_awaited_once()
+    done_stmt = db.execute.await_args_list[-1].args[0]
+    assert "DONE" in [str(v) for v in done_stmt.compile().params.values()]
+
+
+@pytest.mark.asyncio
 async def test_库存镜像复用事件不得被历史一次性幂等记录跳过(monkeypatch):
     from contextlib import asynccontextmanager
     from app.domains.messaging import idempotency
