@@ -1309,3 +1309,48 @@ async def test_resolve_manual_confirm_unknown_outbox_reconciles_acceptance(monke
     assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
     db.commit.assert_awaited_once()
     audit.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_resolve_stock_rejection_cancel_without_local_order(monkeypatch):
+    """库存拒单发生在本地订单创建前；平台核实取消后无需虚构本地订单。"""
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=504,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after stock rejection cancel",
+        aggregate_type="webhook_task",
+        aggregate_id=9901,  # WebhookInbox.id, not DeliveryOrder.id
+        event_kind="deferred_0000",
+        payload=json.dumps({
+            "action": "cancel_order",
+            "platform": "ELEME",
+            "platform_order_id": "EL-NEW-1",
+            "store_id": 7,
+            "order_id": None,
+        }),
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no local DeliveryOrder exists
+        MagicMock(rowcount=1),  # mark Outbox DONE
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
+        await resolve_unknown_dead_letter(
+            504,
+            OutboxResolveIn(reason="平台核实已成功：库存拒单已取消"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert db.execute.await_count == 3
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
