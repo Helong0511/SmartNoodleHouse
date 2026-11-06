@@ -420,7 +420,10 @@ async def test_delivery_completed_callback_syncs_summary_when_order_already_comp
     )
     order = SimpleNamespace(id=101, status="COMPLETED", completed_at=None)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -446,7 +449,10 @@ async def test_delivery_cancel_callback_syncs_summary_when_order_already_cancell
     )
     order = SimpleNamespace(id=102, status="CANCELLED")
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -474,7 +480,10 @@ async def test_late_delivery_completed_callback_does_not_override_other_terminal
     )
     order = SimpleNamespace(id=103, status=terminal_status, completed_at=None)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -503,7 +512,10 @@ async def test_late_delivery_cancel_callback_does_not_override_other_terminal_st
     )
     order = SimpleNamespace(id=104, status=terminal_status)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -546,9 +558,10 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     )
     order = SimpleNamespace(id=105, status=order_status)
     db = MagicMock()
-    db.execute = AsyncMock(
-        return_value=SimpleNamespace(scalar_one_or_none=lambda: order)
-    )
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
