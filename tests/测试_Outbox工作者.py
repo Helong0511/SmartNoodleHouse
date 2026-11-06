@@ -1338,6 +1338,7 @@ async def test_resolve_stock_rejection_cancel_without_local_order(monkeypatch):
     db.execute = AsyncMock(side_effect=[
         MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no local DeliveryOrder exists
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no orphan Order exists
         MagicMock(rowcount=1),  # mark Outbox DONE
     ])
     db.commit = AsyncMock()
@@ -1351,6 +1352,6 @@ async def test_resolve_stock_rejection_cancel_without_local_order(monkeypatch):
             user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
         )
 
-    assert db.execute.await_count == 3
+    assert db.execute.await_count == 4
     db.commit.assert_awaited_once()
     audit.assert_awaited_once()
