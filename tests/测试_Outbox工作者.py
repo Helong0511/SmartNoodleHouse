@@ -377,6 +377,24 @@ async def test_库存镜像处理期间版本变化时重新排队而不是标�
 
 
 @pytest.mark.asyncio
+async def test_process_outbox_item_returns_false_when_atomic_claim_is_lost(monkeypatch):
+    from app.services import outbox_worker
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", _Session)
+    monkeypatch.setattr(
+        outbox_worker, "claim_outbox_item", AsyncMock(return_value=None)
+    )
+
+    assert await outbox_worker.process_outbox_item(404) is False
+
+
+@pytest.mark.asyncio
 async def test_outbox_idempotency_precheck_failure_never_runs_handler(monkeypatch):
     from app.domains.messaging import idempotency
     from app.services import outbox_worker
@@ -407,13 +425,14 @@ async def test_outbox_idempotency_precheck_failure_never_runs_handler(monkeypatc
     old_handler = outbox_worker.OUTBOX_HANDLERS.get(("paid_side_effect", "points_award"))
     outbox_worker.OUTBOX_HANDLERS[("paid_side_effect", "points_award")] = handler
     try:
-        await outbox_worker.process_outbox_item(88)
+        claimed = await outbox_worker.process_outbox_item(88)
     finally:
         if old_handler is None:
             outbox_worker.OUTBOX_HANDLERS.pop(("paid_side_effect", "points_award"), None)
         else:
             outbox_worker.OUTBOX_HANDLERS[("paid_side_effect", "points_award")] = old_handler
 
+    assert claimed is True
     assert db.rollback.await_count == 1
     outbox_worker._mark_failed.assert_awaited_once()
     handler.assert_not_awaited()
