@@ -2034,7 +2034,7 @@ CREATE TABLE IF NOT EXISTS `payment_reconcile_batches` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_prb_channel_bill_store`(`channel` ASC, `bill_date` ASC, `scope_store_id` ASC) USING BTREE,
   INDEX `idx_prb_status_date`(`status` ASC, `bill_date` ASC) USING BTREE,
-  INDEX `idx_prb_scope_store`(`scope_store_id` ASC) USING BTREE
+  INDEX `ix_payment_reconcile_batches_scope_store_id`(`scope_store_id` ASC) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付渠道对账批次' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for payment_reconcile_diffs
