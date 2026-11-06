@@ -175,20 +175,26 @@ class PaymentReconcileService:
                     chunk = payment_numbers[offset : offset + 500]
                     ownership_rows = (
                         await db.execute(
-                            select(Payment.payment_no, Order.store_id, RechargeOrder.store_id)
+                            select(
+                                Payment.payment_no,
+                                Payment.provider,
+                                Order.store_id,
+                                RechargeOrder.store_id,
+                            )
                             .outerjoin(Order, Payment.order_id == Order.id)
                             .outerjoin(RechargeOrder, Payment.recharge_order_id == RechargeOrder.id)
-                            .where(
-                                Payment.provider == ch,
-                                Payment.payment_no.in_(chunk),
-                            )
+                            .where(Payment.payment_no.in_(chunk))
                         )
                     ).all()
-                    for payment_no, order_store_id, recharge_store_id in ownership_rows:
+                    for payment_no, provider, order_store_id, recharge_store_id in ownership_rows:
                         owner_store_id = order_store_id or recharge_store_id
-                        if owner_store_id is None or int(owner_store_id) != scope_id:
+                        if (
+                            str(provider).upper() != ch
+                            or owner_store_id is None
+                            or int(owner_store_id) != scope_id
+                        ):
                             raise ValueError(
-                                f"门店账单包含其他门店或无法确认归属的支付单: {payment_no}"
+                                f"门店账单包含其他门店、其他渠道或无法确认归属的支付单: {payment_no}"
                             )
             start = datetime.combine(bill_date, time.min).replace(tzinfo=now_local().tzinfo)
             end = start + timedelta(days=1)
