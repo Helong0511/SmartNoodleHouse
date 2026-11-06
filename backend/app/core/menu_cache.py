@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 from app.core.async_utils import spawn_bg
@@ -30,7 +31,21 @@ logger = logging.getLogger(__name__)
 
 MENU_TTL_SECONDS = MENU_BUNDLE_TTL_SECONDS
 _BUNDLE_MAX_BYTES = 256 * 1024  # bundle JSON 超 256KB 跳过缓存以避免大Key
-_REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s，防持锁进程崩溃后永久锁
+_REBUILD_LOCK_TTL = 10  # 重建锁租约；owner token 防止过期任务误删/覆盖新 owner
+
+_RELEASE_LOCK_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_SET_BUNDLE_IF_OWNER_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+end
+return 0
+"""
 
 
 async def get_menu_version(store_id: int) -> int:
@@ -83,7 +98,9 @@ async def get_menu_bundle(store_id: int) -> dict[str, Any] | None:
     return None
 
 
-async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
+async def set_menu_bundle(store_id: int, bundle: dict[str, Any], *, owner_token: str | None = None) -> None:
+    if not owner_token:
+        return
     try:
         r = await get_redis()
         from app.core.response import dumps_json
@@ -95,24 +112,36 @@ async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
                 store_id, len(raw.encode("utf-8")) // 1024,
             )
             return
-        await r.set(menu_bundle_key(store_id), raw, ex=ttl_with_jitter(MENU_TTL_SECONDS))
+        await r.eval(
+            _SET_BUNDLE_IF_OWNER_SCRIPT,
+            2,
+            menu_rebuild_lock_key(store_id),
+            menu_bundle_key(store_id),
+            owner_token,
+            raw,
+            ttl_with_jitter(MENU_TTL_SECONDS),
+        )
     except Exception:
         pass
 
 
-async def try_acquire_rebuild_lock(store_id: int) -> bool:
-    """缓存击穿保护：SET NX EX 抢锁，避免并发重建压垮数据库。Redis 不可用时 fail-open。"""
+async def try_acquire_rebuild_lock(store_id: int) -> str | None:
+    """缓存击穿保护：返回唯一 owner token；竞争/Redis 故障返回 None。"""
     try:
         r = await get_redis()
-        return bool(await r.set(menu_rebuild_lock_key(store_id), "1", nx=True, ex=_REBUILD_LOCK_TTL))
+        token = uuid.uuid4().hex
+        acquired = await r.set(menu_rebuild_lock_key(store_id), token, nx=True, ex=_REBUILD_LOCK_TTL)
+        return token if acquired else None
     except Exception:
         return False
 
 
-async def release_rebuild_lock(store_id: int) -> None:
+async def release_rebuild_lock(store_id: int, *, owner_token: str | None = None) -> None:
+    if not owner_token:
+        return
     try:
         r = await get_redis()
-        await r.delete(menu_rebuild_lock_key(store_id))
+        await r.eval(_RELEASE_LOCK_SCRIPT, 1, menu_rebuild_lock_key(store_id), owner_token)
     except Exception:
         pass
 
