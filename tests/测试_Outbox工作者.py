@@ -367,11 +367,11 @@ async def test_successful_handler_is_not_retried_when_post_handler_idempotency_w
 
     row = MagicMock(
         id=903,
-        aggregate_type="test_external",
+        aggregate_type="webhook_task",
         aggregate_id=99,
-        event_kind="notify",
+        event_kind="execute",
         locked_by="worker:external-token",
-        payload="{}",
+        payload='{"action":"cancel_order"}',
         sync_version=0,
     )
     db = MagicMock()
@@ -387,8 +387,8 @@ async def test_successful_handler_is_not_retried_when_post_handler_idempotency_w
             return False
 
     handler = AsyncMock()
-    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("test_external", "notify"))
-    outbox_worker.OUTBOX_HANDLERS[("test_external", "notify")] = handler
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = handler
     monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
     monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
     monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
@@ -406,9 +406,9 @@ async def test_successful_handler_is_not_retried_when_post_handler_idempotency_w
         assert await outbox_worker.process_outbox_item(903) is True
     finally:
         if old_handler is None:
-            outbox_worker.OUTBOX_HANDLERS.pop(("test_external", "notify"), None)
+            outbox_worker.OUTBOX_HANDLERS.pop(("webhook_task", "execute"), None)
         else:
-            outbox_worker.OUTBOX_HANDLERS[("test_external", "notify")] = old_handler
+            outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = old_handler
 
     handler.assert_awaited_once()
     db.rollback.assert_awaited_once()
@@ -424,11 +424,11 @@ async def test_successful_handler_is_not_retried_when_done_update_fails(monkeypa
 
     row = MagicMock(
         id=904,
-        aggregate_type="test_external",
+        aggregate_type="webhook_task",
         aggregate_id=100,
-        event_kind="notify",
+        event_kind="execute",
         locked_by="worker:external-token",
-        payload="{}",
+        payload='{"action":"cancel_order"}',
         sync_version=0,
     )
     db = MagicMock()
@@ -446,8 +446,8 @@ async def test_successful_handler_is_not_retried_when_done_update_fails(monkeypa
             return False
 
     handler = AsyncMock()
-    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("test_external", "notify"))
-    outbox_worker.OUTBOX_HANDLERS[("test_external", "notify")] = handler
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = handler
     monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
     monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
     monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
@@ -465,9 +465,9 @@ async def test_successful_handler_is_not_retried_when_done_update_fails(monkeypa
         assert await outbox_worker.process_outbox_item(904) is True
     finally:
         if old_handler is None:
-            outbox_worker.OUTBOX_HANDLERS.pop(("test_external", "notify"), None)
+            outbox_worker.OUTBOX_HANDLERS.pop(("webhook_task", "execute"), None)
         else:
-            outbox_worker.OUTBOX_HANDLERS[("test_external", "notify")] = old_handler
+            outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = old_handler
 
     handler.assert_awaited_once()
     try_acquire.assert_not_awaited()
@@ -477,6 +477,59 @@ async def test_successful_handler_is_not_retried_when_done_update_fails(monkeypa
     done_stmt = db.execute.await_args_list[-1].args[0]
     assert "DONE" in [str(v) for v in done_stmt.compile().params.values()]
 
+
+@pytest.mark.asyncio
+async def test_internal_database_handler_remains_retryable_after_finalize_failure(monkeypatch):
+    """普通内部 DB handler 事务提交失败时，不能错误标记 DONE。"""
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=905, aggregate_type="test_internal", aggregate_id=101,
+        event_kind="update", locked_by="worker:internal-token",
+        payload="{}", sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=RuntimeError("database finalize failed"))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return db
+        async def __aexit__(self, *args):
+            return False
+
+    handler = AsyncMock()
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("test_internal", "update"))
+    outbox_worker.OUTBOX_HANDLERS[("test_internal", "update")] = handler
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    mark_failed = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "_mark_failed", mark_failed)
+    mark_done = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "_mark_done_after_handler", mark_done)
+
+    async def _run_handler(handler_fn, _db, _row, **kwargs):
+        await handler_fn(_db, _row)
+        return True
+
+    monkeypatch.setattr(
+        outbox_worker, "_run_handler_with_lease", AsyncMock(side_effect=_run_handler)
+    )
+    try:
+        assert await outbox_worker.process_outbox_item(905) is True
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("test_internal", "update"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("test_internal", "update")] = old_handler
+
+    handler.assert_awaited_once()
+    db.rollback.assert_awaited_once()
+    mark_failed.assert_awaited_once()
+    mark_done.assert_not_awaited()
 
 @pytest.mark.asyncio
 async def test_库存镜像复用事件不得被历史一次性幂等记录跳过(monkeypatch):
