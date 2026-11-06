@@ -481,7 +481,9 @@ class ProductSyncService:
 
         failures = 0
         for sid, pid in pairs:
-            failures += await _push_store_product_stock(db, int(sid), int(pid))
+            failures += await _push_store_product_stock(
+                db, int(sid), int(pid), platform_filter=platform.upper() if platform else None
+            )
         return {"products": len(pairs), "failures": failures, "ok": failures == 0}
 
     @staticmethod
