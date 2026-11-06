@@ -1400,6 +1400,7 @@ async def test_resolve_auto_confirm_unknown_outbox_uses_payload_order_not_inbox_
         MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
         MagicMock(rowcount=1),
     ])
+    db.flush = AsyncMock()
     db.commit = AsyncMock()
 
     with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
