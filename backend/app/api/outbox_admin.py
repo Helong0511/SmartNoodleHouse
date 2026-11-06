@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -13,12 +14,23 @@ from app.core.response import calc_pages, success, serialize_dt
 from app.models import OutboxEvent
 from app.services.audit_service import AuditService
 from app.services.outbox_worker import (
-    OUTBOX_HANDLERS,
     _resolve_outbox_handler,
     requeue_dead_letter_outbox,
 )
 
 router = APIRouter(prefix="/admin/outbox", tags=["系统运维-Outbox"])
+
+
+def _safe_error(value: str | None) -> str:
+    """隐藏异常文本中常见的凭据形式，避免运维列表泄露 token/密码。"""
+    text = (value or "")[:1000]
+    text = re.sub(r"(?i)(authorization\\s*[:=]\\s*bearer\\s+)\\S+", r"\\1***", text)
+    text = re.sub(
+        r"(?i)(password|passwd|token|secret|api[_-]?key)(\\s*[:=]\\s*)[^,;\\s]+",
+        r"\\1\\2***",
+        text,
+    )
+    return text[:500]
 
 
 def _require_super_admin(user: CurrentUser) -> None:
@@ -82,7 +94,7 @@ async def list_dead_letters(
             "status": row.status,
             "attempt_count": row.attempt_count,
             "max_attempts": row.max_attempts,
-            "last_error": (row.last_error or "")[:500],
+            "last_error": _safe_error(row.last_error),
             "created_at": serialize_dt(row.created_at),
             "updated_at": serialize_dt(row.updated_at),
         } for row in rows],
@@ -102,6 +114,8 @@ async def replay_dead_letter(
     user: CurrentUser,
 ):
     _require_super_admin(user)
+    if len(data.reason.strip()) < 8:
+        raise AppException(40012, "重放原因去除空格后至少需要 8 个字符", status_code=400)
     row = (await db.execute(
         select(OutboxEvent).where(OutboxEvent.id == outbox_id)
     )).scalar_one_or_none()
