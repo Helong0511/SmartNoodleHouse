@@ -137,13 +137,13 @@ def main() -> int:
     BACKUP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix":
         os.chmod(BACKUP_DIR, 0o700)
+    dump = find_mysqldump()
     # 使用同目录唯一临时文件，只有完整备份通过 gzip CRC 校验后才原子发布。
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     out_path = BACKUP_DIR / f"smart_noodle_house_{stamp}.sql.gz"
     fd, temp_name = tempfile.mkstemp(prefix=".smart-noodle-house-", suffix=".partial", dir=BACKUP_DIR)
     os.close(fd)
     temp_path = Path(temp_name)
-    dump = find_mysqldump()
 
     env = os.environ.copy()
     # 避免密码出现在进程参数列表：使用 MYSQL_PWD（仅本子进程）
