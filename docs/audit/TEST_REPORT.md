@@ -1,7 +1,8 @@
 # Cwm9 测试报告
 
-> 执行日期：2026-09-29
+> 历史执行日期：2026-09-29（归档快照，非当前 main 的测试结论）
 > 执行环境：Windows + Python 3.11 + pytest（asyncio_mode=auto）+ SQLite in-memory
+> 后续变化：真实 MySQL CI、Redis 7 集成测试、前端构建/测试、依赖安全审计已在后续 CI 工作流中增加；请以对应 main commit 的 GitHub Actions 为准。
 > 测试目录：[tests/](file:///e:/SmartNoodleHouse/tests/)（项目硬约束：所有测试代码必须在此目录）
 > 配置：[pytest.ini](file:///e:/SmartNoodleHouse/pytest.ini)、[tests/conftest.py](file:///e:/SmartNoodleHouse/tests/conftest.py)
 
@@ -42,7 +43,7 @@ python -m pytest tests/ -q --tb=line --no-header
 | 5 | 测试_POS退款.py::test_reject/approve_requires_manager | `_can_approve` 对非店长角色会查 DB 权限，纯 AsyncMock 的 db.execute 返回协程而非结果；测试本意是验证"无权限被拒" | patch `_can_approve` 返回 False，精确锁定权限分支 | ✓ |
 | 6 | 测试_外卖营业时间.py::test_自动开关店 | `apply_auto_open_tick` 内部用全局 `AsyncSessionLocal` 开独立会话，测试 SQLite in-memory 与会话隔离导致查不到数据 | patch `app.core.database.AsyncSessionLocal` 复用测试会话 | ✓ |
 | 7 | 测试_订单创建券.py::test_release_for_order_restores_reserved | `release_for_order` 增加了"按 used_order_id 反查"兜底查询，旧测试桩只 mock 了单次 execute | 按真实两次 execute 顺序设置 side_effect | ✓ |
-| 8 | 限流行为（测试_限流关闭失败 / 测试_消息幂等与域模块 两处预期冲突） | 两处测试对"Redis 宕机时限流中间件应 fail-open 还是 fail-closed"预期矛盾 | 经设计权衡统一为 **fail-open**（见下文 §6），重写测试_限流关闭失败.py 明确固化该决策与理由，消除矛盾 | ✓ |
+| 8 | 限流行为（2026-09 历史设计） | 历史测试曾统一预期 Redis 宕机时 fail-open；后续生产安全要求已调整为按路径分级 | 当前敏感认证/支付/小程序登录刷新/外卖回调路径 fail-closed，普通路径 fail-open；详见当前 `rate_limit.py` 与 `startup_checks.py` | 已被后续实现取代 |
 
 修复涉及文件：
 
@@ -55,7 +56,7 @@ python -m pytest tests/ -q --tb=line --no-header
 - [tests/测试_订单创建券.py](file:///e:/SmartNoodleHouse/tests/测试_订单创建券.py)
 - [tests/测试_限流关闭失败.py](file:///e:/SmartNoodleHouse/tests/测试_限流关闭失败.py)
 
-生产代码改动：仅 [sql/struct.sql](file:///e:/SmartNoodleHouse/sql/struct.sql) 口令占位符一处（消除疑似真实口令），后端业务逻辑未因测试失败而削弱；曾短暂尝试把限流改为 fail-closed，因与既有 fail-open 设计及另一测试冲突，已还原为 fail-open 并在代码注释中固化理由。
+本节描述的是 2026-09-29 历史测试修复过程，不代表当前 main 的代码改动范围或当前限流策略。后续已增加敏感路径 fail-closed、真实 MySQL/Redis CI、部署安全校验等改进；请勿将本历史结论用于当前生产配置。
 
 ---
 
@@ -105,14 +106,14 @@ python -m pytest tests/ -q --tb=line --no-header
 
 ---
 
-## 6. 一项记录在案的设计决策：限流 fail-open
+## 6. 历史限流设计决策（2026-09-29，已被后续实现取代）
 
-两套测试对 Redis 宕机时限流行为预期不一致，审计中核实真实代码与多数文档后确认系统既定策略为 **fail-open（降级放行）**：
+本节只保留历史背景。当前 Redis 故障策略已调整为按路径分级：
 
-- 代码：[rate_limit.py:74-77](file:///e:/SmartNoodleHouse/backend/app/core/rate_limit.py) 捕获异常后记 error 并继续 `call_next`。
-- 理由：Redis 仅为限流加速层；认证、入侵检测、SQL 注入检测、登录失败锁定等仍在；fail-closed 会让全站 503，在餐饮营业场景扩大故障半径。
-- 处理：保留 fail-open，重写 [测试_限流关闭失败.py](file:///e:/SmartNoodleHouse/tests/测试_限流关闭失败.py) 为验证"生产环境 Redis 宕机仍放行并继续调用下游"，并在文件 docstring 写明权衡与未来可加开关；与测试_消息幂等与域模块.py 的预期对齐。
-- 后续建议（已记入 REMAINING_ISSUES）：为 `/api/auth/login`、`/api/payments/` 等敏感端点增加独立的"fail-closed"配置开关。
+- `RATE_LIMIT_FAIL_CLOSED_PATHS` 覆盖认证、支付、小程序登录/刷新、外卖回调等敏感路径；Redis 不可用时返回 503。
+- 普通点餐/查询等路径仍 fail-open，避免限流 Redis 故障导致全站不可用。
+- 生产启动校验会拒绝缺少必需敏感路径的配置。
+- 当前行为由 `backend/app/core/rate_limit.py`、`backend/app/core/startup_checks.py` 和 `tests/测试_限流关闭失败.py` 定义；不要按本报告 2026-09 的旧结论操作。
 
 ---
 
@@ -141,14 +142,14 @@ python -m pytest tests/ -q --tb=line --no-header
 
 ## 9. 未覆盖 / 覆盖薄弱项（诚实记录）
 
-1. **真实 MySQL CI 缺失**：所有 DB 测试跑 SQLite，未在 CI 用 MySQL service container 验证方言差异（CHECK、SKIP LOCKED、索引 DDL）。
-2. **真实平台端到端**：支付/外卖/小程序均为契约测试，未用沙箱真实凭证跑全链路（BLK-001）。
-3. **前端无自动化测试**：frontend（Vue）没有单元/E2E 测试套件，路由守卫与 401 逻辑仅靠后端联调与人工验证。
-4. **压测**：有推荐系统性能基准测试，但无全链路并发压测报告（TPS/慢查询/连接池水位）。
-5. **告警链路**：metrics 端点存在，但无 Prometheus 规则与告警触发的自动化验证。
+1. **真实 MySQL CI**：本历史报告日期时缺失；后续已增加 `backend-mysql` MySQL 8 service-container job，但生产 schema 对比仍需预生产执行（BLK-003）。
+2. **真实平台端到端**：支付/外卖/小程序仍需用官方沙箱凭证跑全链路（BLK-001）。
+3. **前端自动化**：本历史报告日期时缺少；后续已接入前端构建/单元测试 CI，完整 Playwright E2E 仍待排期。
+4. **压测**：仓库提供核心链路压测脚本，但生产容量基线和摄像头/KDS/Outbox 联合压测仍需在预生产执行。
+5. **告警链路**：metrics 端点存在，Prometheus/Grafana 规则与告警通知实测仍需运维接入（BLK-004）。
 
 ---
 
 ## 10. 结论
 
-本次审计在真实代码上运行全量测试，初次失败项均已定位修复（其中 1 处为真实疑似口令、7 处为测试桩陈旧/预期矛盾），修复后 **791 passed / 8 skipped / 0 failed**。测试结果与 [REPAIR_TRACKER.md](file:///e:/SmartNoodleHouse/docs/audit/REPAIR_TRACKER.md) 台账状态一致，未发现被掩盖的失败。主要覆盖缺口在真实 MySQL CI、前端自动化与真实平台沙箱联调，已如实列入 REMAINING_ISSUES.md。
+以上 **791 passed / 8 skipped / 0 failed** 仅为 2026-09-29 的历史 SQLite 测试记录。后续 CI 已加入 MySQL 8、Redis 7、前端构建/测试和依赖安全审计；当前 main 的实际通过情况必须按对应 commit 的 Actions 检查读取。生产沙箱联调、生产 schema 演练、备份恢复、告警接入与全链路容量验收仍属外部上线阻塞项。

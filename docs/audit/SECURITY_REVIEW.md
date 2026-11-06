@@ -1,8 +1,8 @@
 # Cwm9 安全审计报告
 
-> 审计日期：2026-09-29
+> 历史审计基线：2026-09-29；配置与发布控制复核：2026-11-06
 > 审计范围：后端 FastAPI、Vue 管理后台、微信/支付宝小程序、camera 模块、nginx/systemd 部署模板
-> 审计方式：基于真实仓库代码扫描 + pytest 全套测试（791 passed, 8 skipped）+ 关键路径人工复核
+> 审计方式：本文件保留 2026-09-29 的代码审计快照，并于 2026-11-06 对 Redis 限流、生产启动校验和部署策略作定点校正；这不是一次新的完整渗透测试。当前 CI 结果应以对应 main commit 的 GitHub Actions 为准。
 > 不含密钥值；不评估业务模型商业风险，仅评估技术安全控制
 
 ---
@@ -17,12 +17,12 @@
 | 注入与越权 | 强 | 全量 ORM 参数化；入侵检测中间件拦截 SQLi/路径遍历/命令注入/漏洞探针 |
 | 数据保护 | 强 | 人脸向量 Fernet 加密 + nonce 防重 + 旧密钥轮换；30 天 PII 脱敏；密码 bcrypt |
 | 上传与 SSRF | 强 | 摄像头 URL 阻断 metadata/loopback/link-local；Pillow 10MB + 最小尺寸防 decompression bomb |
-| 限流与 DoS | 中-强 | Redis 滑动窗口 + WebSocket 配额 + Webhook 512KB；Redis 宕机采用 fail-open（业务多层防护兜底，详见 §6） |
+| 限流与 DoS | 中-强 | Redis 原子 Token Bucket + WebSocket 配额 + Webhook 512KB；Redis 故障时按路径区分 fail-closed / fail-open（详见 §6） |
 | 安全响应头 | 强 | HSTS / X-Frame-Options / nosniff / Referrer-Policy / Permissions-Policy |
 | 审计与可追溯 | 强 | AuditService 多类别记录，敏感字段脱敏；危险请求/入侵事件独立通道 |
-| 生产配置 | 强 | 13 类启动校验，生产环境默认配置/弱密钥/Mock 开关/localhost DB 一律 SystemExit(1) |
+| 生产配置 | 强 | 生产启动校验覆盖密钥、Mock、限流、Webhook、支付凭证及依赖地址；单机 loopback 仅允许显式 opt-in，失败时 SystemExit(1) |
 
-**关键结论：未发现仍未修复的高危（P0）安全漏洞。** 所有 P0 控制点均有真实代码 + 对应测试覆盖，全套测试通过。
+**审计结论边界：** 2026-09-29 的历史审计未记录未修复 P0；该结论不替代 2026-11-06 之后的持续审计，也不代表真实支付平台、门店硬件或生产网络已完成验收。
 
 ---
 
@@ -162,7 +162,7 @@
 
 ### 6.1 API 限流（[backend/app/core/rate_limit.py](file:///e:/SmartNoodleHouse/backend/app/core/rate_limit.py)）
 
-- Redis Lua 脚本 `INCR + EXPIRE` 原子化，避免无 TTL 计数键导致永久 429。
+- Redis Lua Token Bucket 使用 Redis `TIME` 作为权威时钟，以原子 `HSET + PEXPIRE` 更新令牌桶状态；固定 TTL 防止计数键永久残留，并降低固定窗口边界突发。
 - 敏感路径独立配额：
 
   | 路径 | 配额 |
@@ -176,11 +176,11 @@
   | 外卖回调 | 300/60s |
   | 默认 | 120/60s |
 
-- **Redis 宕机策略：fail-open（降级放行）**。设计权衡：
-  - Redis 仅作性能保护层，业务侧仍有认证、入侵检测、SQL 注入检测、登录失败锁定等多层防线。
-  - fail-closed 会让全站 503，扩大 Redis 故障半径，影响门店正常营业（餐饮场景对可用性极敏感）。
-  - 已在 [测试_限流关闭失败.py](file:///e:/SmartNoodleHouse/tests/测试_限流关闭失败.py) 与 [测试_消息幂等与域模块.py](file:///e:/SmartNoodleHouse/tests/测试_消息幂等与域模块.py) 中固化此行为。
-  - 后续若运营要求生产环境也 fail-closed，可由配置开关切换（当前未实现，列入 REMAINING_ISSUES）。
+- Redis 故障策略按路径分级，而不是全站统一 fail-open：
+  - `RATE_LIMIT_FAIL_CLOSED_PATHS` 指定的敏感路径（认证、支付、小程序登录/刷新、外卖回调）在 Redis 不可用时返回 503；其他路径 fail-open，避免普通点餐/查询因限流基础设施故障而全站不可用。
+  - 生产启动校验会拒绝缺少必需敏感路径的配置；不要清空该配置来绕过安全控制。
+  - 该限流策略仅是额外防护，不能替代登录失败锁定、支付验签、商户身份校验、金额/订单校验和持久化幂等。
+  - 已由 `tests/测试_限流关闭失败.py`、`tests/测试_消息幂等与域模块.py` 覆盖；以当前 `backend/app/core/rate_limit.py` 与 `startup_checks.py` 为准。
 
 ### 6.2 WebSocket 防护
 
@@ -264,8 +264,10 @@
 - CORS_ORIGINS 不含 localhost
 - H5_PUBLIC_BASE_URL 非 localhost
 - STORAGE_BACKEND=s3 时凭证配齐
-- WEBHOOK_IP_ALLOWLIST 配齐
-- DATABASE_URL 非 sqlite/localhost/127.0.0.1
+- Webhook IP allowlist：仅当 `WEBHOOK_REQUIRE_ALLOWLIST=true` 时要求完整有效的官方出口 IP/CIDR；关闭 IP allowlist 不会关闭平台签名、商户身份、金额/订单和幂等校验。
+- DATABASE_URL 非 sqlite；loopback 仅在 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true` 时允许，并仍须使用独立最小权限数据库账号。
+- REDIS_URL 必须使用 `redis://` / `rediss://` 且配置密码；loopback 同样受上述显式 opt-in 控制。
+- `RATE_LIMIT_FAIL_CLOSED_PATHS` 必须包含生产必需敏感路径。
 - PROCESS_ROLE 合法
 - 微信/支付宝至少一种支付通道配齐，且非占位符
 - XPYun 打印开启时凭证配齐
@@ -293,7 +295,7 @@
 详见 [REMAINING_ISSUES.md](file:///e:/SmartNoodleHouse/docs/audit/REMAINING_ISSUES.md)。安全相关重点：
 
 1. **历史密钥泄露**：仓库 git 历史中曾出现真实微信 AppSecret / 支付宝私钥 / AES Key，必须在平台控制台轮换（BLK-002）。
-2. **限流 fail-open**：Redis 宕机时限流失效，依赖多层防护兜底；建议未来加配置开关允许敏感端点 fail-closed。
+2. **限流故障分级**：敏感路径已由 `RATE_LIMIT_FAIL_CLOSED_PATHS` fail-closed，普通路径 fail-open；需持续确保生产配置不漏掉新增认证/支付/回调路由。
 3. **真实平台沙箱联调**：支付/外卖验签均使用契约测试 + mock，真实证书链与回调时序需在沙箱环境人工验证（BLK-001）。
 4. **HS256 对称签名**：当前 JWT 使用 HS256，密钥分发仅限后端服务；若未来拆分为多服务，建议迁移 RS256/EdDSA。
 
@@ -312,4 +314,4 @@
 | 启动校验 | 测试_启动打印防护.py、测试_生产种子与平台.py |
 | PII/隐私 | 测试_PII清理.py、测试_智能推荐_13隐私合规.py、测试_手机号仅官方授权.py |
 
-**测试结果**：`791 passed, 8 skipped, 0 failed`（2026-09-29 本地全套，详见 [TEST_REPORT.md](file:///e:/SmartNoodleHouse/docs/audit/TEST_REPORT.md)）。
+**历史测试记录**：`791 passed, 8 skipped, 0 failed`（2026-09-29 本地记录，详见 [TEST_REPORT.md](file:///e:/SmartNoodleHouse/docs/audit/TEST_REPORT.md)；不可作为当前 main 的 CI 结果）。当前 main 的验证结果请查看 GitHub Actions 对应 commit。

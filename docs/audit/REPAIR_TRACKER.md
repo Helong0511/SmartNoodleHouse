@@ -26,7 +26,7 @@
 
 | 编号 | 模块 | 优先级 | 当前代码证据 | 触发条件/影响 | 修复方案 | 关联测试 | 状态 |
 |---|---|---|---|---|---|---|---|
-| P0-001 | 数据库默认凭证 | P0 | [config.py:31](file:///e:/SmartNoodleHouse/backend/app/core/config.py) 默认 `mysql+aiomysql://root:password@127.0.0.1:3306/...`；[startup_checks.py:148-150](file:///e:/SmartNoodleHouse/backend/app/core/startup_checks.py) 生产拒绝 sqlite/localhost/127.0.0.1；[.env.example](file:///e:/SmartNoodleHouse/.env.example) 仅占位符 | 生产误用 root/弱口令连接 | 启动校验已强制生产使用真实地址；`.env.example` 占位；`.env` 已 gitignore | 测试_生产种子与平台.py | 已修复+测试通过 |
+| P0-001 | 数据库/Redis 生产默认配置 | P0 | 默认配置仅供开发；生产启动校验检查 DATABASE_URL/REDIS_URL、凭证和 loopback 策略 | 生产误用 root/弱口令、未认证 Redis 或错误开放本机依赖 | 生产须使用最小权限 MySQL 用户、Redis 强密码/ACL；loopback 仅允许 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true` 显式 opt-in，并确保依赖只绑定 loopback、端口不对公网开放；`.env` 已 gitignore | 测试_生产种子与平台.py、生产配置测试 | 已修复+测试通过（生产环境凭证仍需人工配置） |
 | P0-002 | 启动校验覆盖 | P0 | [startup_checks.py:48-249](file:///e:/SmartNoodleHouse/backend/app/core/startup_checks.py) 覆盖 JWT/FACE/SECRET/MOCK/CORS/H5/STORAGE/WEBHOOK/DB/REDIS/PROCESS_ROLE/支付/打印 | 缺失任何关键配置时生产静默启动 | 13 类校验，errors→SystemExit(1) | 测试_启动打印防护.py | 已修复+测试通过 |
 | P0-003 | JWT 安全 | P0 | [security.py:22-76](file:///e:/SmartNoodleHouse/backend/app/core/security.py) `_JWT_RESERVED_CLAIMS` 防伪造 aud/iss/typ/ver；[deps.py:38-39,98-99,164-165](file:///e:/SmartNoodleHouse/backend/app/api/deps.py) `ver` 校验 `token_version` 撤销 | 客户端伪造 sub/role 提权 | 保留声明不可被 extra 覆盖；撤销机制 | 测试_P0资金JWT隔离.py | 已修复+测试通过 |
 | P0-004 | 顾客 JWT 独立 TTL | P0 | [security.py:103-135](file:///e:/SmartNoodleHouse/backend/app/core/security.py) `create_customer_token` typ=customer 独立 TTL；[deps.py:90-101](file:///e:/SmartNoodleHouse/backend/app/api/deps.py) 拒绝非 customer typ | 顾客令牌冒充员工 | 强制 typ 校验 + token_version | 测试_P0资金JWT隔离.py | 已修复+测试通过 |
@@ -164,7 +164,7 @@
 | T-605 | POS 退款权限测试桩 | P2 | `_can_approve` 对非店长查 DB，AsyncMock 返回协程 | patch `_can_approve` 返回 False 精确锁定权限分支 | 测试_POS退款.py | 已修复+测试通过 |
 | T-606 | 外卖自动开关店测试会话隔离 | P2 | apply_auto_open_tick 内部用全局 AsyncSessionLocal，in-memory 会话隔离查不到数据 | patch app.core.database.AsyncSessionLocal 复用测试会话 | 测试_外卖营业时间.py | 已修复+测试通过 |
 | T-607 | 券释放测试二次查询 | P2 | release_for_order 增加按 used_order_id 反查，旧桩只 mock 单次 execute | 按真实两次 execute 顺序设 side_effect | 测试_订单创建券.py | 已修复+测试通过 |
-| D-608 | 限流宕机行为测试预期冲突 | P2 | 测试_限流关闭失败 期望 fail-closed(503)，测试_消息幂等 期望 fail-open，二者矛盾 | 经设计权衡统一 fail-open（业务多层防护兜底，避免全站 503 扩大故障半径），重写测试固化理由；敏感端点 fail-closed 开关列入 P1-R1 | 测试_限流关闭失败.py、测试_消息幂等与域模块.py | 已修复+测试通过（决策记录） |
+| D-608 | 限流宕机行为测试预期冲突 | P2 | 2026-09 历史测试对 fail-open / fail-closed 预期矛盾 | 已按路径分级：生产必需敏感认证/支付/小程序登录刷新/外卖回调路径由 `RATE_LIMIT_FAIL_CLOSED_PATHS` fail-closed（503）；普通路径 fail-open；生产启动校验拒绝缺失必需前缀 | 测试_限流关闭失败.py、测试_消息幂等与域模块.py、startup_checks.py | 已修复+测试通过（后续实现已闭环） |
 
 ---
 

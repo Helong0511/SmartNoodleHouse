@@ -138,9 +138,11 @@
 详见 [BASELINE.md §7.2](file:///e:/SmartNoodleHouse/docs/audit/BASELINE.md)，关键项：
 
 - 强 JWT/FACE/SECRET 密钥（非默认、熵足够、长度≥32）。
-- 禁止所有 MOCK 开关、APP_DEBUG、localhost DB/CORS/H5。
-- 支付通道与平台证书非占位符。
-- 不合规直接拒绝启动（SystemExit(1)），不留"带病上线"窗口。
+- 禁止所有 MOCK 开关、APP_DEBUG；CORS/H5 不得指向 localhost。
+- DATABASE_URL / REDIS_URL 默认禁止 loopback；单机同机部署可显式设置 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true`，但 MySQL/Redis 必须仅监听 loopback、启用认证、使用最小权限账号，且安全组/防火墙不得开放 3306/6379。
+- Redis URL 必须配置密码；敏感认证/支付/回调路径必须保留 `RATE_LIMIT_FAIL_CLOSED_PATHS`，Redis 故障时这些路径返回 503。
+- Webhook IP allowlist 可按 `WEBHOOK_REQUIRE_ALLOWLIST` 显式决定是否启用；不启用 IP allowlist 不代表可跳过平台验签、商户身份、金额/订单校验和幂等。
+- 支付通道与平台证书非占位符。不合规直接拒绝启动（SystemExit(1)），不留“带病上线”窗口。
 
 ### 6.3 密钥清单与轮换
 
@@ -160,6 +162,8 @@
 - DB：`pool_size + max_overflow` 显式配置；要求 `gunicorn -w × (pool_size+overflow) ≤ MySQL max_connections`（P1-401，config 注释明示）。
 - `pool_pre_ping=True` + `pool_recycle` 剔除失效连接。
 - Redis：每个 API Worker 独立使用 `BlockingConnectionPool`，默认每进程上限 50、池耗尽最多等待 0.75 秒；总连接上限约 `Gunicorn Worker 数 × REDIS_MAX_CONNECTIONS`，另需预留运维/监控/其他服务连接。WebSocket Pub/Sub 从对应 Worker 的连接池借用连接；不得按“全应用单连接”估算。
+- 当前 Redis 混合承载缓存、限流、一次性凭证、活体挑战和分布式锁：生产基线使用显式 `maxmemory` + `maxmemory-policy noeviction`，避免淘汰协调/安全键；达到上限时写入会返回 OOM，关键路径必须按各自策略 fail-closed 或安全降级。纯缓存如需 LRU，应拆分独立实例。
+- Redis 主机需设置 `vm.overcommit_memory=1`，关闭 Transparent Huge Pages，并监控 `INFO memory`、`INFO stats`、`INFO persistence`、磁盘空间及 AOF/RDB 状态。`redis.conf.example` 的 512mb 仅为小型单店示例，部署前必须按主机 RAM、MySQL/OS 占用和 fork/COW 峰值重新核算。
 - 摄像头/支付外部调用统一走 [http_client.py](file:///e:/SmartNoodleHouse/backend/app/core/http_client.py) 共享 httpx client，lifespan 关闭，防连接泄漏。
 - TTS 队列有界（100）防内存膨胀（P1-402）。
 
@@ -271,7 +275,8 @@
 
 - [ ] 平台控制台轮换历史泄露密钥并更新生产 `.env`（BLK-002）
 - [ ] `validate_settings` 在生产配置上通过（无 SystemExit）
-- [ ] DATABASE_URL/REDIS_URL 使用受控私网地址且账号最小权限；若单机同机部署使用 127.0.0.1/::1，必须显式设置 ALLOW_LOOPBACK_PRODUCTION_SERVICES=true，并确认 MySQL/Redis 仅绑定 loopback、Redis 启用 ACL/密码、云安全组/防火墙不开放 3306/6379
+- [ ] DATABASE_URL/REDIS_URL 使用受控私网地址且账号最小权限；单机 loopback 须显式 opt-in，MySQL/Redis 仅绑定 loopback、Redis 启用认证、云安全组/防火墙不开放 3306/6379
+- [ ] Redis `maxmemory` / `noeviction`、`vm.overcommit_memory=1`、THP、AOF/RDB 状态、磁盘告警及内存峰值预算已实测
 - [ ] `alembic upgrade head` 在预生产演练通过
 - [ ] nginx TLS 证书有效、HSTS 开启、仅反代 127.0.0.1:8000
 - [ ] `/api/health`、`/api/ready` 接入负载均衡/监控
