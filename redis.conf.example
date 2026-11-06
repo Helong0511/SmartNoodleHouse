@@ -12,15 +12,15 @@
 requirepass REPLACE_WITH_STRONG_REDIS_PASSWORD
 
 # ── 内存管理 ──
-# 根据 MySQL + Redis 总内存规划，建议物理内存的 25%-50%
-# maxmemory 2gb
+# 必须设置 maxmemory，禁止 64 位 Redis 默认无限制增长；512mb 是小型单店部署的保守示例，
+# 按实测数据集、主机 RAM、MySQL/OS 占用调整。不要超过可用内存预算，并为 AOF/RDB fork 的
+# copy-on-write 峰值、客户端缓冲和碎片预留足够空间。容量不足时应扩容/清理，不要盲目放大。
+maxmemory 512mb
 # 本项目 Redis 混合承载缓存、限流、一次性凭证、活体挑战和分布式锁。
-# 不要对混合实例盲目使用 allkeys-lru：可能淘汰仍有效的锁/限流/一次性凭证键。
-# 推荐将纯缓存与协调/安全状态拆成独立 Redis 实例：
-#   - 纯缓存实例：可按业务容忍度使用 allkeys-lru
-#   - 协调/安全实例：建议 noeviction + 足够内存余量 + 写入拒绝告警（满内存时需 fail closed）
-# 单实例部署时先评估业务键 TTL 与内存预算，不得仅靠淘汰策略掩盖容量不足。
-# maxmemory-policy noeviction
+# 必须使用 noeviction：达到 maxmemory 后写入返回 OOM，由关键路径 fail-closed，
+# 避免 allkeys-lru 淘汰仍有效的锁、限流计数或一次性凭证，破坏安全/并发语义。
+maxmemory-policy noeviction
+# 纯缓存与协调/安全状态如需独立淘汰策略，应拆成两个 Redis 实例；纯缓存实例可按业务容忍度使用 allkeys-lru。
 
 # ── AOF 持久化（优先于 RDB，数据安全性更高）──
 appendonly yes
