@@ -20,7 +20,6 @@ RECO_TTL_SECONDS = 120  # 推荐结果最长缓存 120s（spec 要求 ≤120s）
 MENU_CATALOG_PREFIX = "snh:menu"
 MENU_CATALOG_TTL_SECONDS = 120
 MENU_BUNDLE_TTL_SECONDS = 60
-MENU_VERSION_TTL_SECONDS = 30 * 24 * 3600
 
 # ---------------------------------------------------------------------------
 # 鉴权 / 登录
