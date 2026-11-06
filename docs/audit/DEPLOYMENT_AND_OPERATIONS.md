@@ -170,7 +170,9 @@
 ### 8.1 Transactional Outbox（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/services/outbox_worker.py)）
 
 - 支付副作用与业务同事务写 OutboxEvent。
-- claim：`FOR UPDATE SKIP LOCKED`；处理：指数退避；超 max_attempts → FAILED 人工介入。
+- claim：条件 UPDATE 原子认领并分配唯一 owner token；处理期间独立短事务续租；超 max_attempts → FAILED 人工介入。
+- claim 统计按实际原子认领结果计算，不依赖处理前后状态推断。
+- handler 必须幂等；外部 HTTP 副作用仍需平台侧幂等键/状态对账，DB 租约不能撤销已发出的网络请求。
 - 释放/失败标记均为原子 `UPDATE ... WHERE locked_by=wid`，reclaim 后不会覆盖新 owner。
 - 旁路幂等：MySQL 同事务落库 → commit → 再标 Redis，避免回滚产生 Redis 脏键。
 - 测试：测试_Outbox工作者.py、测试_P2认领修复.py、测试_消息幂等与域模块.py。
@@ -242,10 +244,18 @@
 - DB 回滚：资金类迁移 downgrade 需人工评审；优先采用"向前修复"。
 - 配置回滚：保留上一版 `.env`（不入 git，由运维密钥管理系统保管）。
 
-### 11.3 数据库备份恢复（待运维完善）
+### 11.3 数据库备份恢复（脚本已提供，真实演练待完成）
 
-- 当前 sql/ 提供初始化与对账脚本，未内置自动备份脚本。
-- 建议：每日全量 + binlog 增量，定期在隔离环境演练恢复（REMAINING_ISSUES P1）。
+仓库已提供以下工具：
+- `scripts/备份数据库.py`：调用 mysqldump 生成 gzip 备份，并按保留天数清理旧备份。
+- `scripts/恢复数据库.py`：将 SQL/gzip 备份恢复到当前 `DATABASE_URL` 指定的数据库；必须显式传入 `--yes`。
+- `scripts/验证数据库.py`：检查关键表、字段、索引和 Alembic 版本。
+- `scripts/备份恢复演练.py`：先备份，再通过独立 `DRILL_DATABASE_URL` 恢复并验证演练库。
+
+注意：
+- `--restore-drill` 必须配置独立演练库凭证；不得指向生产库。脚本的 host/port/database 比较只能阻止明显误配置，不能证明两个 DNS 地址背后不是同一数据库实例。生产操作前还必须从数据库侧确认目标实例身份、账号权限和网络隔离。
+- 恢复脚本具有覆盖目标库的破坏性，生产恢复必须经过审批并确认目标。
+- 脚本存在不等于备份策略已经投产。仍需配置定时全量备份、binlog/PITR、异地加密存储、备份完整性校验、保留策略和定期真实恢复演练。
 
 ---
 
@@ -276,7 +286,7 @@
 
 ## 14. 遗留运维事项
 
-1. 自动备份/恢复脚本与演练流程未内建（P1）。
+1. 备份/恢复/结构验证/隔离库演练脚本已内建；生产定时备份、binlog/PITR、异地加密副本、真实恢复演练与 RTO/RPO 验证仍待运维完成。
 2. metrics 端点缺配套 Prometheus 规则与告警（BLK-004）。
 3. 无真实生产 schema 对比报告（BLK-003）。
 4. 全链路压测与容量基线（worker 数/连接池/DB 连接数）未形成报告。
