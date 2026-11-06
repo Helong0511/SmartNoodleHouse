@@ -77,18 +77,26 @@ class OrderArchiveService:
         older_than_days: int = 365,
         limit: int = 200,
         dry_run: bool = False,
+        store_id: int | None = None,
     ) -> dict[str, Any]:
-        """写入 archived_order_snapshots；不删除热表（payments/ledger 等 FK 仍指向 orders）。"""
+        """写入 archived_order_snapshots；不删除热表（payments/ledger 等 FK 仍指向 orders）。
+
+        store_id=None 仅供总部全平台归档；门店调用方必须先由 require_bound_store
+        将用户身份解析为绑定门店 ID，再传入本方法。
+        """
         days = max(30, int(older_than_days))
         cutoff = now_local() - timedelta(days=days)
+        filters = [
+            Order.created_at < cutoff,
+            Order.status.in_(tuple(_ARCHIVEABLE_STATUSES)),
+        ]
+        if store_id is not None:
+            filters.append(Order.store_id == int(store_id))
         orders = list(
             (
                 await db.execute(
                     select(Order)
-                    .where(
-                        Order.created_at < cutoff,
-                        Order.status.in_(tuple(_ARCHIVEABLE_STATUSES)),
-                    )
+                    .where(*filters)
                     .order_by(Order.created_at.asc())
                     .limit(max(1, min(limit, 1000)))
                 )
