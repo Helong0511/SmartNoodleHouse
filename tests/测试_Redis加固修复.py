@@ -1247,8 +1247,11 @@ async def test_menu_rebuild_heartbeat_stops_when_request_owner_exits(monkeypatch
     monkeypatch.setattr(menu_cache, "renew_rebuild_lock", renew)
 
     async def acquire_and_exit():
+        request_task = asyncio.current_task()
         return asyncio.create_task(
-            menu_cache.maintain_rebuild_lock(77, "owner-token")
+            menu_cache.maintain_rebuild_lock(
+                77, "owner-token", owner_task=request_task
+            )
         )
 
     heartbeat = await asyncio.create_task(acquire_and_exit())
