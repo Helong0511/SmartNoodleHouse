@@ -577,7 +577,9 @@ async def test_delivery_callback_log_fallback_id_is_canonical_and_duplicate_safe
     raw_a = {"order_id": "order-2", "status": "DELIVERING", "code": "10"}
     raw_b = {"code": "10", "status": "DELIVERING", "order_id": "order-2"}
     db = MagicMock()
-    db.flush = AsyncMock()
+    db.flush = AsyncMock(
+        side_effect=[None, IntegrityError("insert", {}, Exception("duplicate event"))]
+    )
     db.begin_nested.side_effect = lambda: _CallbackLogSavepoint(db)
 
     async def execute_existing(_stmt):
