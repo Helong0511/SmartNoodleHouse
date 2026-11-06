@@ -398,3 +398,111 @@ async def test_new_delivery_refund_callback_sets_pending_summary(monkeypatch):
     assert result is order
     assert delivery_order.refund_status == "PENDING"
     db.add.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_completed_callback_syncs_summary_when_order_already_completed(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=91, order_id=101, delivery_status="ACCEPTED",
+        logistics_status="DELIVERING", completed_at=None, last_sync_at=None,
+    )
+    order = SimpleNamespace(id=101, status="COMPLETED", completed_at=None)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
+    )
+
+    result = await DeliveryService._handle_completed(db, "MEITUAN", "PLATFORM-101")
+
+    assert result is order
+    assert d_order.delivery_status == "DONE"
+    assert d_order.logistics_status == "DELIVERED"
+    assert d_order.completed_at is not None
+    db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_cancel_callback_syncs_summary_when_order_already_cancelled(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=92, order_id=102, delivery_status="ACCEPTED", last_sync_at=None,
+    )
+    order = SimpleNamespace(id=102, status="CANCELLED")
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
+    )
+
+    result = await DeliveryService._handle_cancel(db, "MEITUAN", "PLATFORM-102")
+
+    assert result is order
+    assert d_order.delivery_status == "CANCELLED"
+    db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["CANCELLED", "REFUNDED"])
+async def test_late_delivery_completed_callback_does_not_override_other_terminal_status(
+    monkeypatch, terminal_status
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=93, order_id=103, delivery_status="CANCELLED",
+        logistics_status="CANCELLED", completed_at=None, last_sync_at=None,
+    )
+    order = SimpleNamespace(id=103, status=terminal_status, completed_at=None)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
+    )
+
+    result = await DeliveryService._handle_completed(db, "MEITUAN", "PLATFORM-103")
+
+    assert result is order
+    assert d_order.delivery_status == "CANCELLED"
+    assert d_order.logistics_status == "CANCELLED"
+    db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["COMPLETED", "REFUNDED"])
+async def test_late_delivery_cancel_callback_does_not_override_other_terminal_status(
+    monkeypatch, terminal_status
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=94, order_id=104, delivery_status="DONE",
+        last_sync_at=None,
+    )
+    order = SimpleNamespace(id=104, status=terminal_status)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
+    )
+
+    result = await DeliveryService._handle_cancel(db, "MEITUAN", "PLATFORM-104")
+
+    assert result is order
+    assert d_order.delivery_status == "DONE"
+    db.flush.assert_not_awaited()
