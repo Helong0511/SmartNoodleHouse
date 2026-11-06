@@ -6,7 +6,7 @@ import re
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
@@ -108,8 +108,16 @@ async def list_dead_letters(
 ):
     _require_super_admin(user)
     filters = (
-        OutboxEvent.status == "FAILED",
-        OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+        or_(
+            and_(
+                OutboxEvent.status == "FAILED",
+                OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+            ),
+            and_(
+                OutboxEvent.status == "UNCERTAIN",
+                OutboxEvent.last_error.like("EXTERNAL_RESULT_UNKNOWN:%"),
+            ),
+        ),
     )
     total = int((await db.execute(
         select(func.count()).select_from(OutboxEvent).where(*filters)
@@ -158,8 +166,15 @@ async def replay_dead_letter(
     )).scalar_one_or_none()
     if row is None:
         raise AppException(40401, "Outbox 事件不存在", status_code=404)
-    if row.status != "FAILED" or int(row.attempt_count or 0) < int(row.max_attempts or 0):
-        raise AppException(40901, "该事件不是已耗尽重试次数的死信，不能人工重放", status_code=409)
+    is_regular_dead_letter = (
+        row.status == "FAILED"
+        and int(row.attempt_count or 0) >= int(row.max_attempts or 0)
+    )
+    is_unknown_dead_letter = (
+        row.status == "UNCERTAIN" and _is_external_result_unknown(row.last_error)
+    )
+    if not (is_regular_dead_letter or is_unknown_dead_letter):
+        raise AppException(40901, "该事件不是可人工处置的死信，不能重放", status_code=409)
     _require_external_result_replay_confirmation(
         row.last_error, data.confirmed_not_applied, data.reason
     )
@@ -231,8 +246,7 @@ async def resolve_unknown_dead_letter(
     if row is None:
         raise AppException(40401, "Outbox 事件不存在", status_code=404)
     if (
-        row.status != "FAILED"
-        or int(row.attempt_count or 0) < int(row.max_attempts or 0)
+        row.status != "UNCERTAIN"
         or not _is_external_result_unknown(row.last_error)
     ):
         raise AppException(40907, "该事件不是待核实的外部结果未知死信", status_code=409)
@@ -242,8 +256,7 @@ async def resolve_unknown_dead_letter(
         update(OutboxEvent)
         .where(
             OutboxEvent.id == int(outbox_id),
-            OutboxEvent.status == "FAILED",
-            OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+            OutboxEvent.status == "UNCERTAIN",
             OutboxEvent.last_error.like("EXTERNAL_RESULT_UNKNOWN:%"),
         )
         .values(
