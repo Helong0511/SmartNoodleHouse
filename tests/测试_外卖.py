@@ -566,3 +566,46 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     assert d_order.rider_phone == "13800000000"
     assert d_order.last_sync_at is not None
     db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_callback_log_fallback_id_is_canonical_and_duplicate_safe():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    raw_a = {"order_id": "order-2", "status": "DELIVERING", "code": "10"}
+    raw_b = {"code": "10", "status": "DELIVERING", "order_id": "order-2"}
+    db = MagicMock()
+    db.flush = AsyncMock()
+    db.begin_nested.side_effect = lambda: _CallbackLogSavepoint(db)
+
+    async def execute_existing(_stmt):
+        return SimpleNamespace(scalar_one_or_none=lambda: object())
+
+    db.execute = AsyncMock(side_effect=execute_existing)
+
+    await DeliveryService._log_callback(
+        db, "MEITUAN", "DELIVERY", "order-2", None, raw_a
+    )
+    first_id = db.add.call_args_list[-1].args[0].event_id
+    await DeliveryService._log_callback(
+        db, "MEITUAN", "DELIVERY", "order-2", None, raw_b
+    )
+    second_id = db.add.call_args_list[-1].args[0].event_id
+
+    assert first_id == second_id
+    assert db.flush.await_count == 2
+
+
+class _CallbackLogSavepoint:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc_type is IntegrityError:
+            return False
+        return False
