@@ -511,6 +511,24 @@ async def process_outbox_item(outbox_id: int) -> bool:
                     return True
 
             await db.commit()
+            # 只有订单状态与 Outbox DONE 已一并提交后，才广播商家取消完成事件。
+            if row.aggregate_type == "webhook_task":
+                try:
+                    completed_payload = json.loads(row.payload or "{}")
+                    if completed_payload.get("action") == "cancel_order":
+                        from app.services.websocket_manager import ws_manager
+
+                        await ws_manager.notify_order_event(
+                            "ORDER_CANCELLED",
+                            {
+                                "order_id": completed_payload.get("order_id"),
+                                "reason": completed_payload.get("reason") or "商家取消",
+                                "by": "merchant",
+                            },
+                        )
+                except Exception:
+                    # WebSocket 是瞬时通知；通知失败不能回滚已提交状态或重放平台副作用。
+                    logger.warning("外卖取消完成通知发送失败 outbox_id=%s", outbox_id, exc_info=True)
             if not is_stock_mirror:
                 try:
                     from app.domains.messaging.idempotency import mark_processed_redis
