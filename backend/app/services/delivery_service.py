@@ -641,20 +641,24 @@ class DeliveryService:
         if not d_order:
             return None
         order = await db.get(Order, d_order.order_id)
-        if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
-            from app.services.order_lifecycle import apply_order_status
+        if order:
+            if str(order.status or "").upper() not in ("COMPLETED", "CANCELLED", "REFUNDED"):
+                from app.services.order_lifecycle import apply_order_status
 
-            await apply_order_status(
-                db,
-                order,
-                "CANCELLED",
-                source="DELIVERY",
-                assert_kind="SYSTEM",
-                remark="平台取消",
-            )
-            d_order.delivery_status = "CANCELLED"
-            d_order.last_sync_at = now_local()
-            await db.flush()
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark="平台取消",
+                )
+            # 本地员工/超时任务可能已先完成取消；迟到的平台重复回调仍需补齐
+            # 外卖订单摘要状态，但不得把 COMPLETED / REFUNDED 覆盖为 CANCELLED。
+            if str(order.status or "").upper() == "CANCELLED":
+                d_order.delivery_status = "CANCELLED"
+                d_order.last_sync_at = now_local()
+                await db.flush()
         return order
 
     @classmethod
@@ -663,22 +667,26 @@ class DeliveryService:
         if not d_order:
             return None
         order = await db.get(Order, d_order.order_id)
-        if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
-            from app.services.order_lifecycle import apply_order_status
+        if order:
+            if str(order.status or "").upper() not in ("COMPLETED", "CANCELLED", "REFUNDED"):
+                from app.services.order_lifecycle import apply_order_status
 
-            await apply_order_status(
-                db,
-                order,
-                "COMPLETED",
-                source="DELIVERY",
-                assert_kind="SYSTEM",
-                remark="平台完成",
-            )
-            d_order.delivery_status = "DONE"
-            d_order.logistics_status = "DELIVERED"
-            d_order.completed_at = now_local()
-            d_order.last_sync_at = now_local()
-            await db.flush()
+                await apply_order_status(
+                    db,
+                    order,
+                    "COMPLETED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark="平台完成",
+                )
+            # 本地 POS/KDS 可能已先完成订单；平台回调仍应幂等补齐外卖侧 DONE。
+            # 但取消/退款终态不能被迟到的完成事件改写。
+            if str(order.status or "").upper() == "COMPLETED":
+                d_order.delivery_status = "DONE"
+                d_order.logistics_status = "DELIVERED"
+                d_order.completed_at = d_order.completed_at or getattr(order, "completed_at", None) or now_local()
+                d_order.last_sync_at = now_local()
+                await db.flush()
         return order
 
     @classmethod
