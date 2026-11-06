@@ -452,7 +452,7 @@ class OrderPriceCalculator:
             db,
             items_data,
             store_id=order.store_id,
-            customer_id=int(order.customer_id) if order.customer_id else None,
+            customer_id=(int(customer_id) if (customer_id := getattr(order, "customer_id", None)) else None),
         )
         # P1-1 纵深防御：最终断言所有餐品门店与订单门店一致（calculate_items_batch 已校验，此处为第二道防线）
         if rows and order.store_id is not None:
