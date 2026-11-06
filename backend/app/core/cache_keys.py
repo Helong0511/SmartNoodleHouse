@@ -133,7 +133,7 @@ def reco_rebuild_lock_key(
 
 def menu_rebuild_lock_key(store_id: int) -> str:
     """菜单 bundle 重建互斥锁键。"""
-    return f"{MENU_CATALOG_PREFIX}:lock:{int(store_id)}"
+    return f"{MENU_CATALOG_PREFIX}:{{s{int(store_id)}}}:lock"
 
 
 def menu_catalog_key(store_id: int) -> str:
@@ -141,7 +141,7 @@ def menu_catalog_key(store_id: int) -> str:
 
 
 def menu_bundle_key(store_id: int) -> str:
-    return f"{MENU_CATALOG_PREFIX}:bundle:{int(store_id)}"
+    return f"{MENU_CATALOG_PREFIX}:{{s{int(store_id)}}}:bundle"
 
 
 def menu_version_key(store_id: int) -> str:
