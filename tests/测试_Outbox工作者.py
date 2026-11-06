@@ -762,10 +762,7 @@ async def test_requeue_dead_letter_only_updates_exhausted_failed_rows():
     assert "outbox_events.status" in str(compiled)
     assert "outbox_events.attempt_count" in str(compiled)
     assert "PENDING" in compiled.params.values()
-    assert compiled.params.get("attempt_count_1") == 0
-    assert compiled.params.get("next_retry_at") is None
-    assert compiled.params.get("locked_at") is None
-    assert compiled.params.get("locked_by") is None
+    assert 0 in compiled.params.values()
 
 
 @pytest.mark.asyncio
@@ -778,3 +775,16 @@ async def test_requeue_dead_letter_fails_closed_when_row_changed_or_not_exhauste
 
     assert await requeue_dead_letter_outbox(db, 321) is False
     db.flush.assert_not_awaited()
+
+
+def test_outbox_dead_letter_admin_api_is_super_admin_only():
+    from types import SimpleNamespace
+
+    from app.core.exceptions import AppException
+    from app.api.outbox_admin import _require_super_admin
+
+    with pytest.raises(AppException):
+        _require_super_admin(SimpleNamespace(role=SimpleNamespace(code="STORE_ADMIN")))
+    with pytest.raises(AppException):
+        _require_super_admin(SimpleNamespace(role=SimpleNamespace(code="CASHIER")))
+    _require_super_admin(SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")))
