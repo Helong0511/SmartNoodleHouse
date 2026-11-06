@@ -45,7 +45,7 @@ async def test_process_refund_fail_closed_without_credentials():
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund FOR UPDATE
-        MagicMock(first=MagicMock(return_value=None)),  # no cancellation intent
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no pending cancel intent
     ])
     db.get = AsyncMock()
     db.commit = AsyncMock()
@@ -216,7 +216,9 @@ async def test_process_refund_rejects_when_cancel_outbox_is_active():
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund lock
-        MagicMock(first=MagicMock(return_value=(77, "PENDING"))),  # cancel Outbox intent
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
+            '{"action":"cancel_order","platform":"MEITUAN","platform_order_id":"po-51","order_id":999}',
+        ])))),  # callback-originated cancel task uses inbox id, not delivery_order_id
     ])
     db.commit = AsyncMock()
 
