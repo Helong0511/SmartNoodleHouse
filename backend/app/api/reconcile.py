@@ -15,7 +15,7 @@ from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReco
 from app.schemas.pagination import clamp_page
 from app.services.order_archive_service import OrderArchiveService
 from app.services.payment_reconcile_service import PaymentReconcileService
-from app.services.store_scope import assert_store_access, require_bound_store
+from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/reconcile", tags=["reconcile"])
 
@@ -194,7 +194,7 @@ async def run_order_archive(body: ArchiveRunBody, db: DbSession, user: CurrentUs
 async def list_archived_orders(
     db: DbSession,
     user: CurrentUser,
-    store_id: int | None = None,
+    store_id: int | None = Query(None, ge=1),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = None,
@@ -248,14 +248,14 @@ async def list_archived_orders(
 
 @router.get("/orders/archived/{order_no}", dependencies=[require_permission("order:read")])
 async def get_archived_order(order_no: str, db: DbSession, user: CurrentUser):
-    row = (
-        await db.execute(
-            select(ArchivedOrderSnapshot).where(ArchivedOrderSnapshot.order_no == order_no)
-        )
-    ).scalar_one_or_none()
+    sid = require_bound_store(user)
+    query = select(ArchivedOrderSnapshot).where(ArchivedOrderSnapshot.order_no == order_no)
+    if sid is not None:
+        query = query.where(ArchivedOrderSnapshot.store_id == sid)
+    row = (await db.execute(query)).scalar_one_or_none()
     if not row:
+        # 跨门店订单与不存在订单统一返回 404，避免订单号枚举。
         raise AppException(40400, "归档订单不存在", status_code=404)
-    assert_store_access(user, row.store_id)
     return success(
         {
             "id": row.id,
