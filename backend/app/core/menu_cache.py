@@ -4,7 +4,7 @@
 - version：门店单调递增版本戳（INCR），客户端携带相同版本时返回 changed:false 小响应。
 - 缓存击穿：SET NX EX 互斥锁，避免并发重建压垮 DB。
 - 缓存雪崩：TTL 加 ±20% 随机偏移。
-- 延迟双删：bump_menu_version 删 bundle 后延迟再删一次。
+- 版本 fencing：bundle、version、lock 共用 hash slot，Lua 原子校验 owner 与版本后写入。
 - 大Key防护：bundle JSON 超 256KB 时跳过缓存。
 Redis 全部异常静默降级为未缓存，不阻塞点餐主流程。
 """
