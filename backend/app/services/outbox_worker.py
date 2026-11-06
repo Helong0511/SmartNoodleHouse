@@ -534,3 +534,27 @@ async def process_pending_outbox(limit: int = 30) -> int:
             claimed += 1
     return claimed
 
+
+
+async def requeue_dead_letter_outbox(db: AsyncSession, outbox_id: int) -> bool:
+    """仅将已耗尽重试次数的 FAILED 死信原子重排；不触碰 PROCESSING/可重试事件。"""
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == int(outbox_id),
+            OutboxEvent.status == "FAILED",
+            OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+        )
+        .values(
+            status="PENDING",
+            attempt_count=0,
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+            processed_at=None,
+        )
+    )
+    if int(result.rowcount or 0) != 1:
+        return False
+    await db.flush()
+    return True

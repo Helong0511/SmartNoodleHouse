@@ -35,6 +35,7 @@ from app.api import (
     orders_customer,
     orders_kitchen,
     orders_pos,
+    outbox_admin,
     payments,
     performance,
     print_jobs,
@@ -74,6 +75,7 @@ api_router.include_router(orders_customer.router)
 api_router.include_router(orders.router)
 api_router.include_router(orders_kitchen.router)
 api_router.include_router(orders_pos.router)
+api_router.include_router(outbox_admin.router)
 api_router.include_router(payments.router)
 api_router.include_router(wallet.router)
 api_router.include_router(financial_ledger.router)
