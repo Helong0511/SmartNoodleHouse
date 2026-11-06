@@ -59,7 +59,12 @@ class FakeRedis:
                 return 1
             return 0
         if numkeys == 2:
-            if self.store.get(keys[0]) == argv[0]:
+            # generation + cache 原子读取（只读，不得错误地当成 owner 写入）。
+            if len(argv) == 1 and "return redis.call('GET', KEYS[2])" in script:
+                if (self.store.get(keys[0]) or "0") == str(argv[0]):
+                    return self.store.get(keys[1])
+                return None
+            if self.store.get(keys[0]) == argv[0] and len(argv) >= 2:
                 self.store[keys[1]] = argv[1]
                 return "OK"
             return 0
