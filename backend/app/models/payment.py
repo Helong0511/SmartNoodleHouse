@@ -145,12 +145,21 @@ class PaymentCallbackReceipt(Base):
 
 class PaymentReconcileBatch(Base, TimestampMixin):
     __tablename__ = "payment_reconcile_batches"
-    __table_args__ = (UniqueConstraint("channel", "bill_date", name="uk_prb_channel_bill"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "channel", "bill_date", "scope_store_id", name="uk_prb_channel_bill_store"
+        ),
+    )
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
     channel: Mapped[str] = mapped_column(String(20))
     bill_date: Mapped[date] = mapped_column(Date)
+    # 0 表示总部/平台级对账；正数表示门店独立账单范围。
+    # 不加 stores 外键是为了让 0 作为总部作用域哨兵值，并保留迁移兼容性。
+    scope_store_id: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0", index=True
+    )
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     local_count: Mapped[int] = mapped_column(Integer, default=0)
     channel_count: Mapped[int] = mapped_column(Integer, default=0)
