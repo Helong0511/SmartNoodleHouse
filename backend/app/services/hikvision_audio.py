@@ -242,9 +242,39 @@ async def sync_channel_osd_name(
     name = clip_osd_channel_name(display_name)
     if not name:
         return {"ok": False, "reason": "empty_name"}
-    base = (base_url or "").rstrip("/")
+    base = (base_url or "").strip().rstrip("/")
     if not base:
         return {"ok": False, "reason": "no_base"}
+
+    # Defense in depth: this function is also imported by internal callers/tests;
+    # never trust that every caller obtained base_url through resolve_isapi_base().
+    # Validate and pin the destination here, immediately before creating the HTTP client.
+    try:
+        from urllib.parse import urlsplit
+        from app.services.camera_credentials import pin_camera_url_for_connect
+
+        parsed_base = urlsplit(base)
+        if (
+            parsed_base.scheme.lower() != "http"
+            or not parsed_base.hostname
+            or parsed_base.username is not None
+            or parsed_base.password is not None
+            or parsed_base.path not in ("", "/")
+            or parsed_base.query
+            or parsed_base.fragment
+        ):
+            return {"ok": False, "reason": "invalid_base"}
+        pinned = pin_camera_url_for_connect(base)
+        pinned_parts = urlsplit(pinned)
+        if pinned_parts.scheme.lower() != "http" or not pinned_parts.hostname:
+            return {"ok": False, "reason": "invalid_base"}
+        # Preserve the validated port and IPv6 brackets; discard all non-authority
+        # components so subsequent ISAPI paths cannot inherit caller-controlled paths.
+        base = f"http://{pinned_parts.netloc}"
+    except Exception as exc:
+        logger.warning("拒绝不安全的海康 ISAPI 目标 base=%s err=%s", base[:120], str(exc)[:120])
+        return {"ok": False, "reason": "unsafe_base"}
+
     ch = max(1, int(channel or 1))
     overlay_path = f"/ISAPI/System/Video/inputs/channels/{ch}/overlays/channelNameOverlay"
     channel_path = f"/ISAPI/System/Video/inputs/channels/{ch}"
