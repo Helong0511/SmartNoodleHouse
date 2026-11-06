@@ -11,7 +11,7 @@ from sqlalchemy import and_, func, or_, select, update
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success, serialize_dt, now_local
-from app.models import OutboxEvent
+from app.models import DeliveryOrder, Order, OutboxEvent
 from app.services.audit_service import AuditService
 from app.services.outbox_worker import (
     _resolve_outbox_handler,
@@ -251,6 +251,58 @@ async def resolve_unknown_dead_letter(
     ):
         raise AppException(40907, "该事件不是待核实的外部结果未知死信", status_code=409)
 
+    # 商家取消的外部平台结果已核实成功时，必须先补齐本地订单状态，
+    # 再把 Outbox 标记 DONE；否则可能出现平台已取消、本地订单仍显示进行中。
+    local_reconciled = False
+    try:
+        payload = json.loads(row.payload or "{}")
+    except (TypeError, ValueError) as exc:
+        raise AppException(40910, "结果未知事件 payload 无效，拒绝自动对账", status_code=409) from exc
+    if row.aggregate_type == "webhook_task" and isinstance(payload, dict) and payload.get("action") == "cancel_order":
+        order_id = int(payload.get("order_id") or 0)
+        delivery_order_id = int(row.aggregate_id)
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none() if order_id > 0 else None
+        delivery_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.id == delivery_order_id,
+                    DeliveryOrder.order_id == order_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none() if order_id > 0 else None
+        if order is None or delivery_order is None:
+            raise AppException(40911, "取消订单本地关联记录不存在，需人工核对后处理", status_code=409)
+        payload_store_id = int(payload.get("store_id") or 0)
+        if payload_store_id and int(order.store_id) != payload_store_id:
+            raise AppException(40912, "取消订单门店归属与 Outbox 事件不一致", status_code=409)
+        if order.status in ("COMPLETED", "REFUNDED"):
+            raise AppException(40913, f"平台取消已核实，但本地订单为 {order.status}，需人工对账", status_code=409)
+        if order.status != "CANCELLED":
+            from app.services.order_lifecycle import apply_order_status
+
+            await apply_order_status(
+                db,
+                order,
+                "CANCELLED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark=str(payload.get("reason") or "商家取消")[:200],
+            )
+        delivery_order.delivery_status = "CANCELLED"
+        delivery_order.last_sync_at = now_local()
+        await db.flush()
+        local_reconciled = True
+
     previous_error = _safe_error(row.last_error)
     result = await db.execute(
         update(OutboxEvent)
@@ -285,6 +337,7 @@ async def resolve_unknown_dead_letter(
             "event_kind": row.event_kind,
             "previous_error": previous_error,
             "resolution": "external_platform_confirmed_success",
+            "local_reconciled": local_reconciled,
             "reason": data.reason.strip(),
         },
         request=request,
