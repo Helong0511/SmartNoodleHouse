@@ -10,6 +10,7 @@ Redis 全部异常静默降级为未缓存，不阻塞点餐主流程。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
