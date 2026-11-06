@@ -142,8 +142,11 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
         and_(
             OutboxEvent.aggregate_type == "webhook_task",
             or_(
+                OutboxEvent.payload.like('%"action": "confirm_order"%'),
                 OutboxEvent.payload.like('%"action":"confirm_order"%'),
+                OutboxEvent.payload.like('%"action": "cancel_order"%'),
                 OutboxEvent.payload.like('%"action":"cancel_order"%'),
+                OutboxEvent.payload.like('%"action": "reply_urge"%'),
                 OutboxEvent.payload.like('%"action":"reply_urge"%'),
             ),
         ),
