@@ -154,7 +154,9 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     # 取消后到达的退款仍必须能够补记财务分录。
     cancel_guard_stmt = db.execute.await_args_list[4].args[0]
     compiled_params = cancel_guard_stmt.compile().params
-    assert "DONE" not in [str(value) for value in compiled_params.values()]
+    guarded_statuses = [str(value) for value in compiled_params.values()]
+    assert "DONE" not in guarded_statuses
+    assert "FAILED" in guarded_statuses  # 可重试/死信取消均须人工核实后再放行退款
 
 
 @pytest.mark.asyncio
