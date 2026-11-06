@@ -131,9 +131,9 @@ async def enqueue_outbox(
 
 
 async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE_PROCESSING_SEC) -> int:
-    """回收崩溃残留的 PROCESSING 行：locked_at < now - stale_after → 复位 PENDING。
+    """回收崩溃残留的 PROCESSING 行。
 
-    复位时不清零 attempt_count（避免无限重试），仅释放锁、保留退避。
+    普通事件恢复为 PENDING；外部副作用事件进入结果未知死信，避免崩溃后盲目重复执行。
     """
     cutoff = now_local() - timedelta(seconds=stale_after)
     # delivery_manual/webhook_task handler 可能在发出平台请求后进程崩溃。
