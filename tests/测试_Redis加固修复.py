@@ -176,7 +176,7 @@ async def test_menu_cache_rebuild_lock_acquire_release():
         fake.store.pop(menu_cache.menu_rebuild_lock_key(1))
         # 释放后可再次抢锁
         ok3 = await menu_cache.try_acquire_rebuild_lock(1)
-        assert ok3 is True
+        assert isinstance(ok3, str) and ok3 and ok3 != ok1
 
 
 # ── menu_cache 大Key 跳过 ──
