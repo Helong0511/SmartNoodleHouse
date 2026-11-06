@@ -147,6 +147,75 @@ async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
     assert "CASE" in str(stmt).upper()
     assert "FAILED" in [str(v) for v in compiled.params.values()]
     assert "PENDING" in [str(v) for v in compiled.params.values()]
+    # 外部平台/设备副作用事件不能在 worker 崩溃后盲目回到 PENDING。
+    assert "delivery_manual" in [str(v) for v in compiled.params.values()]
+    assert "webhook_task" in [str(v) for v in compiled.params.values()]
+    assert any("EXTERNAL_RESULT_UNKNOWN" in str(v) for v in compiled.params.values())
+
+
+@pytest.mark.asyncio
+async def test_mark_uncertain_moves_event_to_dead_letter_without_retry():
+    from types import SimpleNamespace
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+    row = SimpleNamespace(
+        id=41, aggregate_type="delivery_manual", aggregate_id=901,
+        event_kind="confirm_abc123",
+    )
+
+    await outbox_worker._mark_uncertain(
+        db, row, "MEITUAN confirm order=7788: ReadTimeout", wid="worker-1"
+    )
+
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    assert "EXTERNAL_RESULT_UNKNOWN" in str(compiled.params.values())
+    assert "FAILED" in [str(v) for v in compiled.params.values()]
+    assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+    assert "worker-1" in [str(v) for v in compiled.params.values()]
+    assert "attempt_count" in str(stmt)
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_external_side_effect_read_timeout_is_uncertain_but_connect_error_can_retry():
+    import httpx
+
+    from app.services.delivery_tasks import _call_external_side_effect
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    request = httpx.Request("POST", "https://platform.invalid/order/confirm")
+
+    async def read_timeout():
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    with pytest.raises(ExternalSideEffectUncertain):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", read_timeout)
+
+    async def connect_error():
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with pytest.raises(httpx.ConnectError):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", connect_error)
+
+
+def test_unknown_external_result_requires_explicit_reconciliation_before_replay():
+    from app.api.outbox_admin import (
+        _is_external_result_unknown,
+        _require_external_result_replay_confirmation,
+    )
+    from app.core.exceptions import AppException
+
+    marker = "EXTERNAL_RESULT_UNKNOWN: ReadTimeout"
+    assert _is_external_result_unknown(marker)
+    assert not _is_external_result_unknown("ordinary provider failure")
+    with pytest.raises(AppException):
+        _require_external_result_replay_confirmation(marker, False)
+    _require_external_result_replay_confirmation(marker, True)
+    with pytest.raises(AppException):
+        _require_external_result_replay_confirmation("ordinary failure", True)
 
 
 @pytest.mark.asyncio
