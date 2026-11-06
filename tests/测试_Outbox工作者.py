@@ -1148,3 +1148,106 @@ async def test_legacy_deferred_confirm_rolls_back_only_on_explicit_false(monkeyp
     }])
 
     rollback.assert_awaited_once_with(None, "MEITUAN", "MT-REJECTED-1")
+
+@pytest.mark.asyncio
+async def test_resolve_cancel_unknown_outbox_reconciles_order_before_marking_done(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=501,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after cancel request",
+        aggregate_type="webhook_task",
+        aggregate_id=601,
+        event_kind="deferred_cancel_order",
+        payload=json.dumps({
+            "action": "cancel_order",
+            "order_id": 701,
+            "store_id": 7,
+            "reason": "商家缺货",
+        }),
+    )
+    order = SimpleNamespace(id=701, store_id=7, status="CONFIRMED")
+    delivery_order = SimpleNamespace(id=601, order_id=701, delivery_status="ACCEPTED")
+    update_result = MagicMock(rowcount=1)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),  # read Outbox snapshot
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder lock
+        update_result,  # conditional UNCERTAIN -> DONE
+    ])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    async def apply_status(_db, target, status, **_kwargs):
+        target.status = status
+
+    monkeypatch.setattr("app.services.order_lifecycle.apply_order_status", apply_status)
+    user = SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN"))
+    with patch(
+        "app.api.outbox_admin.AuditService.log_staff",
+        new=AsyncMock(),
+    ) as audit:
+        await resolve_unknown_dead_letter(
+            501,
+            OutboxResolveIn(reason="平台核实已成功：取消订单已在平台确认"),
+            request=MagicMock(),
+            db=db,
+            user=user,
+        )
+
+    assert order.status == "CANCELLED"
+    assert delivery_order.delivery_status == "CANCELLED"
+    assert db.execute.await_count == 4
+    order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
+    assert "orders" in order_lock_sql and "for update" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_cancel_unknown_outbox_rejects_store_mismatch():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+    from app.core.exceptions import AppException
+
+    row = SimpleNamespace(
+        id=502,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout",
+        aggregate_type="webhook_task",
+        aggregate_id=602,
+        event_kind="deferred_cancel_order",
+        payload=json.dumps({"action": "cancel_order", "order_id": 702, "store_id": 7}),
+    )
+    order = SimpleNamespace(id=702, store_id=8, status="CONFIRMED")
+    delivery_order = SimpleNamespace(id=602, order_id=702, delivery_status="ACCEPTED")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+    ])
+    db.commit = AsyncMock()
+
+    with pytest.raises(AppException) as ei:
+        await resolve_unknown_dead_letter(
+            502,
+            OutboxResolveIn(reason="平台核实已成功：订单已取消"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert ei.value.code == 40912
+    db.commit.assert_not_awaited()
