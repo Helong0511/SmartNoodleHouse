@@ -118,11 +118,11 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     """平台已退但本地账本失败时，重试只补账，不再次调用外卖平台。"""
     refund = SimpleNamespace(
         id=31, order_id=91, delivery_order_id=41, platform="MEITUAN",
-        platform_refund_id="platform-rf-1", amount=12, refund_type="PARTIAL",
+        platform_refund_id="platform-rf-1", amount=12, refund_type="FULL",
         status="APPROVED_LEDGER_PENDING", handled_at=None,
     )
-    d_order = SimpleNamespace(id=41, order_id=91, refund_status="APPROVED_LEDGER_PENDING")
-    order = SimpleNamespace(id=91, store_id=7, channel="MEITUAN")
+    d_order = SimpleNamespace(id=41, order_id=91, refund_status="APPROVED_LEDGER_PENDING", delivery_status="ACCEPTED")
+    order = SimpleNamespace(id=91, store_id=7, channel="MEITUAN", status="COOKING")
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
@@ -133,18 +133,26 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     db.get = AsyncMock()
     db.commit = AsyncMock()
 
+    async def apply_refunded(_db, target, status, **_kwargs):
+        target.status = status
+
     with patch(
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new=AsyncMock(return_value=SimpleNamespace(id=101)),
     ) as record, patch(
         "app.services.delivery_service.get_delivery_provider"
-    ) as provider_factory:
+    ) as provider_factory, patch(
+        "app.services.order_lifecycle.apply_order_status",
+        new=apply_refunded,
+    ):
         result = await DeliveryService.process_refund(db, 31, approve=True)
 
     assert result["status"] == "APPROVED"
     assert result["ledger_recovered"] is True
     assert refund.status == "APPROVED"
     assert d_order.refund_status == "APPROVED"
+    assert order.status == "REFUNDED"
+    assert d_order.delivery_status == "CANCELLED"
     record.assert_awaited_once()
     provider_factory.assert_not_called()
     db.commit.assert_awaited_once()
