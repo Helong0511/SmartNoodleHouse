@@ -130,7 +130,7 @@ async function replay(row: OutboxDeadLetter) {
   try {
     const { value } = await ElMessageBox.prompt(
       row.result_unknown
-        ? `事件 #${row.id} 的平台执行结果未知。请先登录对应外卖平台核实该订单操作确实没有执行；原因中必须包含“下游核实未执行”，否则系统拒绝重放。`
+        ? `事件 #${row.id} 的平台执行结果未知。请先核实对应外卖平台/打印设备确实没有执行；原因中必须包含“下游核实未执行”，否则系统拒绝重放。`
         : `将事件 #${row.id} 重新放入待处理队列。请填写故障修复情况或重放原因（至少 8 个字符）。`,
       '确认人工重放',
       {
@@ -143,7 +143,7 @@ async function replay(row: OutboxDeadLetter) {
         inputValidator: (value: string) => {
           if (value.trim().length < 8) return '原因至少需要 8 个字符'
           if (row.result_unknown && !value.includes('下游核实未执行')) {
-            return '结果未知事件必须先核实平台状态，并在原因中写入“下游核实未执行”'
+            return '结果未知事件必须先核实平台/设备状态，并在原因中写入“下游核实未执行”'
           }
           return true
         },
