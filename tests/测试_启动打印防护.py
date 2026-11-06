@@ -218,6 +218,33 @@ def test_prod_loopback_redis_still_requires_password():
         )
 
 
+def test_prod_rejects_mysql_root_account():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                database_url="mysql+aiomysql://root:strong-password@db.example.internal:3306/snh",
+            )
+        )
+
+
+def test_prod_rejects_placeholder_database_password():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                database_url="mysql+aiomysql://app_user:REPLACE_WITH_DB_PASSWORD@db.example.internal:3306/snh",
+            )
+        )
+
+
+def test_prod_rejects_placeholder_redis_password():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                redis_url="rediss://:REPLACE_WITH_REDIS_PASSWORD@redis.example.com:6379/0",
+            )
+        )
+
+
 def test_prod_allows_empty_webhook_allowlist_only_when_explicitly_not_required():
     validate_settings(
         _base_prod(
