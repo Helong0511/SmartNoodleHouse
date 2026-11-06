@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from app.core.menu_cache import (
     bump_menu_version,
     get_menu_bundle,
     get_menu_version,
+    maintain_rebuild_lock,
     release_rebuild_lock,
     set_menu_bundle,
     try_acquire_rebuild_lock,
@@ -282,6 +284,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                 return waited
         lock_token = await try_acquire_rebuild_lock(sid)
 
+    heartbeat_task = (
+        asyncio.create_task(maintain_rebuild_lock(sid, lock_token))
+        if lock_token
+        else None
+    )
     try:
         # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量。
         if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
@@ -315,6 +322,9 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
             )
         return bundle
     finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         if lock_token:
             await release_rebuild_lock(sid, owner_token=lock_token)
 
