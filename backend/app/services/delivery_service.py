@@ -1098,6 +1098,21 @@ class DeliveryService:
 
         if refund.status == "APPROVED_LEDGER_PENDING":
             # 平台已确认退款，但本地财务分录上次写入失败；只补记账，绝不再次调用平台退款接口。
+            # 全额退款还必须补齐 Order/DeliveryOrder 终态，避免只记账却仍显示待配送。
+            if refund.refund_type == "FULL":
+                if order.status not in ("CANCELLED", "REFUNDED"):
+                    from app.services.order_lifecycle import apply_order_status
+
+                    await apply_order_status(
+                        db,
+                        order,
+                        "REFUNDED",
+                        source="DELIVERY",
+                        payment_status="REFUNDED",
+                        assert_kind="SYSTEM",
+                        remark="外卖全额退款平台结果人工核实成功",
+                    )
+                d_order.delivery_status = "CANCELLED"
             from app.services.financial_ledger_service import FinancialLedgerService
 
             try:
