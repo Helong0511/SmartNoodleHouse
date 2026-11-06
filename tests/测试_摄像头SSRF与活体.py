@@ -375,13 +375,6 @@ def test_camera_worker_revalidates_target_before_open_and_reconnect(monkeypatch)
     capture.assert_not_called()
     assert worker.status == "OFFLINE"
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "rtsp://192.168.1.10:99999/Streaming/Channels/102",
-        "rtsp://192.168.1.10:not-a-port/Streaming/Channels/102",
-    ],
-)
 def test_camera_connection_pins_hostname_to_validated_ip(monkeypatch):
     """RTSP hostname 在交给 FFmpeg 前必须固定成已校验 IP，消除 DNS rebinding TOCTOU。"""
     from urllib.parse import urlparse
@@ -475,6 +468,13 @@ def test_camera_worker_opens_pinned_ip_not_dns_hostname(monkeypatch):
     assert "camera.example" not in capture.source
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "rtsp://192.168.1.10:99999/Streaming/Channels/102",
+        "rtsp://192.168.1.10:not-a-port/Streaming/Channels/102",
+    ],
+)
 def test_camera_url_rejects_invalid_ports(url):
     with pytest.raises(AppException) as ei:
         assert_camera_url_safe(url)
