@@ -112,6 +112,7 @@ async def list_batches(
                     "id": b.id,
                     "channel": b.channel,
                     "bill_date": b.bill_date.isoformat(),
+                    "scope_store_id": int(b.scope_store_id or 0),
                     "status": b.status,
                     "local_count": b.local_count,
                     "channel_count": b.channel_count,
