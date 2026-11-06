@@ -19,14 +19,10 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-# MySQL：对象已存在时可忽略（重复执行 / 部分表已手工建过）
+# CANONICAL SCHEMA 使用 CREATE TABLE IF NOT EXISTS；仅保留表已存在的兼容兜底。
+# 任何重复列/索引/外键或唯一键错误都必须失败，不能静默留下缺失约束的 schema。
 _IGNORE_MYSQL_ERRNOS = {
-    1007,  # database exists
     1050,  # table already exists
-    1060,  # duplicate column
-    1061,  # duplicate key name
-    1062,  # duplicate entry（种子类语句偶发）
-    1022,  # can't write; duplicate key
 }
 
 
@@ -66,7 +62,7 @@ def _should_skip_statement(stmt: str) -> bool:
     # 防御性跳过：即使误入标记区也不执行删库/授权类语句
     return bool(
         re.match(
-            r"(?is)^(DROP\s+DATABASE|CREATE\s+DATABASE|USE|CREATE\s+USER|GRANT\b|FLUSH\s+PRIVILEGES)\b",
+            r"(?is)^(DROP\b|TRUNCATE\b|DELETE\b|CREATE\s+DATABASE|USE\b|CREATE\s+USER|GRANT\b|REVOKE\b|FLUSH\s+PRIVILEGES)\b",
             stmt,
         )
     )
