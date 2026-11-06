@@ -310,3 +310,69 @@ async def test_camera_speaker_tts_cancelled_skips_local_fallback():
         await provider.speak("欢迎光临", camera_id=9)
 
     local.speak.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://127.0.0.1",
+        "http://169.254.169.254",
+        "http://100.100.100.200",
+        "http://[::1]",
+        "https://192.168.1.64",
+        "http://user:pass@192.168.1.64",
+        "http://192.168.1.64/redirect",
+    ],
+)
+async def test_sync_channel_osd_name_rejects_untrusted_base_before_http(base_url):
+    """OSD helper itself must enforce SSRF policy; callers cannot bypass the URL resolver."""
+    with patch("app.services.hikvision_audio.httpx.AsyncClient") as client:
+        out = await sync_channel_osd_name(base_url, "admin", "pass", "测试门店")
+    assert out["ok"] is False
+    assert out["reason"] in {"invalid_base", "unsafe_base"}
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_channel_osd_name_pins_dns_hostname_before_http(monkeypatch):
+    """Even direct calls with a hostname must pin the fully validated DNS answer."""
+    from app.services.camera_credentials import socket
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (None, None, None, None, ("192.168.1.64", port or 80))
+        ],
+    )
+    requested = []
+
+    class _Resp:
+        text = '<?xml version="1.0"?><channelNameOverlay><enabled>true</enabled><name>old</name></channelNameOverlay>'
+        status_code = 200
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return False
+        async def get(self, url):
+            requested.append(url)
+            return _Resp()
+        async def put(self, url, content=None, headers=None):
+            requested.append(url)
+            return _Resp()
+
+    with patch("app.services.hikvision_audio.httpx.AsyncClient", _Client):
+        out = await sync_channel_osd_name(
+            "http://camera.example", "admin", "pass", "测试门店"
+        )
+    assert out["ok"] is True
+    assert requested
+    assert all("camera.example" not in url for url in requested)
+    assert all("192.168.1.64" in url for url in requested)
