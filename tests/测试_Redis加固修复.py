@@ -170,6 +170,9 @@ async def test_menu_cache_rebuild_lock_acquire_release():
         fake.store[menu_cache.menu_rebuild_lock_key(1)] = "new-owner"
         await menu_cache.release_rebuild_lock(1, owner_token=ok1)
         assert fake.store[menu_cache.menu_rebuild_lock_key(1)] == "new-owner"
+        # 旧 owner 也不得覆盖新 owner 对应的菜单 bundle。
+        await menu_cache.set_menu_bundle(1, {"categories": ["stale"]}, owner_token=ok1)
+        assert menu_cache.menu_bundle_key(1) not in fake.store
         fake.store.pop(menu_cache.menu_rebuild_lock_key(1))
         # 释放后可再次抢锁
         ok3 = await menu_cache.try_acquire_rebuild_lock(1)
