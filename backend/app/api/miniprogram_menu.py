@@ -1,6 +1,8 @@
 """小程序菜单/推荐/行为事件/评价：从 miniprogram 路由拆出，路径仍挂在 /api/miniprogram。"""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from sqlalchemy import select
 
@@ -15,6 +17,7 @@ from app.services.behavior_event_service import MAX_BATCH, ingest_events
 from app.services.feedback_service import EVALUABLE_PAYMENT_STATUSES, FeedbackService
 from app.services.reco_cache import (
     get_cached_reco,
+    maintain_reco_lock,
     release_reco_lock,
     set_cached_reco,
     try_acquire_reco_lock,
@@ -194,6 +197,19 @@ async def get_recommendations(
         waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3, limit)
         if waited is not None:
             return success(waited, request=request)
+        # 等待后重新竞争一次，避免锁刚释放时所有 waiter 同时进入重建。
+        lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint, limit)
+
+    heartbeat_task = (
+        asyncio.create_task(
+            maintain_reco_lock(
+                cid, store_id, scene, ab_bucket, fingerprint,
+                owner_token=lock_token, limit=limit,
+            )
+        )
+        if lock_token
+        else None
+    )
     try:
         ranked, state, meta = await RecommendationService.recommend(
             db,
@@ -210,6 +226,9 @@ async def get_recommendations(
         )
         payload["cache_hit"] = False
     finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         if lock_token:
             await release_reco_lock(
                 cid, store_id, scene, ab_bucket, fingerprint, owner_token=lock_token, limit=limit
