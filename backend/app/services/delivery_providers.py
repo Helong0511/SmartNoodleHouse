@@ -301,6 +301,20 @@ class MeituanProvider(DeliveryProvider):
             )
         if data.get("data") != "ok" and data.get("error"):
             logger.error("美团 API 失败 %s: %s", path, data)
+            # 未建立可验证的确定拒绝错误码白名单前，订单副作用接口的 error
+            # envelope 不能直接作为“平台未执行”的证据，避免 Worker/退款自动重发。
+            side_effect_paths = {
+                "/api/v1/order/confirm",
+                "/api/v1/order/preparationMealComplete",
+                "/api/v1/order/remindReply",
+                "/api/v1/order/refund/agree",
+                "/api/v1/order/refund/reject",
+                "/api/v1/order/cancel",
+            }
+            if path in side_effect_paths:
+                raise DeliveryPlatformResultUnknown(
+                    f"MEITUAN {path}: platform returned an error envelope; downstream side effect is not safely classifiable"
+                )
         return data
 
     async def confirm_order(self, platform_order_id: str) -> bool:
