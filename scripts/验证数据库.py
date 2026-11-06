@@ -258,7 +258,7 @@ async def main() -> None:
             print(f"[{'OK' if ok else 'WARN'}] index {table}.{index}")
             if not ok:
                 print(f"  hint: alembic upgrade head 或 sql/007_prod_indexes.sql")
-        else:
+        if not await _table_exists(db, "alembic_version"):
             failures.append("missing alembic_version")
 
         for table, col in REQUIRED_COLUMNS:

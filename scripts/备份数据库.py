@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -22,6 +23,9 @@ BACKUP_DIR = ROOT / "backups"
 
 
 def load_database_url() -> str:
+    override = (os.environ.get("DATABASE_URL") or "").strip()
+    if override:
+        return override
     for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line.startswith("DATABASE_URL="):
@@ -73,16 +77,73 @@ def prune(keep_days: int) -> int:
     return removed
 
 
+def _run_mysqldump_to_gzip(cmd: list[str], out_path: Path, env: dict[str, str]) -> tuple[int, str]:
+    """流式压缩 mysqldump 输出，避免 stdout/stderr 双 PIPE 互相阻塞。"""
+    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            env=env,
+        )
+        assert proc.stdout is not None
+        try:
+            with gzip.open(out_path, "wb", compresslevel=6) as gz:
+                while True:
+                    chunk = proc.stdout.read(1024 * 256)
+                    if not chunk:
+                        break
+                    gz.write(chunk)
+            return_code = proc.wait()
+        except BaseException:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            out_path.unlink(missing_ok=True)
+            raise
+        finally:
+            proc.stdout.close()
+
+        stderr_file.seek(0)
+        error = stderr_file.read(1024 * 1024).decode("utf-8", errors="replace")
+        if return_code != 0:
+            out_path.unlink(missing_ok=True)
+        return int(return_code), error
+
+
+def _verify_gzip_backup(path: Path) -> int:
+    """完整读取 gzip 流以验证 CRC/长度，拒绝空文件和截断备份。"""
+    total = 0
+    with gzip.open(path, "rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+    if total == 0:
+        raise ValueError("mysqldump 输出为空，拒绝发布备份")
+    return total
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="备份业务库")
     parser.add_argument("--keep-days", type=int, default=14, help="保留天数，0=不清理")
     args = parser.parse_args()
 
     cfg = parse_url(load_database_url())
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = BACKUP_DIR / f"smart_noodle_house_{stamp}.sql.gz"
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        os.chmod(BACKUP_DIR, 0o700)
     dump = find_mysqldump()
+    # 使用同目录唯一临时文件，只有完整备份通过 gzip CRC 校验后才原子发布。
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    out_path = BACKUP_DIR / f"smart_noodle_house_{stamp}.sql.gz"
+    fd, temp_name = tempfile.mkstemp(prefix=".smart-noodle-house-", suffix=".partial", dir=BACKUP_DIR)
+    os.close(fd)
+    temp_path = Path(temp_name)
 
     env = os.environ.copy()
     # 避免密码出现在进程参数列表：使用 MYSQL_PWD（仅本子进程）
@@ -105,25 +166,19 @@ def main() -> int:
         cfg["database"],
     ]
     print("备份中…", cfg["database"], "->", out_path.name)
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-    )
-    assert proc.stdout is not None
-    with gzip.open(out_path, "wb", compresslevel=6) as gz:
-        while True:
-            chunk = proc.stdout.read(1024 * 256)
-            if not chunk:
-                break
-            gz.write(chunk)
-    _, err = proc.communicate()
-    if proc.returncode != 0:
-        if out_path.exists():
-            out_path.unlink()
-        sys.stderr.write(err.decode("utf-8", errors="replace"))
-        return proc.returncode
+    try:
+        return_code, error = _run_mysqldump_to_gzip(cmd, temp_path, env)
+        if return_code != 0:
+            sys.stderr.write(error)
+            return return_code
+        _verify_gzip_backup(temp_path)
+        # 备份包含顾客/订单/资金等敏感数据，禁止被同机其他普通用户读取。
+        if os.name == "posix":
+            os.chmod(temp_path, 0o600)
+        os.replace(temp_path, out_path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
     size_mb = out_path.stat().st_size / 1024 / 1024
     removed = prune(args.keep_days)
