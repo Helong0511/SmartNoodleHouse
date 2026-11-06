@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from decimal import Decimal
 
 from app.services.delivery_events import DeliveryEvent, EVENT_WS_MAP, classify_eleme_event, classify_meituan_event, parse_meituan_foods
