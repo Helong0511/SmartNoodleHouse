@@ -20,7 +20,7 @@ def classify_meituan_event(data: dict[str, Any]) -> str:
     notify = str(data.get("notify_type") or data.get("event") or data.get("type") or "").lower()
     if "urge" in notify or "催" in notify or data.get("urge_id"):
         return DeliveryEvent.URGE
-    if "refund" in notify or "退款" in notify or data.get("refund_id"):
+    if "refund" in notify or "退款" in notify or data.get("refund_id") or data.get("refund_no") or data.get("refundId"):
         return DeliveryEvent.REFUND
     if "privacy" in notify or "隐私" in notify:
         return DeliveryEvent.PRIVACY

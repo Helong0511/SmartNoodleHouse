@@ -325,3 +325,256 @@ async def test_poll_pending_payments_settles():
     assert n == 1
     claim_db.commit.assert_awaited()
     settle_db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_refund_status并发回调已成功时不得重复执行入账(monkeypatch):
+    """平台查单在锁外；期间若回调先成功，必须以锁内当前行状态为准。"""
+    payment = SimpleNamespace(
+        id=31, payment_no="PAY_RF_RACE", provider="ALIPAY",
+        provider_trade_no="ali_trade_31", order_id=41,
+        amount=Decimal("20.00"),
+    )
+    stale = SimpleNamespace(
+        id=51, refund_no="RF_RACE", payment_id=31, order_id=41,
+        amount=Decimal("5.00"), status="PROCESSING",
+    )
+    current = SimpleNamespace(
+        id=51, refund_no="RF_RACE", payment_id=31, order_id=41,
+        amount=Decimal("5.00"), status="SUCCESS",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = current
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=payment)
+    db.execute = AsyncMock(return_value=result)
+
+    with patch.object(
+        PaymentService, "_query_channel_refund", new_callable=AsyncMock,
+        return_value={
+            "status": "SUCCESS", "refund_no": "RF_RACE",
+            "payment_no": "PAY_RF_RACE", "provider_trade_no": "ali_trade_31",
+            "amount": "5.00", "provider_refund_no": "ali_refund_51",
+        },
+    ), patch.object(
+        PaymentService, "_finalize_refund", new_callable=AsyncMock
+    ) as finalize:
+        returned = await PaymentService.sync_refund_status(db, stale)
+
+    assert returned is current
+    finalize.assert_not_awaited()
+    stmt = db.execute.await_args.args[0]
+    assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_sync_refund_status使用查单后锁内刷新出来的最新退款行(monkeypatch):
+    payment = SimpleNamespace(
+        id=32, payment_no="PAY_RF_REFRESH", provider="ALIPAY",
+        provider_trade_no="ali_trade_32", order_id=42,
+        amount=Decimal("30.00"),
+    )
+    stale = SimpleNamespace(
+        id=52, refund_no="RF_REFRESH", payment_id=32, order_id=42,
+        amount=Decimal("7.00"), status="UNKNOWN",
+    )
+    current = SimpleNamespace(
+        id=52, refund_no="RF_REFRESH", payment_id=32, order_id=42,
+        amount=Decimal("7.00"), status="PROCESSING",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = current
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=payment)
+    db.execute = AsyncMock(return_value=result)
+
+    with patch.object(
+        PaymentService, "_query_channel_refund", new_callable=AsyncMock,
+        return_value={
+            "status": "PROCESSING", "refund_no": "RF_REFRESH",
+            "payment_no": "PAY_RF_REFRESH", "provider_trade_no": "ali_trade_32",
+        },
+    ), patch.object(
+        PaymentService, "_finalize_refund", new_callable=AsyncMock,
+        return_value=current,
+    ) as finalize:
+        returned = await PaymentService.sync_refund_status(db, stale)
+
+    assert returned is current
+    finalize.assert_awaited_once()
+    assert finalize.await_args.args[1] is current
+    assert finalize.await_args.args[2] == "PROCESSING"
+    stmt = db.execute.await_args.args[0]
+    assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_key_retry_returns_original_after_full_refund():
+    payment = SimpleNamespace(id=71, status="REFUNDED")
+    existing = SimpleNamespace(
+        id=81, payment_id=71, amount=Decimal("6.00"),
+        reason="顾客取消", status="SUCCESS", idempotency_key="refund-retry-81",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing)),
+    ])
+
+    returned = await PaymentService.refund(
+        db, payment, Decimal("6.00"), "顾客取消",
+        idempotency_key="refund-retry-81",
+    )
+
+    assert returned is existing
+    assert getattr(returned, "_idempotent_replay", False) is True
+    assert db.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_key_cannot_be_reused_with_different_amount():
+    payment = SimpleNamespace(id=72, status="PARTIAL_REFUND")
+    existing = SimpleNamespace(
+        id=82, payment_id=72, amount=Decimal("6.00"),
+        reason="顾客取消", status="SUCCESS", idempotency_key="refund-retry-82",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing)),
+    ])
+
+    with pytest.raises(AppException) as exc:
+        await PaymentService.refund(
+            db, payment, Decimal("8.00"), "顾客取消",
+            idempotency_key="refund-retry-82",
+        )
+
+    assert exc.value.code == 40955
+    assert db.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_key_cannot_cross_payment_boundary():
+    payment = SimpleNamespace(id=73, status="PAID")
+    existing = SimpleNamespace(
+        id=83, payment_id=999, amount=Decimal("6.00"),
+        reason="顾客取消", status="SUCCESS", idempotency_key="refund-retry-83",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing)),
+    ])
+
+    with pytest.raises(AppException) as exc:
+        await PaymentService.refund(
+            db, payment, Decimal("6.00"), "顾客取消",
+            idempotency_key="refund-retry-83",
+        )
+
+    assert exc.value.code == 40955
+
+
+@pytest.mark.asyncio
+async def test_refund_api_idempotent_replay_does_not_duplicate_audit_or_websocket():
+    from app.api.payments import RefundCreate, refund_payment
+
+    payment = SimpleNamespace(id=91, payment_no="PAY_REPLAY", order_id=92)
+    order = SimpleNamespace(
+        id=92, order_no="ORDER_REPLAY", channel="ONLINE", store_id=3
+    )
+    refund = SimpleNamespace(
+        id=93, refund_no="RF_REPLAY", status="SUCCESS",
+        amount=Decimal("4.00"), _idempotent_replay=True,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = payment
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    db.get = AsyncMock(return_value=order)
+    user = SimpleNamespace(id=7, role=SimpleNamespace(code="STORE_ADMIN"))
+    request = MagicMock()
+
+    with patch("app.api.payments.assert_order_store_access"), patch(
+        "app.api.payments.PaymentService.refund",
+        new_callable=AsyncMock,
+        return_value=refund,
+    ), patch(
+        "app.services.audit_service.AuditService.log_refund",
+        new_callable=AsyncMock,
+    ) as audit, patch(
+        "app.api.payments.ws_manager.notify_order_event",
+        new_callable=AsyncMock,
+    ) as notify:
+        response = await refund_payment(
+            "PAY_REPLAY",
+            RefundCreate(amount=Decimal("4.00"), reason="顾客取消"),
+            request,
+            db,
+            user,
+            idempotency_key="stable-replay-key",
+        )
+
+    assert response is not None
+    audit.assert_not_awaited()
+    notify.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    payment = SimpleNamespace(
+        id=74, status="PAID", amount=Decimal("10.00"),
+        provider="WECHAT", order_id=75, payment_no="PAY_RACE",
+    )
+    order = SimpleNamespace(id=75)
+    winner = SimpleNamespace(
+        id=84, payment_id=74, amount=Decimal("3.00"),
+        reason="顾客取消", status="PENDING",
+        idempotency_key="refund-race-key",
+    )
+    locked_result = MagicMock()
+    locked_result.scalar_one_or_none.return_value = payment
+    no_existing_result = MagicMock()
+    no_existing_result.scalar_one_or_none.return_value = None
+    winner_result = MagicMock()
+    winner_result.scalar_one_or_none.return_value = winner
+
+    db = AsyncMock()
+    # AsyncSession.add() is synchronous; keep it a normal mock to avoid an
+    # un-awaited coroutine warning that can hide real async lifecycle bugs.
+    db.add = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        locked_result, no_existing_result, winner_result,
+    ])
+    db.scalar = AsyncMock(side_effect=[0, Decimal("0.00")])
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock(
+        side_effect=IntegrityError("INSERT payment_refunds", {}, Exception("duplicate"))
+    )
+
+    monkeypatch.setattr(
+        "app.services.payment_service._order_table_parts",
+        AsyncMock(return_value=("TABLE", "T1")),
+    )
+    monkeypatch.setattr(
+        "app.services.payment_service._order_store_no",
+        AsyncMock(return_value="S1"),
+    )
+    monkeypatch.setattr(
+        "app.services.payment_service.generate_no",
+        lambda *args, **kwargs: "RF_RACE",
+    )
+
+    returned = await PaymentService.refund(
+        db, payment, Decimal("3.00"), "顾客取消",
+        idempotency_key="refund-race-key",
+    )
+
+    assert returned is winner
+    assert getattr(returned, "_idempotent_replay", False) is True
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()

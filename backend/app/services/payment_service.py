@@ -20,6 +20,7 @@ from app.models import (
     Payment,
     PaymentCallbackReceipt,
     PaymentRefund,
+    PosRefundRequest,
     RechargeOrder,
     Store,
 )
@@ -31,6 +32,90 @@ from app.services.status_history import record_payment_status
 from app.services.webhook_replay import claim_once, make_receipt_key, release_claim
 
 logger = logging.getLogger(__name__)
+
+
+def _wechat_callback_receipt_identity(data: dict, parsed: dict) -> tuple[str, ...]:
+    """构造稳定的微信通知身份；签名头 nonce 是每次 HTTP 请求随机值，不能用于回调幂等。"""
+    notification_id = str(data.get("id") or "").strip()
+    if parsed.get("is_refund"):
+        return (
+            f"{notification_id}" if notification_id else "",
+            str(parsed.get("refund_no") or data.get("out_refund_no") or "").strip(),
+            str(data.get("event_type") or parsed.get("refund_status") or "").strip().upper(),
+            str(data.get("success_time") or data.get("create_time") or "").strip(),
+        )
+    return (
+        notification_id,
+        str(data.get("out_trade_no") or parsed.get("payment_no") or "").strip(),
+        str(data.get("transaction_id") or parsed.get("provider_trade_no") or "").strip(),
+        str(data.get("event_type") or parsed.get("status") or "").strip().upper(),
+    )
+
+
+def _validate_duplicate_paid_callback(provider_u: str, payment: Payment, parsed: dict) -> None:
+    """已支付记录的重复成功回调必须与原渠道、原金额、原交易号完全一致。"""
+    provider = str(provider_u or "").strip().upper()
+    stored_provider = str(getattr(payment, "provider", "") or "").strip().upper()
+    if provider not in ("WECHAT", "ALIPAY") or stored_provider != provider:
+        raise AppException(40302, "支付回调渠道与本地支付记录不匹配")
+
+    raw_amount = parsed.get("amount")
+    if isinstance(raw_amount, dict):
+        raw_amount = raw_amount.get("total")
+    if raw_amount is None:
+        raise AppException(40302, "重复支付回调缺少金额")
+    try:
+        callback_amount = (
+            money(Decimal(str(raw_amount)) / 100)
+            if provider == "WECHAT"
+            else money(Decimal(str(raw_amount)))
+        )
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise AppException(40302, "重复支付回调金额非法") from exc
+    if callback_amount != money(payment.amount):
+        raise AppException(40302, "重复支付回调金额与原支付记录不匹配")
+
+    callback_trade_no = str(parsed.get("provider_trade_no") or "").strip()
+    stored_trade_no = str(getattr(payment, "provider_trade_no", "") or "").strip()
+    if not callback_trade_no or not stored_trade_no or callback_trade_no != stored_trade_no:
+        raise AppException(40302, "重复支付回调渠道交易号与原支付记录不匹配")
+
+
+def _validate_refund_callback_binding(
+    provider: str,
+    parsed: dict,
+    refund: PaymentRefund,
+    payment: Payment | None,
+) -> None:
+    """Ensure a signed refund notification belongs to the exact local payment/refund pair."""
+    if payment is None:
+        raise AppException(40401, "退款关联的支付记录不存在")
+    expected_provider = str(payment.provider or "").strip().upper()
+    if expected_provider != str(provider or "").strip().upper():
+        raise AppException(40302, "退款回调支付渠道与本地支付记录不匹配")
+    callback_payment_no = str(parsed.get("payment_no") or "").strip()
+    if not callback_payment_no or callback_payment_no != str(payment.payment_no or "").strip():
+        raise AppException(40302, "退款回调原支付单号与本地记录不匹配")
+    if int(refund.payment_id) != int(payment.id):
+        raise AppException(40302, "退款单与原支付记录关联不一致")
+    refund_order_id = getattr(refund, "order_id", None)
+    payment_order_id = getattr(payment, "order_id", None)
+    # 订单支付必须绑定同一订单；余额充值等非订单支付允许双方 order_id 同时为空。
+    if (refund_order_id is None) != (payment_order_id is None):
+        raise AppException(40302, "退款单与原支付单订单关联不一致")
+    if refund_order_id is not None and int(refund_order_id) != int(payment_order_id):
+        raise AppException(40302, "退款单与原支付单订单关联不一致")
+    # 微信退款通知 transaction_id、支付宝异步通知 trade_no 均用于标识原渠道交易。
+    # 必须与本地已保存的 provider_trade_no 绑定，不能只依赖商户侧 payment_no。
+    callback_trade_no = str(parsed.get("provider_trade_no") or "").strip()
+    local_trade_no = str(payment.provider_trade_no or "").strip()
+    if not callback_trade_no or not local_trade_no or callback_trade_no != local_trade_no:
+        raise AppException(40302, "退款回调渠道原交易号与本地支付记录不匹配")
+    callback_refund_no = str(parsed.get("refund_no") or "").strip()
+    if not callback_refund_no:
+        raise AppException(40302, "退款回调缺少商户退款单号")
+    if callback_refund_no != str(refund.refund_no or "").strip():
+        raise AppException(40302, "渠道退款单号与本地退款单不匹配")
 
 
 async def _order_table_parts(db: AsyncSession, order: Order) -> tuple[str | None, str]:
@@ -197,7 +282,9 @@ class WechatPayProvider:
         return {
             "payment_no": data.get("out_trade_no"),
             "provider_trade_no": data.get("transaction_id"),
-            "amount": str(total),  # 微信回调金额单位：分
+            # 保留微信原始 amount 对象（total/refund/currency/payer_total）。
+            # 支付回调处理器读取 total；退款处理器还必须读取 refund 和 currency。
+            "amount": dict(amt) if isinstance(amt, dict) else str(total),
             "currency": currency,
             "status": "PAID" if data.get("trade_state") == "SUCCESS" else "FAILED",
             "mchid": data.get("mchid"),
@@ -353,8 +440,13 @@ class AlipayProvider:
             "app_id": data.get("app_id"),
             "is_refund": is_refund,
             "refund_no": data.get("out_biz_no") or data.get("out_request_no"),
-            "provider_refund_no": data.get("trade_no"),
+            # 支付宝 trade_no 是原支付交易号，不是独立退款单号；不可写入 provider_refund_no。
+            "provider_refund_no": None,
+            # Alipay refund_fee is the transaction's cumulative successful refund total,
+            # not the amount of this individual out_request_no.
             "refund_status": data.get("refund_status"),
+            "fund_change": data.get("fund_change"),
+            "gmt_refund": data.get("gmt_refund"),
             "refund_fee": data.get("refund_fee"),
             "trade_status": trade_status,
         }
@@ -507,7 +599,7 @@ class PaymentService:
             select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
             .where(
                 PaymentRefund.payment_id.in_(ids),
-                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
             )
             .group_by(PaymentRefund.payment_id)
         )
@@ -1251,6 +1343,36 @@ class PaymentService:
         ).scalar_one_or_none()
 
     @classmethod
+    async def _lock_order_then_payment_for_refund(
+        cls, db: AsyncSession, refund: PaymentRefund
+    ) -> tuple[Payment, Order]:
+        """退款成功入账统一按 Order → Payment 加锁，与支付回调/订单状态机保持同序。
+
+        退款行可能已由回调/补偿任务先锁定；但不得先锁 Payment 再锁 Order，
+        否则会与 _lock_order_then_payment() 形成 Order↔Payment 死锁环。
+        """
+        order_id = int(refund.order_id) if refund.order_id is not None else 0
+        if order_id <= 0:
+            raise AppException(40302, "退款记录缺少有效订单关联")
+        order = (
+            await db.execute(
+                select(Order).where(Order.id == order_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not order:
+            raise AppException(40402, "退款关联订单不存在")
+        payment = (
+            await db.execute(
+                select(Payment).where(Payment.id == int(refund.payment_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not payment:
+            raise AppException(40401, "支付记录不存在")
+        if payment.order_id is None or int(payment.order_id) != order_id:
+            raise AppException(40302, "退款记录与原支付订单关联不一致")
+        return payment, order
+
+    @classmethod
     async def sync_payment_status(
         cls, db: AsyncSession, payment: Payment
     ) -> tuple[Payment, dict]:
@@ -1689,16 +1811,12 @@ class PaymentService:
             if parsed_probe.get("is_refund"):
                 receipt = make_receipt_key(
                     f"{provider_u}:REFUND",
-                    headers.get("wechatpay-nonce") or headers.get("Wechatpay-Nonce") or "",
-                    str(parsed_probe.get("refund_no") or ""),
-                    str(parsed_probe.get("provider_refund_no") or ""),
+                    *_wechat_callback_receipt_identity(data, parsed_probe),
                 )
             else:
                 receipt = make_receipt_key(
                     provider_u,
-                    headers.get("wechatpay-nonce") or headers.get("Wechatpay-Nonce") or "",
-                    data.get("out_trade_no") or "",
-                    data.get("transaction_id") or "",
+                    *_wechat_callback_receipt_identity(data, parsed_probe),
                 )
         else:
             data = AlipayVerifier().verify_and_parse(headers, body)
@@ -1733,11 +1851,11 @@ class PaymentService:
                 )
 
         redis_channel = f"pay:{provider_u}"
-        first = await claim_once(redis_channel, receipt)
-        if not first:
-            # Redis 显示已认领：可能是真重复，也可能是崩溃残留
-            # （claim 后、receipt 提交前 crash）。必须查 DB receipt 判断真相，
-            # 否则支付状态可能永久卡住（#2）。
+        claim_token = await claim_once(redis_channel, receipt)
+        if not claim_token:
+            # Redis 显示已认领：可能是真重复，也可能是崩溃残留。
+            # 必须查 DB receipt 判断事实；若没有 DB receipt，继续依赖 DB UNIQUE 竞争，
+            # 但绝不能删除未知请求的 Redis 锁（它可能仍由正在执行的请求持有）。
             receipt_provider_check = (
                 f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
             )
@@ -1750,7 +1868,7 @@ class PaymentService:
                 )
             ).scalar_one_or_none()
             if existing_receipt:
-                # 真重复：receipt 已落库，业务已处理过，短路返回现有对象
+                # 真重复：receipt 已落库，业务已处理过，短路返回现有对象。
                 if parsed_probe.get("is_refund"):
                     refund_no = parsed_probe.get("refund_no")
                     if refund_no:
@@ -1760,9 +1878,8 @@ class PaymentService:
                     return None
                 result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
                 return result.scalar_one_or_none()
-            # Redis claim 是崩溃残留（receipt 未落库）：释放 Redis，继续处理，
-            # 让本次回调真正入账，而不是被误判为重复。
-            await release_claim(redis_channel, receipt)
+            # 无 DB receipt 可能是崩溃残留，也可能是另一请求尚未提交。
+            # 继续由数据库唯一约束仲裁；当前请求没有 Redis 锁所有权，不得释放它。
 
         receipt_provider = f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
         try:
@@ -1776,7 +1893,20 @@ class PaymentService:
             await db.flush()
         except IntegrityError:
             await db.rollback()
-            # DB UNIQUE 已认领：与 Redis 一致视为重复，不再处理
+            # 不能仅凭 IntegrityError 就认定 receipt 重复；只有按 provider+receipt_key
+            # 查到已存在的回执才算并发重复。FK/NOT NULL/其他唯一键错误必须向平台报错，
+            # 否则平台收到成功 ACK、而本地没有处理支付的风险会变成永久漏单。
+            existing_receipt = (
+                await db.execute(
+                    select(PaymentCallbackReceipt).where(
+                        PaymentCallbackReceipt.provider == receipt_provider,
+                        PaymentCallbackReceipt.receipt_key == receipt,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_receipt is None:
+                await release_claim(redis_channel, receipt, claim_token)
+                raise
             if parsed_probe.get("is_refund"):
                 refund_no = parsed_probe.get("refund_no")
                 if refund_no:
@@ -1791,47 +1921,16 @@ class PaymentService:
             if parsed_probe.get("is_refund"):
                 return await cls._apply_refund_callback(db, provider_u, data, parsed_probe, receipt)
             return await cls._apply_payment_callback(db, provider_u, provider_inst, data, receipt)
-        except IntegrityError:
-            # 业务级 UNIQUE 冲突（如已 PAID 订单再次标记、point_ledger/status_history 重复）：
-            # 视为重复处理，回滚本次未提交变更，短路返回现有对象。
-            # 不释放 Redis / 不删 receipt（receipt 未提交已随 rollback 消失；
-            # 若 prior 已提交 receipt 仍在 DB 守护，重试会被上面的 receipt 检查短路）。
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            if parsed_probe.get("is_refund"):
-                refund_no = parsed_probe.get("refund_no")
-                if refund_no:
-                    return (
-                        await db.execute(select(PaymentRefund).where(PaymentRefund.refund_no == refund_no))
-                    ).scalar_one_or_none()
-                return None
-            result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
-            return result.scalar_one_or_none()
         except Exception:
-            # 瞬时/未知错误（OperationalError/Timeout 等）：回滚（receipt 未提交随之回滚），
-            # 释放 Redis 让 provider 重试，re-raise 让 provider 知道重试。
+            # 回执与支付/退款业务写入属于同一 DB 事务；rollback 会原子撤销本请求的回执。
+            # 绝不能用独立 Session 按 receipt_key 删除“查到的回执”：它可能属于并发请求
+            # 已成功提交的事务，删除后会重新开放已处理回调，造成重复入账/退款。
             try:
                 await db.rollback()
             except Exception:
-                pass
-            try:
-                async with AsyncSessionLocal() as db_clean:
-                    existing = (
-                        await db_clean.execute(
-                            select(PaymentCallbackReceipt).where(
-                                PaymentCallbackReceipt.provider == receipt_provider,
-                                PaymentCallbackReceipt.receipt_key == receipt,
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    if existing:
-                        await db_clean.delete(existing)
-                        await db_clean.commit()
-            except Exception as clean_err:
-                logger.warning("回调失败后清理 DB 回执失败: %s", clean_err)
-            await release_claim(redis_channel, receipt)
+                logger.exception("支付回调失败后 DB rollback 异常 receipt=%s", receipt)
+            # 仅释放本请求拥有的 Redis claim；若本请求是 Redis 降级放行则 Lua 安全 no-op。
+            await release_claim(redis_channel, receipt, claim_token)
             raise
 
     @classmethod
@@ -1855,8 +1954,12 @@ class PaymentService:
         payment = await cls._lock_order_then_payment(db, int(peek))
         if not payment:
             raise AppException(40401, "支付记录不存在")
+        if str(payment.provider or "").strip().upper() != str(provider_u or "").strip().upper():
+            raise AppException(40302, "支付回调渠道与本地支付记录不匹配")
 
         if payment.status == "PAID":
+            if str(parsed.get("status") or "").strip().upper() == "PAID":
+                _validate_duplicate_paid_callback(provider_u, payment, parsed)
             return payment
 
         # 储值充值回调
@@ -2041,80 +2144,160 @@ class PaymentService:
         parsed: dict,
         receipt: str,
     ) -> PaymentRefund | None:
-        refund_no = parsed.get("refund_no")
-        # 支付宝全额退款未传 out_request_no 时 out_biz_no 可能等于 out_trade_no
-        if not refund_no or refund_no == parsed.get("payment_no"):
-            # 回退：按支付单找最近一笔进行中的退款
-            payment_no = parsed.get("payment_no")
-            payment = (
-                await db.execute(select(Payment).where(Payment.payment_no == payment_no))
-            ).scalar_one_or_none()
-            if not payment:
-                raise AppException(40401, "支付记录不存在")
-            row = (
-                await db.execute(
-                    select(PaymentRefund)
-                    .where(
-                        PaymentRefund.payment_id == payment.id,
-                        PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
-                    )
-                    .order_by(PaymentRefund.id.desc())
-                    .limit(1)
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
-        else:
-            row = (
-                await db.execute(
-                    select(PaymentRefund).where(PaymentRefund.refund_no == refund_no).with_for_update()
-                )
-            ).scalar_one_or_none()
+        refund_no = str(parsed.get("refund_no") or "").strip()
+        # 退款通知必须携带商户退款请求号，并精确命中本地 refund_no。
+        # 不能按 payment_no 猜测“最近一笔进行中退款”：迟到/重试的旧通知可能被错误绑定到新退款。
+        if not refund_no:
+            raise AppException(40302, "退款回调缺少商户退款单号，拒绝自动匹配")
+        # 先无锁读取退款单。支付宝分支随后需要调用 refund.query；
+        # 绝不能在第三方 HTTP 请求期间持有 PaymentRefund 行锁。
+        row = (
+            await db.execute(
+                select(PaymentRefund).where(PaymentRefund.refund_no == refund_no)
+            )
+        ).scalar_one_or_none()
 
         if not row:
             raise AppException(40403, "退款记录不存在")
 
-        # P0-11: 退款金额严格校验 — provider refund_fee 必须匹配本地退款金额
-        # 支付宝：refund_fee（元）；微信：verifier 回传 amount.refund（分，字段名 refund_amount）
-        # 生产 fail-closed：缺金额或解析失败一律拒绝，禁止按本地金额盲入账
-        refund_fee_raw = parsed.get("refund_fee")
-        if refund_fee_raw is None:
-            refund_amount_raw = parsed.get("refund_amount")
-            if refund_amount_raw is not None and provider_u == "WECHAT":
-                try:
-                    refund_fee_raw = money(Decimal(str(refund_amount_raw)) / 100)
-                except (InvalidOperation, ValueError) as exc:
-                    raise AppException(40302, "退款金额解析失败") from exc
-        if refund_fee_raw is None:
-            raise AppException(40302, "退款回调缺少金额，拒绝入账")
-        try:
-            provider_refund_amount = money(Decimal(str(refund_fee_raw)))
-        except (InvalidOperation, ValueError) as exc:
-            raise AppException(40302, "退款金额解析失败") from exc
-        if provider_refund_amount != money(row.amount):
-            raise AppException(40302, "退款金额不匹配")
+        # 不能只凭退款单号命中本地记录：还必须校验签名回调中的原支付单、
+        # provider 和订单归属，避免跨支付单/跨渠道退款通知误更新本地退款状态。
+        linked_payment = await db.get(Payment, row.payment_id)
+        _validate_refund_callback_binding(provider_u, parsed, row, linked_payment)
 
-        status_raw = str(parsed.get("refund_status") or "").upper()
+        status_raw = str(parsed.get("refund_status") or "").strip().upper()
+        provider_refund_no = parsed.get("provider_refund_no")
+
         if provider_u == "WECHAT":
-            if status_raw == "SUCCESS" or str(data.get("event_type") or "").upper() == "REFUND.SUCCESS":
+            # 微信 amount.total 是原支付总金额，amount.refund 是本次退款金额，单位均为分。
+            amount_info = parsed.get("amount")
+            if not isinstance(amount_info, dict) or amount_info.get("total") is None:
+                raise AppException(40302, "微信退款回调缺少原订单总金额")
+            try:
+                provider_total_amount = money(Decimal(str(amount_info["total"])) / 100)
+            except (InvalidOperation, ValueError) as exc:
+                raise AppException(40302, "微信退款原订单总金额解析失败") from exc
+            if provider_total_amount != money(linked_payment.amount):
+                raise AppException(40302, "微信退款回调原订单总金额与本地支付金额不匹配")
+            callback_currency = str(amount_info.get("currency") or "CNY").upper()
+            if callback_currency != "CNY":
+                raise AppException(40302, "微信退款回调币种必须为 CNY")
+
+            # amount.refund 是本次退款金额，必须与本地退款申请金额一致。
+            refund_amount_raw = parsed.get("refund_amount")
+            if refund_amount_raw is None:
+                raise AppException(40302, "微信退款回调缺少本次退款金额")
+            try:
+                provider_refund_amount = money(Decimal(str(refund_amount_raw)) / 100)
+            except (InvalidOperation, ValueError) as exc:
+                raise AppException(40302, "微信退款金额解析失败") from exc
+            if provider_refund_amount != money(row.amount):
+                raise AppException(40302, "微信本次退款金额与本地退款申请不匹配")
+
+            event_type = str(data.get("event_type") or "").strip().upper()
+            if status_raw == "SUCCESS" or event_type == "REFUND.SUCCESS":
                 new_status = "SUCCESS"
-            elif status_raw in ("CLOSED", "ABNORMAL") or "CLOSED" in str(data.get("event_type") or "").upper():
-                new_status = "CLOSED" if "CLOSED" in status_raw or "CLOSED" in str(data.get("event_type") or "").upper() else "ABNORMAL"
+            elif status_raw == "CLOSED" or event_type == "REFUND.CLOSED":
+                new_status = "CLOSED"
+            elif status_raw == "ABNORMAL":
+                new_status = "ABNORMAL"
             else:
                 new_status = "PROCESSING"
         else:
-            # 支付宝必须保留并判断原始 refund_status；refund_fee 只表示金额，不代表退款成功。
-            new_status = _resolve_alipay_refund_status(parsed)
+            # 支付宝 refund_fee 是“该笔交易累计已成功退款总额”，不是本次退款金额。
+            # 必须用 out_biz_no 定位单笔退款，再调用 refund.query 确认该请求的状态与金额。
+            cumulative_raw = parsed.get("refund_fee")
+            cumulative_amount = None
+            if cumulative_raw is not None:
+                try:
+                    cumulative_amount = money(Decimal(str(cumulative_raw)))
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(40302, "支付宝累计退款金额解析失败") from exc
+                if cumulative_amount < 0 or cumulative_amount > money(linked_payment.amount):
+                    raise AppException(40302, "支付宝累计退款金额超出原支付金额")
+
+            # 回调中的 refund_fee 不能证明当前 out_request_no 已成功；
+            # 通过官方 refund.query 按单笔商户退款请求号核验，解决多次部分退款累计金额歧义。
+            query_result = await alipay_client.trade_refund_query(
+                payment_no=str(linked_payment.payment_no),
+                refund_no=str(row.refund_no),
+            )
+            query_status = _resolve_alipay_refund_status({"refund_status": str((query_result or {}).get("status") or "PROCESSING").upper()})
+            query_amount_raw = (query_result or {}).get("amount")
+            if query_status == "SUCCESS":
+                if query_amount_raw is None:
+                    raise AppException(50302, "支付宝退款查询未返回本次退款金额，暂不确认成功")
+                try:
+                    query_amount = money(Decimal(str(query_amount_raw)))
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(50302, "支付宝退款查询金额解析失败") from exc
+                if query_amount != money(row.amount):
+                    raise AppException(40302, "支付宝退款查询的本次退款金额与本地申请不匹配")
+                if cumulative_amount is not None and cumulative_amount < money(row.amount):
+                    raise AppException(40302, "支付宝累计退款金额小于本次已成功退款金额")
+            elif query_status in ("FAILED", "CLOSED"):
+                new_status = query_status
+            else:
+                new_status = "PROCESSING"
+            provider_refund_no = (query_result or {}).get("provider_refund_no") or provider_refund_no
+
+        # 渠道查询已在无行锁状态下完成。现在重新获取当前退款行并加锁，
+        # 防止查询期间其他回调/查单已完成状态迁移；populate_existing 确保刷新旧快照。
+        row = (
+            await db.execute(
+                select(PaymentRefund)
+                .where(PaymentRefund.id == int(row.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise AppException(40403, "退款记录不存在")
+        linked_payment = await db.get(Payment, row.payment_id)
+        _validate_refund_callback_binding(provider_u, parsed, row, linked_payment)
 
         return await cls._finalize_refund(
             db,
             row,
             new_status,
-            provider_refund_no=parsed.get("provider_refund_no"),
+            provider_refund_no=provider_refund_no,
             callback_raw={"receipt": receipt, "parsed": {k: parsed.get(k) for k in (
-                "refund_no", "refund_status", "payment_no", "provider_refund_no", "refund_fee", "event_type"
+                "refund_no", "refund_status", "payment_no", "provider_refund_no", "refund_fee", "fund_change", "gmt_refund", "event_type"
             )}},
             source="CALLBACK",
         )
+
+    @classmethod
+    async def _sync_pos_refund_request_on_success(
+        cls, db: AsyncSession, refund: PaymentRefund
+    ) -> None:
+        """将异步渠道退款成功原子同步到对应 POS 退款申请，按 refund_id 严格关联。"""
+        request = (
+            await db.execute(
+                select(PosRefundRequest)
+                .where(PosRefundRequest.refund_id == int(refund.id))
+                .with_for_update()
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if request is None or request.status in ("SUCCESS", "REJECTED", "CANCELLED"):
+            return
+
+        executed = money(Decimal(str(request.executed_amount or 0)) + money(refund.amount))
+        request.executed_amount = executed
+        request.payment_id = int(refund.payment_id)
+        request.fail_reason = None
+        if executed > money(request.amount):
+            # 记录实际已退金额，但明确暴露申请金额被超出的异常，绝不静默封账。
+            request.status = "RECONCILIATION_REQUIRED"
+            request.fail_reason = (
+                f"实际退款累计 ¥{executed} 超过申请金额 ¥{money(request.amount)}，需人工核对"
+            )[:255]
+        elif executed >= money(request.amount):
+            request.status = "SUCCESS"
+        else:
+            request.status = "PROCESSING"
+        await db.flush()
 
     @classmethod
     async def _finalize_refund(
@@ -2128,11 +2311,17 @@ class PaymentService:
         fail_reason: str | None = None,
         source: str = "SYSTEM",
     ) -> PaymentRefund:
-        # P1-14 Refund state machine: PENDING -> PROCESSING -> {SUCCESS, FAILED, CLOSED, UNKNOWN}.
+        # P1-14 Refund state machine: PENDING -> PROCESSING -> {SUCCESS, FAILED, CLOSED, UNKNOWN, ABNORMAL}.
         # Idempotent: SUCCESS is terminal; re-finalizing a SUCCESS row is a no-op.
         # UNKNOWN = provider returned an ambiguous result; must NOT be promoted to SUCCESS;
         #   recovery happens via sync_refund_status query / scheduled compensation.
         if row.status == "SUCCESS":
+            return row
+        # 支付平台通知可能乱序：终态退款不能被迟到的 PROCESSING/UNKNOWN 覆盖。
+        # FAILED/CLOSED 仅允许后续权威 SUCCESS 查询/通知纠正；ABNORMAL 必须等待人工/平台处理结果。
+        if row.status in ("FAILED", "CLOSED") and new_status != "SUCCESS":
+            return row
+        if row.status == "ABNORMAL" and new_status in ("PENDING", "PROCESSING", "UNKNOWN"):
             return row
 
         if provider_refund_no:
@@ -2146,11 +2335,8 @@ class PaymentService:
             row.status = "SUCCESS"
             row._callback_transitioned_to_success = True
             row.succeeded_at = now_local()
-            payment = (
-                await db.execute(select(Payment).where(Payment.id == row.payment_id).with_for_update())
-            ).scalar_one_or_none()
-            if not payment:
-                raise AppException(40401, "支付记录不存在")
+            # 先锁订单再锁支付单，避免与支付回调的 Order→Payment 锁序死锁。
+            payment, order = await cls._lock_order_then_payment_for_refund(db, row)
             success_sum = await db.scalar(
                 select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
                     PaymentRefund.payment_id == payment.id,
@@ -2170,9 +2356,9 @@ class PaymentService:
                 source=source,
                 remark=f"refund_no={row.refund_no}",
             )
-            order = (
-                await db.execute(select(Order).where(Order.id == row.order_id).with_for_update())
-            ).scalar_one_or_none()
+            # POS 异步退款在审批返回后才收到 SUCCESS 回调；必须在同一事务内累计执行金额。
+            await cls._sync_pos_refund_request_on_success(db, row)
+
             if order:
                 provider_u = (payment.provider or "").upper()
                 if provider_u != "BALANCE":
@@ -2215,18 +2401,18 @@ class PaymentService:
                 net = await cls.order_net_collected(db, order.id)
                 total = money(order.total_amount)
                 if net <= 0:
-                    try:
-                        from app.services.social_benefit_service import SocialBenefitService
+                    # 公益台账与营销归因冲减必须和退款 SUCCESS 同事务写入 Outbox。
+                    # 不在资金确认事务中吞掉副作用异常；worker 使用 refund_id 幂等重试。
+                    from app.services.outbox_worker import enqueue_outbox
 
-                        await SocialBenefitService.reverse_for_order(db, int(order.id))
-                    except Exception:
-                        logger.exception("公益台账退款冲减失败 order_id=%s", order.id)
-                    try:
-                        from app.services.attribution_service import AttributionService
-
-                        await AttributionService.reverse_for_order(db, int(order.id))
-                    except Exception:
-                        logger.exception("营销归因退款冲减失败 order_id=%s", order.id)
+                    for event_kind in ("social_benefit_reverse", "campaign_attribution_reverse"):
+                        await enqueue_outbox(
+                            db,
+                            aggregate_type="refund",
+                            aggregate_id=int(row.id),
+                            event_kind=event_kind,
+                            payload={"refund_id": int(row.id), "order_id": int(order.id)},
+                        )
                     if order.status not in ("CANCELLED", "REFUNDED"):
                         await apply_order_status(
                             db,
@@ -2324,8 +2510,10 @@ class PaymentService:
                                     "入队退款补偿 outbox 失败 refund_id=%s kind=%s", row.id, kind
                                 )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
-            row.status = new_status if new_status != "ABNORMAL" else "FAILED"
-            row.fail_reason = row.fail_reason or fail_reason or new_status
+            row.status = new_status
+            row.fail_reason = row.fail_reason or fail_reason or (
+                "微信退款异常：需要在微信商户平台处理异常退款后再查询确认" if new_status == "ABNORMAL" else new_status
+            )
         elif new_status == "UNKNOWN":
             # 保留 UNKNOWN，不得升格为 SUCCESS；由 query / 定时补偿恢复
             row.status = "UNKNOWN"
@@ -2338,11 +2526,11 @@ class PaymentService:
 
     @classmethod
     async def refundable_amount(cls, db: AsyncSession, payment: Payment) -> Decimal:
-        """可退余额 = 支付金额 − (成功+进行中+未知)退款。"""
+        """可退余额 = 支付金额 − (成功+进行中+未知+异常待处理)退款。"""
         used = await db.scalar(
             select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
                 PaymentRefund.payment_id == payment.id,
-                PaymentRefund.status.in_(("SUCCESS", "PENDING", "PROCESSING", "UNKNOWN")),
+                PaymentRefund.status.in_(("SUCCESS", "PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
             )
         ) or Decimal("0")
         left = money(payment.amount) - money(Decimal(str(used)))
@@ -2356,6 +2544,8 @@ class PaymentService:
         amount: Decimal,
         reason: str,
         operator_id: int | None = None,
+        pos_refund_request_id: int | None = None,
+        idempotency_key: str | None = None,
     ) -> PaymentRefund:
         locked = (
             await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
@@ -2363,6 +2553,30 @@ class PaymentService:
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
+        # HTTP 客户端可用 Idempotency-Key 安全重试退款请求。
+        # 必须在支付终态检查之前查询，才能在“部分退款成功但响应丢失”后返回原退款单，
+        # 而不是再次向渠道发起一笔新的部分退款。
+        idem_key = str(idempotency_key or "").strip() or None
+        if idem_key is not None:
+            if len(idem_key) > 64:
+                raise AppException(40055, "退款幂等键长度不能超过 64 个字符")
+            existing_refund = (
+                await db.execute(
+                    select(PaymentRefund)
+                    .where(PaymentRefund.idempotency_key == idem_key)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if existing_refund is not None:
+                if (
+                    int(existing_refund.payment_id) != int(payment.id)
+                    or money(existing_refund.amount) != money(amount)
+                    or str(existing_refund.reason or "") != str(reason or "")
+                ):
+                    raise AppException(40955, "退款幂等键已被不同的支付单或退款参数使用")
+                # 标记这是客户端重试命中旧记录；API 层据此避免重复审计/广播副作用。
+                existing_refund._idempotent_replay = True
+                return existing_refund
         if payment.status == "REFUNDED":
             raise AppException(40053, "该支付已全额退款，不可重复退款")
         if payment.status not in ("PAID", "PARTIAL_REFUND"):
@@ -2371,11 +2585,11 @@ class PaymentService:
         if amount <= 0:
             raise AppException(40051, "退款金额非法")
 
-        # 进行中/未知的退款单：禁止再开一笔，避免连点重复提交
+        # 进行中/未知/异常待处理的退款单：禁止再开一笔，避免重复退款
         inflight = await db.scalar(
             select(func.count()).select_from(PaymentRefund).where(
                 PaymentRefund.payment_id == payment.id,
-                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
             )
         ) or 0
         if int(inflight) > 0:
@@ -2399,19 +2613,68 @@ class PaymentService:
         t_no, t_ph = await _order_table_parts(db, order)
         sno = await _order_store_no(db, order)
         refund_no = generate_no(refund_biz(payment.provider), sno, t_no, table_placeholder=t_ph)
+        locked_payment_id = int(payment.id)
         row = PaymentRefund(
             refund_no=refund_no,
-            payment_id=payment.id,
+            payment_id=locked_payment_id,
             order_id=payment.order_id,
             amount=amount,
             reason=reason,
             status="PENDING",
             operator_id=operator_id,
+            idempotency_key=idem_key,
         )
         db.add(row)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            # 不同支付单并发复用同一幂等键时，先由唯一索引裁决；
+            # 回滚失败事务后重新读取胜出的退款单，匹配参数则安全返回原单。
+            await db.rollback()
+            if idem_key is not None:
+                winner = (
+                    await db.execute(
+                        select(PaymentRefund).where(
+                            PaymentRefund.idempotency_key == idem_key
+                        )
+                    )
+                ).scalar_one_or_none()
+                if winner is not None:
+                    if (
+                        int(winner.payment_id) != locked_payment_id
+                        or money(winner.amount) != money(amount)
+                        or str(winner.reason or "") != str(reason or "")
+                    ):
+                        raise AppException(
+                            40955, "退款幂等键已被不同的支付单或退款参数使用"
+                        )
+                    winner._idempotent_replay = True
+                    return winner
+            # 不是幂等键冲突（例如退款单号冲突）时保留原始数据库异常，
+            # 不伪装成可重试的幂等成功。
+            raise
 
-        # 短事务：落库 PENDING 退款单并释放行锁后再调第三方
+        if pos_refund_request_id is not None:
+            pos_request = (
+                await db.execute(
+                    select(PosRefundRequest)
+                    .where(PosRefundRequest.id == int(pos_refund_request_id))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if (
+                pos_request is None
+                or int(pos_request.order_id) != int(payment.order_id or 0)
+                or pos_request.status not in ("PROCESSING", "FAILED")
+            ):
+                raise AppException(40954, "POS 退款申请状态已变化，无法绑定渠道退款单")
+            # 在调用渠道前先建立精确关联，避免极快的异步 SUCCESS 回调早于 POS refund_id 落库。
+            pos_request.refund_id = row.id
+            pos_request.payment_id = payment.id
+            pos_request.status = "PROCESSING"
+            pos_request.fail_reason = None
+
+        # 短事务：落库 PENDING 退款单和 POS 关联并释放行锁后再调第三方
         refund_id = row.id
         payment_id = payment.id
         await db.commit()
@@ -2436,15 +2699,26 @@ class PaymentService:
                     raise AppException(40401, "支付记录不存在")
                 result = await provider_inst.refund_payment(payment, amount, reason, refund_no)
         except AppException as e:
-            # 渠道明确拒绝（HTTP 业务错误）：结果确定，置 FAILED 允许重新发起
+            # 只有本地配置/签名材料缺失（请求尚未发出）才可判定为确定失败。
+            # 渠道返回的 4xx/5xx 业务错误也可能发生在受理之后，保守置 UNKNOWN 并查单，
+            # 绝不能因一个 AppException 就把可重试退款单标 FAILED 后再次发起退款。
             row = (
                 await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
             ).scalar_one_or_none()
+            if e.code in (50010, 50011, 50020):
+                if row and row.status in ("PENDING", "PROCESSING", "UNKNOWN"):
+                    row.status = "FAILED"
+                    row.fail_reason = str(e)[:255]
+                    await db.flush()
+                    await db.commit()
+                raise
             if row and row.status in ("PENDING", "PROCESSING", "UNKNOWN"):
-                row.status = "FAILED"
-                row.fail_reason = str(e)[:255]
+                row.status = "UNKNOWN"
+                row.fail_reason = f"渠道返回结果不确定，待查单补偿: {e}"[:255]
                 await db.flush()
                 await db.commit()
+                logger.warning("退款渠道返回不确定错误，保留原退款单 refund_no=%s: %s", refund_no, e)
+                return row
             raise
         except Exception as e:
             # 网络超时/结果未知：渠道侧可能已实际退款，置 UNKNOWN 并交由
@@ -2458,6 +2732,10 @@ class PaymentService:
                 await db.flush()
                 await db.commit()
             logger.error("退款申请结果未知 refund_no=%s: %s", refund_no, e)
+            # 将已持久化的 UNKNOWN 退款单返回调用方，使 POS 审批单能绑定 refund_id；
+            # 后续回调/查单成功时，_sync_pos_refund_request_on_success 才能精确补齐累计金额。
+            if row is not None:
+                return row
             raise AppException(40055, "退款结果未知，系统将自动查询退款结果，请稍后查看退款状态")
 
         row = (
@@ -2521,6 +2799,71 @@ class PaymentService:
         return None
 
     @classmethod
+    def _validate_refund_query_result(
+        cls, *, provider: str, payment: Payment, refund: PaymentRefund, result: dict
+    ) -> str:
+        """统一校验主动查单与定时补偿的渠道退款结果；只有完整匹配才允许入账。"""
+        provider_u = str(provider or "").strip().upper()
+        if provider_u not in ("WECHAT", "ALIPAY"):
+            raise AppException(40302, "退款查询渠道与本地支付记录不匹配")
+        if (
+            int(refund.payment_id) != int(payment.id)
+            or not payment.payment_no
+            or not refund.refund_no
+        ):
+            raise AppException(40302, "退款单缺少有效的原支付/退款编号")
+        refund_order_id = getattr(refund, "order_id", None)
+        payment_order_id = getattr(payment, "order_id", None)
+        if (refund_order_id is None) != (payment_order_id is None):
+            raise AppException(40302, "退款单与原支付订单关联不一致")
+        if refund_order_id is not None and int(refund_order_id) != int(payment_order_id):
+            raise AppException(40302, "退款单与原支付订单关联不一致")
+
+        result_refund_no = str(result.get("refund_no") or "").strip()
+        if result_refund_no and result_refund_no != str(refund.refund_no):
+            raise AppException(40302, "渠道退款查询返回的退款单号不匹配")
+        result_payment_no = str(result.get("payment_no") or "").strip()
+        if result_payment_no and result_payment_no != str(payment.payment_no):
+            raise AppException(40302, "渠道退款查询返回的原支付单号不匹配")
+        result_trade_no = str(result.get("provider_trade_no") or "").strip()
+        local_trade_no = str(payment.provider_trade_no or "").strip()
+        if result_trade_no and (not local_trade_no or result_trade_no != local_trade_no):
+            raise AppException(40302, "渠道退款查询返回的原交易号不匹配")
+
+        query_status = str(result.get("status") or "PROCESSING").strip().upper()
+        if query_status == "SUCCESS":
+            if provider_u == "ALIPAY":
+                amount_raw = result.get("amount")
+                if amount_raw is None:
+                    raise AppException(50302, "支付宝退款查询缺少本次退款金额，拒绝入账")
+                try:
+                    query_amount = money(Decimal(str(amount_raw)))
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(50302, "支付宝退款查询金额解析失败") from exc
+                if query_amount != money(refund.amount):
+                    raise AppException(40302, "支付宝退款查询本次退款金额与本地申请不匹配")
+            else:
+                amount_info = result.get("amount")
+                if not isinstance(amount_info, dict):
+                    raise AppException(50302, "微信退款查询缺少金额信息，拒绝入账")
+                refund_raw = amount_info.get("refund")
+                total_raw = amount_info.get("total")
+                if refund_raw is None or total_raw is None:
+                    raise AppException(50302, "微信退款查询缺少本次退款或原订单金额")
+                try:
+                    query_refund_amount = money(Decimal(str(refund_raw)) / 100)
+                    query_total_amount = money(Decimal(str(total_raw)) / 100)
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(50302, "微信退款查询金额解析失败") from exc
+                if query_refund_amount != money(refund.amount):
+                    raise AppException(40302, "微信退款查询本次退款金额与本地申请不匹配")
+                if query_total_amount != money(payment.amount):
+                    raise AppException(40302, "微信退款查询原订单总金额与本地支付金额不匹配")
+                if str(amount_info.get("currency") or "CNY").upper() != "CNY":
+                    raise AppException(40302, "微信退款查询币种必须为 CNY")
+        return query_status
+
+    @classmethod
     async def sync_refund_status(cls, db: AsyncSession, row: PaymentRefund) -> PaymentRefund:
         """主动查询平台退款结果（补偿回调丢失）。"""
         if row.status == "SUCCESS":
@@ -2528,19 +2871,63 @@ class PaymentService:
         payment = await db.get(Payment, row.payment_id)
         if not payment:
             raise AppException(40401, "支付记录不存在")
+        provider = str(payment.provider or "").strip().upper()
+        if provider not in ("WECHAT", "ALIPAY"):
+            raise AppException(40302, "退款查询渠道与本地支付记录不匹配")
+        if not payment.payment_no or not row.refund_no or int(row.payment_id) != int(payment.id):
+            raise AppException(40302, "退款单缺少有效的原支付/退款编号")
+        refund_order_id = getattr(row, "order_id", None)
+        payment_order_id = getattr(payment, "order_id", None)
+        if (refund_order_id is None) != (payment_order_id is None):
+            raise AppException(40302, "退款单与原支付订单关联不一致")
+        if refund_order_id is not None and int(refund_order_id) != int(payment_order_id):
+            raise AppException(40302, "退款单与原支付订单关联不一致")
 
         result = await cls._query_channel_refund(
-            provider=str(payment.provider or ""),
-            payment_no=str(payment.payment_no or ""),
-            refund_no=str(row.refund_no or ""),
+            provider=provider,
+            payment_no=str(payment.payment_no),
+            refund_no=str(row.refund_no),
         )
         if result is None:
             return row
 
+        # 主动查单与定时补偿共用同一套渠道身份、订单关联、金额和币种校验。
+        query_status = cls._validate_refund_query_result(
+            provider=provider, payment=payment, refund=row, result=result
+        )
+
+        # HTTP 查单期间可能有异步回调/另一个补偿 Worker 已完成退款。
+        # 必须在网络请求结束后重新当前读并锁定退款行，不能用请求前的 ORM 快照
+        # 覆盖并发事务写入的 SUCCESS/FAILED 等状态，也不能重复执行财务分录。
+        current_row = (
+            await db.execute(
+                select(PaymentRefund)
+                .where(PaymentRefund.id == int(row.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if current_row is None:
+            raise AppException(40403, "退款记录不存在")
+        if (
+            int(current_row.payment_id) != int(payment.id)
+            or str(current_row.refund_no or "") != str(row.refund_no or "")
+            or money(current_row.amount) != money(row.amount)
+            or (
+                current_row.order_id is not None
+                and payment.order_id is not None
+                and int(current_row.order_id) != int(payment.order_id)
+            )
+        ):
+            raise AppException(40302, "退款记录在查单期间发生关联或金额变化，拒绝入账")
+        # 成功是不可逆终态；并发回调已完成时直接返回，避免重复财务/积分/钱包副作用。
+        if current_row.status == "SUCCESS":
+            return current_row
+
         return await cls._finalize_refund(
             db,
-            row,
-            result.get("status") or "PROCESSING",
+            current_row,
+            query_status,
             provider_refund_no=result.get("provider_refund_no"),
             callback_raw={"query": result.get("raw")},
             source="REFUND_QUERY",
@@ -2932,10 +3319,7 @@ class PaymentService:
 
     @classmethod
     async def poll_pending_refunds(cls, limit: int = 20) -> int:
-        """定时补偿：拉取 PROCESSING/PENDING/UNKNOWN 退款单（query 恢复）。
-
-        与支付 poll 相同：id 扫描 → 渠道 HTTP 锁外 → 短事务 finalize，避免锁住多行做 HTTP。
-        """
+        """定时补偿：拉取未决退款；与主动查单共用严格的渠道结果校验。"""
         from types import SimpleNamespace
 
         async with AsyncSessionLocal() as db:
@@ -2943,7 +3327,7 @@ class PaymentService:
                 (
                     await db.execute(
                         select(PaymentRefund.id)
-                        .where(PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")))
+                        .where(PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")))
                         .order_by(PaymentRefund.id.asc())
                         .limit(limit)
                     )
@@ -2955,13 +3339,14 @@ class PaymentService:
         done = 0
         for rid in ids:
             try:
+                # 第一阶段只读取快照，随后立即提交释放连接/锁；绝不持锁调用渠道 HTTP。
                 async with AsyncSessionLocal() as db:
                     row = (
                         await db.execute(
                             select(PaymentRefund)
                             .where(
                                 PaymentRefund.id == int(rid),
-                                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
+                                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
                             )
                             .with_for_update(skip_locked=True)
                         )
@@ -2973,28 +3358,42 @@ class PaymentService:
                     if not payment:
                         await db.commit()
                         continue
-                    snap = SimpleNamespace(
-                        refund_id=row.id,
-                        refund_no=row.refund_no,
+                    refund_snapshot = SimpleNamespace(
+                        id=int(row.id),
+                        payment_id=int(row.payment_id),
                         order_id=row.order_id,
-                        payment_id=row.payment_id,
-                        provider=payment.provider,
-                        payment_no=payment.payment_no,
-                        before=before,
+                        refund_no=str(row.refund_no or ""),
+                        amount=row.amount,
+                    )
+                    payment_snapshot = SimpleNamespace(
+                        id=int(payment.id),
+                        provider=str(payment.provider or "").strip().upper(),
+                        payment_no=str(payment.payment_no or ""),
+                        provider_trade_no=str(payment.provider_trade_no or ""),
+                        order_id=payment.order_id,
+                        amount=payment.amount,
                     )
                     await db.commit()
 
                 try:
                     result = await cls._query_channel_refund(
-                        provider=str(snap.provider or ""),
-                        payment_no=str(snap.payment_no or ""),
-                        refund_no=str(snap.refund_no or ""),
+                        provider=payment_snapshot.provider,
+                        payment_no=payment_snapshot.payment_no,
+                        refund_no=refund_snapshot.refund_no,
                     )
                 except Exception as e:
-                    logger.warning("退款查询失败 refund_no=%s: %s", snap.refund_no, e)
+                    logger.warning("退款查询失败 refund_no=%s: %s", refund_snapshot.refund_no, e)
                     continue
                 if result is None:
                     continue
+
+                # 定时任务不得绕过主动查单的渠道身份、订单、金额和币种校验。
+                query_status = cls._validate_refund_query_result(
+                    provider=payment_snapshot.provider,
+                    payment=payment_snapshot,
+                    refund=refund_snapshot,
+                    result=result,
+                )
 
                 async with AsyncSessionLocal() as db:
                     row = (
@@ -3007,16 +3406,44 @@ class PaymentService:
                     if row is None or row.status == "SUCCESS":
                         await db.commit()
                         continue
+                    if (
+                        int(row.payment_id) != refund_snapshot.payment_id
+                        or str(row.refund_no or "") != refund_snapshot.refund_no
+                        or money(row.amount) != money(refund_snapshot.amount)
+                        or row.order_id != refund_snapshot.order_id
+                    ):
+                        await db.rollback()
+                        logger.error("退款查单期间本地退款单发生变化，拒绝应用结果 refund_id=%s", rid)
+                        continue
+
+                    if query_status == "SUCCESS":
+                        # 资金入账前按统一 Order→Payment 顺序锁定并重新核对原支付快照。
+                        current_payment, _ = await cls._lock_order_then_payment_for_refund(db, row)
+                    else:
+                        current_payment = await db.get(
+                            Payment, row.payment_id, populate_existing=True
+                        )
+                    if not current_payment or (
+                        str(current_payment.provider or "").strip().upper() != payment_snapshot.provider
+                        or str(current_payment.payment_no or "") != payment_snapshot.payment_no
+                        or str(current_payment.provider_trade_no or "") != payment_snapshot.provider_trade_no
+                        or current_payment.order_id != payment_snapshot.order_id
+                        or money(current_payment.amount) != money(payment_snapshot.amount)
+                    ):
+                        await db.rollback()
+                        logger.error("退款查单期间原支付记录发生变化，拒绝应用结果 refund_id=%s", rid)
+                        continue
+
                     await cls._finalize_refund(
                         db,
                         row,
-                        result.get("status") or "PROCESSING",
+                        query_status,
                         provider_refund_no=result.get("provider_refund_no"),
                         callback_raw={"query": result.get("raw")},
                         source="REFUND_QUERY",
                     )
                     await db.commit()
-                    if snap.before != "SUCCESS" and row.status == "SUCCESS":
+                    if before != "SUCCESS" and row.status == "SUCCESS":
                         done += 1
                         try:
                             from app.services.websocket_manager import ws_manager

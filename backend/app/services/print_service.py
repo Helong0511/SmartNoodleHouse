@@ -74,7 +74,7 @@ TICKET_CANCEL = "CANCEL"  # 作废/取消（票头加【作废】）
 MAX_PRINT_ATTEMPTS = 8
 PRINT_BACKOFF_BASE_SEC = 2
 PRINT_BACKOFF_CAP_SEC = 3600
-# PRINTING 超时回收：locked_at 早于 now - STALE_PRINTING_SEC 视为崩溃残留，复位 PENDING
+# PRINTING 超时回收：locked_at 早于 now - STALE_PRINTING_SEC 视为崩溃残留，复位 RETRYING
 STALE_PRINTING_SEC = 300
 # TEXT 可截断上限（留余量）
 PRINT_CONTENT_MAX_LEN = 60000
@@ -530,8 +530,8 @@ class PrintService:
     ) -> PrintJob:
         """创建或更新 PrintJob 为 PENDING，写入已 sanitize 的 content。
 
-        P1 修复：按 (order_id, ticket_type) 查找现有 PENDING/PRINTING 任务，
-        存在则复用，避免超时重试重复出票。
+        重复触发时复用未完成任务。查询使用行锁，避免并发请求同时创建同订单同票型任务；
+        PRINTING 任务不得被重置为 PENDING，否则会抢占正在执行的打印并导致重复出纸。
         """
         safe = _prepare_job_content(content)
         digest = _content_hash(safe)
@@ -542,11 +542,15 @@ class PrintService:
             # 幂等：复用同订单同票型的未完成打印任务，避免重复出票
             existing = (
                 await db.execute(
-                    select(PrintJob).where(
+                    select(PrintJob)
+                    .where(
                         PrintJob.order_id == int(order_id),
                         PrintJob.ticket_type == ticket_type,
                         PrintJob.status.in_(("PENDING", "PRINTING")),
                     )
+                    .order_by(PrintJob.id.desc())
+                    .limit(1)
+                    .with_for_update()
                 )
             ).scalar_one_or_none()
             if existing is not None:
@@ -564,6 +568,9 @@ class PrintService:
             db.add(job)
             await db.flush()
         else:
+            # 正在打印的任务由当前 owner 持有；重复触发只能复用，不能清锁或重置状态。
+            if job.status == "PRINTING":
+                return job
             job.store_id = int(store_id)
             job.order_id = int(order_id)
             job.ticket_type = ticket_type
@@ -725,6 +732,18 @@ class PrintService:
                 fallback=settings.kitchen_ticket_order_no,
             ),
         )
+        # 以订单行为互斥锁：即使尚无 PrintJob 行，两个并发请求也不能同时创建任务。
+        # 锁只持有到下面 PRINTING 状态提交，不跨越打印机网络调用。
+        locked_order_id = (
+            await db.execute(
+                select(Order.id)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if locked_order_id is None:
+            return None
+
         job = await cls._upsert_pending_job(
             db,
             store_id=int(ctx.order.store_id),
@@ -733,6 +752,16 @@ class PrintService:
             content=content,
             print_job_id=print_job_id,
         )
+        # Outbox/Webhook 重复投递时，若已有打印仍在进行，不得再次调用物理打印机。
+        # 包括显式 print_job_id 的调用；真正超时的 PRINTING 会由 reclaim_stale_printing
+        # 回收，再走 PrintJob 重试队列，而不是由重复事件抢占。
+        if job.status == "PRINTING":
+            return {
+                "code": 0,
+                "msg": "print already in progress; duplicate trigger ignored",
+                "print_job_id": int(job.id),
+                "deduplicated": True,
+            }
         await cls._begin_printing(db, job)
         job_id = int(job.id)
         store_id = int(ctx.order.store_id)
@@ -972,5 +1001,9 @@ class PrintService:
         await db.commit()
         count = int(result.rowcount or 0)
         if count:
-            logger.warning("Reclaimed %s stale PRINTING print jobs", count)
+            logger.critical(
+                "PRINT RESULT UNCERTAIN: reclaimed %s stale PRINTING jobs; printer may already have accepted the ticket. "
+                "Automatic retry can create duplicate kitchen tickets. Inspect printer/output before manual intervention.",
+                count,
+            )
         return count

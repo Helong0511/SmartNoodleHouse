@@ -90,6 +90,13 @@ class PreferenceService:
         """根据顾客近期已付订单重算全部口味偏好（分析 + 修正）。"""
         if not customer_id:
             return
+        customer = await db.get(Customer, customer_id)
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+            # 未明确同意：不构建画像，并清除可能残留的规格偏好。
+            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id))).scalars().all()
+            for pref in stale:
+                await db.delete(pref)
+            return
 
         orders = list(
             (
@@ -220,6 +227,9 @@ class PreferenceService:
         store_id: int | None = None,
         apply_scene: bool = True,
     ) -> dict:
+        customer = await db.get(Customer, customer_id)
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+            return {"preferences": [], "scene": {"enabled": False, "scene_enabled": False, "weather_active": False, "weather_reason": "顾客未授权个性化推荐", "label": None}}
         prefs_result = await db.execute(
             select(CustomerPreference)
             .where(

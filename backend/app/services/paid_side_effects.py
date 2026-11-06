@@ -134,6 +134,48 @@ async def _handle_campaign_attribution(db: AsyncSession, row) -> None:
     await AttributionService.attribute_paid_order(db, int(row.aggregate_id))
 
 
+
+
+@register_outbox_handler("refund", "social_benefit_reverse")
+async def _handle_social_benefit_reverse(db: AsyncSession, row) -> None:
+    """全额退款后冲减公益核销台账。幂等：只转换 PENDING/NORMAL 状态。
+
+    aggregate_id = refund_id；先锁订单以串行化同一订单的退款后处理。
+    """
+    from app.models import Order, PaymentRefund
+    from app.services.social_benefit_service import SocialBenefitService
+
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if not refund:
+        return
+    order = (
+        await db.execute(select(Order).where(Order.id == int(refund.order_id)).with_for_update())
+    ).scalar_one_or_none()
+    if not order:
+        return
+    await SocialBenefitService.reverse_for_order(db, int(order.id))
+
+
+@register_outbox_handler("refund", "campaign_attribution_reverse")
+async def _handle_campaign_attribution_reverse(db: AsyncSession, row) -> None:
+    """全额退款后冲减营销归因。幂等：只转换 ACTIVE 归因，重复执行为 no-op。
+
+    aggregate_id = refund_id；先锁订单以串行化同一订单的退款后处理。
+    """
+    from app.models import Order, PaymentRefund
+    from app.services.attribution_service import AttributionService
+
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if not refund:
+        return
+    order = (
+        await db.execute(select(Order).where(Order.id == int(refund.order_id)).with_for_update())
+    ).scalar_one_or_none()
+    if not order:
+        return
+    await AttributionService.reverse_for_order(db, int(order.id))
+
+
 @register_outbox_handler("refund", "milestone_reclaim")
 async def _handle_milestone_reclaim(db: AsyncSession, row) -> None:
     """全额退款后回收超档里程碑券。幂等：status_reason=milestone_reclaim。"""

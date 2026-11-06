@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable
+import threading
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Awaitable
 
 logger = logging.getLogger(__name__)
 
@@ -40,3 +42,41 @@ def spawn_bg(coro_or_task: Awaitable | asyncio.Task) -> None:
         return
     _BG_TASKS.add(task)
     task.add_done_callback(_BG_TASKS.discard)
+
+
+# Redis 不可用或跨进程锁竞争时的本进程 single-flight 兜底。
+# ref-count 确保并发等待者全部退出后回收锁对象，避免动态 key 导致内存泄漏。
+_SINGLEFLIGHT_GUARD = threading.Lock()
+_SINGLEFLIGHT_LOCKS: dict[str, tuple[asyncio.Lock, int]] = {}
+
+
+@asynccontextmanager
+async def local_singleflight(key: str) -> AsyncIterator[None]:
+    """同一进程同一业务 key 同时只允许一个重建者；不替代跨进程 Redis 锁。"""
+    normalized = str(key or "").strip()
+    if not normalized:
+        raise ValueError("singleflight key is required")
+    with _SINGLEFLIGHT_GUARD:
+        entry = _SINGLEFLIGHT_LOCKS.get(normalized)
+        if entry is None:
+            lock, users = asyncio.Lock(), 1
+        else:
+            lock, users = entry[0], entry[1] + 1
+        _SINGLEFLIGHT_LOCKS[normalized] = (lock, users)
+
+    acquired = False
+    try:
+        await lock.acquire()
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            lock.release()
+        with _SINGLEFLIGHT_GUARD:
+            current = _SINGLEFLIGHT_LOCKS.get(normalized)
+            if current is not None and current[0] is lock:
+                remaining = current[1] - 1
+                if remaining <= 0:
+                    _SINGLEFLIGHT_LOCKS.pop(normalized, None)
+                else:
+                    _SINGLEFLIGHT_LOCKS[normalized] = (lock, remaining)

@@ -1,7 +1,7 @@
 """库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌餐品库存"""
 from __future__ import annotations
 
-from sqlalchemy import select, text, update
+from sqlalchemy import case, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -20,8 +20,9 @@ async def _emit_stock_mirror(
     product_id: int,
     mirror_id: int,
     zero: bool,
+    aggregate_type: str = "delivery_stock",
 ) -> None:
-    """库存跨 0 翻转时发出外卖镜像信号（同事务）。
+    """库存发生变化时发出外卖绝对库存镜像信号（同事务）。
 
     复用 outbox：aggregate 用门店库存行 id（每店每品唯一）。因同一餐品会反复
     售罄/补货，而 outbox 键永久唯一，信号行为 DONE 时将其复活为 PENDING；
@@ -30,25 +31,31 @@ async def _emit_stock_mirror(
     payload = {"store_id": store_id, "product_id": product_id, "zero": zero}
     _, is_new = await enqueue_outbox(
         db,
-        aggregate_type="delivery_stock",
+        aggregate_type=aggregate_type,
         aggregate_id=int(mirror_id),
         event_kind="mirror",
         payload=payload,
     )
     if not is_new:
+        # 正在处理的事件绝不能被新库存变化抢占/清锁，否则新旧 Worker 会并发
+        # 向平台发送 HTTP，旧请求可能最后完成并覆盖较新的库存。
+        # PROCESSING 保持原 owner 和租约，只递增版本；旧 Worker 完成时检测版本变化
+        # 并将同一行重新排队。非处理中事件则正常复活并清理旧重试状态。
+        processing = OutboxEvent.status == "PROCESSING"
         await db.execute(
             update(OutboxEvent)
             .where(
-                OutboxEvent.aggregate_type == "delivery_stock",
+                OutboxEvent.aggregate_type == aggregate_type,
                 OutboxEvent.aggregate_id == int(mirror_id),
                 OutboxEvent.event_kind == "mirror",
             )
             .values(
-                status="PENDING",
-                attempt_count=0,
-                next_retry_at=None,
-                locked_at=None,
-                locked_by=None,
+                sync_version=OutboxEvent.sync_version + 1,
+                status=case((processing, OutboxEvent.status), else_="PENDING"),
+                attempt_count=case((processing, OutboxEvent.attempt_count), else_=0),
+                next_retry_at=case((processing, OutboxEvent.next_retry_at), else_=None),
+                locked_at=case((processing, OutboxEvent.locked_at), else_=None),
+                locked_by=case((processing, OutboxEvent.locked_by), else_=None),
                 last_error=None,
                 payload=dumps_json(payload),
             )
@@ -117,7 +124,7 @@ async def deduct_stock(
             )
             if result.rowcount != 1:
                 raise AppException(40031, f"本店库存不足或餐品不可售: {product_id}")
-            # 扣减成功时扣前必 >0（条件 UPDATE 保证）；若扣后归 0 即 >0→0 售罄翻转
+            # 每次库存变化都写入同一幂等 outbox 行；handler 重读最新值并覆盖平台库存。
             after = (
                 await db.execute(
                     text(
@@ -127,10 +134,13 @@ async def deduct_stock(
                     {"sid": store_id, "pid": product_id},
                 )
             ).scalar()
-            if int(after or 0) == 0:
-                await _emit_stock_mirror(
-                    db, store_id=store_id, product_id=product_id, mirror_id=row.id, zero=True
-                )
+            await _emit_stock_mirror(
+                db,
+                store_id=store_id,
+                product_id=product_id,
+                mirror_id=row.id,
+                zero=int(after or 0) == 0,
+            )
             # 销量仍记在品牌餐品上
             await db.execute(
                 text(
@@ -165,6 +175,17 @@ async def deduct_stock(
     )
     if result.rowcount != 1:
         raise AppException(40031, f"库存不足或餐品不可售: {product_id}")
+    if store_id:
+        # 没有 StoreProductStock 覆盖行时，库存存于 products.stock；
+        # 使用独立 aggregate_type，避免与覆盖行 ID 发生唯一键碰撞。
+        await _emit_stock_mirror(
+            db,
+            store_id=int(store_id),
+            product_id=int(product_id),
+            mirror_id=int(product_id),
+            zero=False,
+            aggregate_type="delivery_stock_base",
+        )
 
 
 async def restore_stock(
@@ -188,7 +209,6 @@ async def restore_stock(
             return
         row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
-            was_zero = int(row.stock or 0) == 0
             await db.execute(
                 text(
                     """
@@ -202,11 +222,14 @@ async def restore_stock(
                 ),
                 {"sid": store_id, "pid": product_id, "qty": qty, "unlimited": UNLIMITED_STOCK},
             )
-            # 回库前为 0、回库后必 >0（qty>0）：0→>0 恢复营业，镜像解除售罄
-            if was_zero:
-                await _emit_stock_mirror(
-                    db, store_id=store_id, product_id=product_id, mirror_id=row.id, zero=False
-                )
+            # 每次回库都镜像当前绝对库存；handler 会合并高频变化并重读最新值。
+            await _emit_stock_mirror(
+                db,
+                store_id=store_id,
+                product_id=product_id,
+                mirror_id=row.id,
+                zero=False,
+            )
             await db.execute(
                 text(
                     "UPDATE products SET sales_count = GREATEST(0, sales_count - :qty) "
@@ -216,7 +239,7 @@ async def restore_stock(
             )
             return
 
-    await db.execute(
+    result = await db.execute(
         text(
             """
             UPDATE products
@@ -236,6 +259,15 @@ async def restore_stock(
             "sid": int(store_id) if store_id else None,
         },
     )
+    if store_id and result.rowcount == 1:
+        await _emit_stock_mirror(
+            db,
+            store_id=int(store_id),
+            product_id=int(product_id),
+            mirror_id=int(product_id),
+            zero=False,
+            aggregate_type="delivery_stock_base",
+        )
 
 
 async def deduct_for_order_items(

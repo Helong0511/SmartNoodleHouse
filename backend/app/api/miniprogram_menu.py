@@ -18,8 +18,9 @@ from app.services.feedback_service import EVALUABLE_PAYMENT_STATUSES, FeedbackSe
 from app.services.reco_cache import (
     get_cached_reco,
     maintain_reco_lock,
+    get_reco_generation,
     release_reco_lock,
-    set_cached_reco,
+    set_cached_reco_if_owner,
     try_acquire_reco_lock,
     wait_for_reco,
 )
@@ -53,7 +54,7 @@ async def get_menu_bundle_api(
 
     先经 get_or_build 校验当前分类时段方案；跨时段会 bump version。
     客户端 version 与当前一致时返回 changed:false；否则返回完整 bundle。
-    Redis 不可用时降级为每次查库。
+    Redis 缓存协调不可用且无本地可用缓存时返回可重试 503，避免并发回源。
     限时/生日菜在返回前按今日与顾客生日过滤。
     """
     if not store_id:
@@ -120,6 +121,11 @@ async def get_menu_bundle_api(
 _RECO_SCENES = {"recommend_menu", "settle_addon"}
 
 
+def _reco_cache_fingerprint(fingerprint: str, limit: int) -> str:
+    """缓存身份必须包含所有影响推荐响应内容的参数。"""
+    return f"{fingerprint}:limit={int(limit)}"
+
+
 def _serialize_reco(ranked, state, meta, ab_bucket, ab_status=None):
     items = []
     for r in ranked:
@@ -179,6 +185,8 @@ async def get_recommendations(
     ab_status = None
     weight_override = None
     fingerprint = cart_fingerprint(exclude_ids) if scene == "settle_addon" else ""
+    # limit 会改变排序截断结果，必须参与缓存隔离，避免 5 条请求污染 20 条请求。
+    cache_fingerprint = _reco_cache_fingerprint(fingerprint, limit)
     cid = customer.id if customer else None
 
     if cid is not None:
@@ -187,16 +195,23 @@ async def get_recommendations(
             ab_status = ab_exp.status
         weight_override = (ab_params or {}).get("reco_weights")
 
-    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint, limit)
+    reco_generation = await get_reco_generation(cid)
+    cached = await get_cached_reco(
+        cid, store_id, scene, ab_bucket, cache_fingerprint, generation=reco_generation
+    )
     if cached is not None:
         return success(cached, request=request)
 
-    # 互斥重建：避免缓存击穿时多请求同时 recommend 压垮 DB
-    lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint, limit)
-    if not lock_token:
-        waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3, limit)
-        if waited is not None:
-            return success(waited, request=request)
+    # Redis 锁负责跨进程协调；本地 single-flight 在 Redis 故障时限制同 worker 并发重算。
+    from app.core.async_utils import local_singleflight
+
+    flight_key = f"reco:{cid or 0}:{store_id}:{scene}:{ab_bucket}:{cache_fingerprint}"
+    async with local_singleflight(flight_key):
+        # 等待本地前一个请求期间，先重新检查 Redis 缓存，避免重复计算。
+        # 本地排队期间顾客画像/授权可能已变化，必须重新读取代际。
+        reco_generation = await get_reco_generation(cid)
+        cached_after_wait = await get_cached_reco(
+            cid, store_id, scene, ab_bucket, cache_fingerprint, generation=reco_generation
         # 等待后重新竞争一次，避免锁刚释放时所有 waiter 同时进入重建。
         lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint, limit)
 
@@ -220,12 +235,48 @@ async def get_recommendations(
             exclude_ids=exclude_ids,
             weight_override=weight_override,
         )
-        payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
-        await set_cached_reco(
-            cid, store_id, scene, ab_bucket, payload, fingerprint, owner_token=lock_token, limit=limit
+        if cached_after_wait is not None:
+            return success(cached_after_wait, request=request)
+
+        lock_token = await try_acquire_reco_lock(
+            cid, store_id, scene, ab_bucket, cache_fingerprint, generation=reco_generation
         )
-        payload["cache_hit"] = False
-    finally:
+        lock_ok = lock_token is not None
+        if not lock_ok:
+            waited = await wait_for_reco(
+                cid, store_id, scene, ab_bucket, cache_fingerprint, 2.0,
+            )
+            if waited is not None:
+                return success(waited, request=request)
+            # Redis 锁竞争/不可用且短缓存未命中时，不允许所有 worker 同时重算。
+            # 返回可重试错误，保护推荐查询背后的订单/行为画像查询链路。
+            raise AppException(
+                50301,
+                "推荐服务正在刷新或缓存协调服务暂不可用，请稍后重试",
+                status_code=503,
+            )
+        try:
+            ranked, state, meta = await RecommendationService.recommend(
+                db,
+                store_id,
+                customer_id=cid,
+                scene=scene,
+                limit=limit,
+                exclude_ids=exclude_ids,
+                weight_override=weight_override,
+            )
+            payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
+            await set_cached_reco_if_owner(
+                cid, store_id, scene, ab_bucket, payload, cache_fingerprint, lock_token,
+                expected_generation=reco_generation,
+            )
+            payload["cache_hit"] = False
+        finally:
+            if lock_ok:
+                await release_reco_lock(
+                    cid, store_id, scene, ab_bucket, cache_fingerprint,
+                    token=lock_token, generation=reco_generation,
+                )
         if heartbeat_task is not None:
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)

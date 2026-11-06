@@ -2,7 +2,7 @@ import asyncio
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from jose import JWTError
+from jwt.exceptions import InvalidTokenError as JWTError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 

@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError as JWTError
 
 from app.core.exceptions import AppException
 from app.core.security import (
@@ -24,7 +25,7 @@ from app.services.store_scope import assert_store_access
 
 def _jwt_settings(**over):
     base = dict(
-        jwt_secret="s" * 48,
+        jwt_secret="s" * 64,
         jwt_algorithm="HS256",
         jwt_expire_minutes=60,
         customer_jwt_expire_minutes=120,
@@ -427,8 +428,12 @@ def test_prod_startup_rejects_payment_mock():
 async def test_balance_restore_for_refund_is_idempotent_by_refund_id():
     from app.services.balance_service import BalanceService
 
-    existing = SimpleNamespace(id=1, entry_type="REFUND_RESTORE")
+    existing = SimpleNamespace(
+        id=1, entry_type="REFUND_RESTORE", customer_id=1, order_id=2,
+        store_id=1, delta_principal=Decimal("5.00"), delta_gift=Decimal("0.00"),
+    )
     first = MagicMock()
+    first.scalar_one = MagicMock(return_value=SimpleNamespace(id=1))
     first.scalar_one_or_none = MagicMock(return_value=existing)
     db = AsyncMock()
     db.execute = AsyncMock(return_value=first)
@@ -442,3 +447,40 @@ async def test_balance_restore_for_refund_is_idempotent_by_refund_id():
         store_id=1,
     )
     assert out is existing
+
+
+def test_jwt_decoder_rejects_unconfigured_signature_algorithm():
+    settings = _jwt_settings(jwt_algorithm="HS256")
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": "1",
+        "exp": now + timedelta(minutes=5),
+        "iat": now,
+        "nbf": now,
+        "iss": settings.app_name,
+        "aud": settings.jwt_audience,
+        "typ": "staff",
+        "ver": 0,
+    }
+    # 不能根据 token 自带的 alg 放宽验证；服务端只接受配置的 HS256。
+    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS512")
+    with patch("app.core.security.get_settings", return_value=settings):
+        with pytest.raises(JWTError):
+            decode_token(token)
+
+
+def test_jwt_decoder_requires_all_security_critical_claims():
+    settings = _jwt_settings()
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "iss": settings.app_name,
+            "aud": settings.jwt_audience,
+        },
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    with patch("app.core.security.get_settings", return_value=settings):
+        with pytest.raises(JWTError):
+            decode_token(token)

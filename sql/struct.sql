@@ -5,7 +5,6 @@ CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4
 -- 切换数据库
 USE `smart_noodle_house`;
 -- 部署前必须将 REPLACE_WITH_STRONG_DB_PASSWORD 替换为强密码；禁止把真实数据库密码提交到版本库。noodle_house`.* TO 'remote' @'localhost';
-FLUSH PRIVILEGES;
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 0;
 -- BEGIN CANONICAL SCHEMA
@@ -413,7 +412,7 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `registered_store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '会员激活时门店 → stores.id；只记第一次',
   `registered_table_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '会员激活时桌台 → tables.id；只记第一次',
   `last_order_at` datetime(3) NULL DEFAULT NULL COMMENT '最近下单时间',
-  `recommend_opt_in` int NOT NULL DEFAULT 1 COMMENT '个性化推荐开关：1=开启（默认） 0=关闭（退回非个性化热销榜，不采集行为）',
+  `recommend_opt_in` int NOT NULL DEFAULT 0 COMMENT '个性化推荐开关：默认关闭；顾客明确同意后开启',
   `consent_version` varchar(40) NULL DEFAULT NULL COMMENT '个性化推荐同意的隐私政策版本（版本化留痕，PIPL 合规）',
   `recommend_consent_at` datetime(3) NULL DEFAULT NULL COMMENT '个性化推荐同意时间',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次建档时间（游客即可）',
@@ -521,6 +520,7 @@ CREATE TABLE IF NOT EXISTS `delivery_refunds` (
   `order_id` bigint UNSIGNED NOT NULL COMMENT '统一订单 → orders.id',
   `platform` varchar(20) NOT NULL COMMENT 'MEITUAN | ELEME',
   `platform_refund_id` varchar(64) NULL DEFAULT NULL COMMENT '平台退款单号',
+  `event_fingerprint` varchar(64) NULL DEFAULT NULL COMMENT '无平台退款编号时的规范化事件指纹',
   `refund_type` varchar(30) NOT NULL DEFAULT 'FULL' COMMENT 'FULL=全额 | PARTIAL=部分',
   `amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '退款金额',
   `reason` varchar(500) NULL DEFAULT NULL COMMENT '退款原因',
@@ -530,6 +530,7 @@ CREATE TABLE IF NOT EXISTS `delivery_refunds` (
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_dr_platform_refund`(`platform` ASC, `platform_refund_id` ASC) USING BTREE,
+  UNIQUE INDEX `uq_delivery_refund_event_fingerprint`(`platform` ASC, `event_fingerprint` ASC) USING BTREE,
   INDEX `idx_dr_order`(`order_id` ASC) USING BTREE,
   INDEX `fk_dr_do`(`delivery_order_id` ASC) USING BTREE,
   CONSTRAINT `fk_dr_do` FOREIGN KEY (`delivery_order_id`) REFERENCES `delivery_orders` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
@@ -909,6 +910,7 @@ CREATE TABLE IF NOT EXISTS `outbox_events` (
   `aggregate_id` bigint UNSIGNED NOT NULL COMMENT '聚合 ID（refund_id / order_id / ...）',
   `event_kind` varchar(64) NOT NULL COMMENT '事件类型：refund_finalize / points_award / coupon_mark_used / pref_update / points_deduct_refund / pref_recompute',
   `payload` mediumtext NULL COMMENT 'JSON 负载（参数快照）',
+  `sync_version` int NOT NULL DEFAULT 0 COMMENT '库存镜像同步版本',
   `status` varchar(16) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / PROCESSING / DONE / FAILED',
   `attempt_count` int NOT NULL DEFAULT 0 COMMENT '消费尝试次数',
   `max_attempts` int NOT NULL DEFAULT 8 COMMENT '最大重试次数',
@@ -1779,6 +1781,7 @@ CREATE TABLE IF NOT EXISTS `customer_segments` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店；NULL=总部',
   `code` varchar(64) NOT NULL COMMENT '业务键',
+
   `name` varchar(100) NOT NULL COMMENT '分群名称',
   `segment_type` varchar(20) NOT NULL DEFAULT 'DYNAMIC' COMMENT 'STATIC/DYNAMIC',
   `rules_json` json NULL COMMENT '条件树',
@@ -1814,6 +1817,7 @@ CREATE TABLE IF NOT EXISTS `marketing_campaigns` (
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店；NULL=总部',
   `code` varchar(64) NOT NULL COMMENT '业务键',
   `code_key` varchar(96) NULL DEFAULT NULL COMMENT 'HQ:CODE 或 store_id:CODE（跨库唯一）',
+  `code_key` varchar(96) NULL DEFAULT NULL COMMENT 'HQ:{CODE} 或 {store_id}:{CODE}，跨库唯一',
   `name` varchar(100) NOT NULL COMMENT '活动名',
   `campaign_type` varchar(30) NOT NULL DEFAULT 'MEMBER_DAY' COMMENT 'FESTIVAL/MEMBER_DAY/TIME_SLOT/SOCIAL/...',
   `status` varchar(20) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/SCHEDULED/RUNNING/PAUSED/ENDED/CANCELLED',
@@ -2070,6 +2074,104 @@ CREATE TABLE IF NOT EXISTS `archived_order_snapshots` (
   INDEX `idx_aos_store_created`(`store_id` ASC, `original_created_at` ASC) USING BTREE,
   INDEX `idx_aos_archived_at`(`archived_at` ASC) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '历史订单冷库快照' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for leader_fencing_state
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `leader_fencing_state` (
+  `id` int NOT NULL COMMENT '单例主键',
+  `epoch` bigint NOT NULL DEFAULT 0 COMMENT '数据库 fencing epoch',
+  `owner_id` varchar(64) NULL DEFAULT NULL COMMENT '当前 leader owner token',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'Leader fencing 状态' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_campaign_stores
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_campaign_stores` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '营销活动',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '参与范围门店',
+  `included` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否纳入活动',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mcs_camp_store`(`campaign_id` ASC, `store_id` ASC) USING BTREE,
+  INDEX `idx_mcs_store`(`store_id` ASC, `campaign_id` ASC) USING BTREE,
+  CONSTRAINT `fk_mcs_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mcs_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '营销活动参与门店范围' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_flash_sales
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_flash_sales` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '关联营销活动',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '抢购商品',
+  `per_customer_limit` int NOT NULL DEFAULT 1 COMMENT '每位顾客限购数量',
+  `claim_valid_minutes` int NOT NULL DEFAULT 30 COMMENT '抢购资格有效分钟数',
+  `verify_deadline_at` datetime(3) NULL DEFAULT NULL COMMENT '核销截止时间',
+  `notice` varchar(200) NULL DEFAULT NULL COMMENT '活动提示',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mfs_campaign`(`campaign_id` ASC) USING BTREE,
+  CONSTRAINT `fk_mfs_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mfs_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '限量抢购配置' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_flash_sale_stocks
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_flash_sale_stocks` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '营销活动',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '门店',
+  `product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店专属抢购商品',
+  `total_quantity` int NOT NULL DEFAULT 0 COMMENT '总库存',
+  `remaining_quantity` int NOT NULL DEFAULT 0 COMMENT '剩余库存',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mfss_camp_store`(`campaign_id` ASC, `store_id` ASC) USING BTREE,
+  INDEX `idx_mfss_store`(`store_id` ASC, `campaign_id` ASC) USING BTREE,
+  INDEX `ix_mfss_product`(`product_id` ASC) USING BTREE,
+  CONSTRAINT `fk_mfss_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mfss_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mfss_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '抢购门店库存' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_flash_sale_claims
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '营销活动',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '参与门店',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客',
+  `unit_no` int NOT NULL DEFAULT 1 COMMENT '每人第几份资格',
+  `claim_no` varchar(40) NOT NULL COMMENT '抢购资格编号',
+  `status` varchar(20) NOT NULL DEFAULT 'CLAIMED' COMMENT 'CLAIMED/USED/EXPIRED/CANCELLED',
+  `claimed_at` datetime(3) NOT NULL COMMENT '领取时间',
+  `expires_at` datetime(3) NOT NULL COMMENT '资格过期时间',
+  `verify_deadline_at` datetime(3) NULL DEFAULT NULL COMMENT '核销截止时间',
+  `order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '核销订单',
+  `verified_at` datetime(3) NULL DEFAULT NULL COMMENT '核销时间',
+  `verified_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '核销操作人',
+  `client_request_id` varchar(64) NULL DEFAULT NULL COMMENT '客户端幂等请求号',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mfsc_cust_unit`(`campaign_id` ASC, `customer_id` ASC, `unit_no` ASC) USING BTREE,
+  UNIQUE INDEX `uk_mfsc_no`(`claim_no` ASC) USING BTREE,
+  UNIQUE INDEX `uk_mfsc_req`(`client_request_id` ASC) USING BTREE,
+  INDEX `idx_mfsc_customer_status`(`customer_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_mfsc_status_expire`(`status` ASC, `expires_at` ASC) USING BTREE,
+  INDEX `idx_mfsc_campaign_store`(`campaign_id` ASC, `store_id` ASC, `status` ASC) USING BTREE,
+  CONSTRAINT `fk_mfsc_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mfsc_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mfsc_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mfsc_verified_by` FOREIGN KEY (`verified_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '限量抢购资格' ROW_FORMAT = Dynamic;
+
 -- END CANONICAL SCHEMA
 SET FOREIGN_KEY_CHECKS = 1;
 

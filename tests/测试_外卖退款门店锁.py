@@ -98,3 +98,61 @@ async def test_cancel_by_merchant_http_after_commit():
     db.commit.assert_awaited()
     mock_provider.cancel_order.assert_awaited_once()
     apply.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_refund_recovers_ledger_without_calling_provider():
+    """平台已退但本地账本失败时，重试只补账，不再次调用外卖平台。"""
+    refund = SimpleNamespace(
+        id=31, order_id=91, delivery_order_id=41, platform="MEITUAN",
+        platform_refund_id="platform-rf-1", amount=12, refund_type="PARTIAL",
+        status="APPROVED_LEDGER_PENDING", handled_at=None,
+    )
+    d_order = SimpleNamespace(id=41, order_id=91, refund_status="APPROVED_LEDGER_PENDING")
+    order = SimpleNamespace(id=91, store_id=7, channel="MEITUAN")
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
+    db.get = AsyncMock(side_effect=[d_order, order])
+    db.commit = AsyncMock()
+
+    with patch(
+        "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
+        new=AsyncMock(return_value=SimpleNamespace(id=101)),
+    ) as record, patch(
+        "app.services.delivery_service.get_delivery_provider"
+    ) as provider_factory:
+        result = await DeliveryService.process_refund(db, 31, approve=True)
+
+    assert result["status"] == "APPROVED"
+    assert result["ledger_recovered"] is True
+    assert refund.status == "APPROVED"
+    assert d_order.refund_status == "APPROVED"
+    record.assert_awaited_once()
+    provider_factory.assert_not_called()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state():
+    refund = SimpleNamespace(
+        id=32, order_id=92, delivery_order_id=42, platform="ELEME",
+        platform_refund_id="platform-rf-2", amount=8, refund_type="PARTIAL",
+        status="APPROVED_LEDGER_PENDING", handled_at=None,
+    )
+    d_order = SimpleNamespace(id=42, order_id=92, refund_status="APPROVED_LEDGER_PENDING")
+    order = SimpleNamespace(id=92, store_id=8, channel="ELEME")
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
+    db.get = AsyncMock(side_effect=[d_order, order])
+    db.rollback = AsyncMock()
+
+    with patch(
+        "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
+        new=AsyncMock(side_effect=RuntimeError("database unavailable")),
+    ), pytest.raises(AppException) as ei:
+        await DeliveryService.process_refund(db, 32, approve=True)
+
+    assert ei.value.code == 50354
+    assert refund.status == "APPROVED_LEDGER_PENDING"
+    assert d_order.refund_status == "APPROVED_LEDGER_PENDING"
+    db.rollback.assert_awaited_once()

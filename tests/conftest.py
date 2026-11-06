@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import BigInteger, Integer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool, StaticPool
 
 # 添加 backend 到 path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -21,8 +22,12 @@ from app.services.order_service import OrderPriceCalculator
 # 默认内存 SQLite；CI MySQL job 通过 TEST_DATABASE_URL 注入
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# 测试中的 pytest-asyncio fixture 使用函数级事件循环；禁用连接池，避免
+# AsyncEngine 把前一个 loop 创建的 aiomysql/aiosqlite 连接复用到下一个 loop。
+# 每个测试各自创建/销毁 Engine，避免连接跨 pytest event loop 复用。
+# SQLite 内存库必须使用 StaticPool 保持同一连接/数据库；MySQL 使用 NullPool，
+# 每次借用都新建连接，避免 aiomysql Future 绑定到前一个事件循环。
+_TEST_POOL_CLASS = StaticPool if TEST_DATABASE_URL.startswith("sqlite") else NullPool
 
 
 def _make_sqlite_pk_autoincrement():
@@ -55,7 +60,7 @@ def _make_sqlite_pk_autoincrement():
 _make_sqlite_pk_autoincrement()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
@@ -64,12 +69,21 @@ def event_loop():
 
 @pytest_asyncio.fixture
 async def db_session():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with TestSessionLocal() as session:
-        yield session
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    engine = create_async_engine(
+        TEST_DATABASE_URL, echo=False, poolclass=_TEST_POOL_CLASS
+    )
+    test_session_local = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with test_session_local() as session:
+            yield session
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+    finally:
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -89,9 +103,13 @@ def _isolate_system_settings_cache(monkeypatch):
     """
     from app.services.system_settings_service import SystemSettingsService
 
-    async def _touch_cache_test(db=None):
+    original_touch_cache = SystemSettingsService.touch_cache.__func__
+
+    async def _touch_cache_test(cls, db=None):
+        # 测试不提供 Session 时禁止连接真实数据库；提供 Session 时必须走生产
+        # single-flight 实现，避免测试桩绕过锁而掩盖并发回源问题。
         if db is not None:
-            await SystemSettingsService._load_raw(db)
+            await original_touch_cache(cls, db)
 
     monkeypatch.setattr(SystemSettingsService, "touch_cache", classmethod(_touch_cache_test))
     SystemSettingsService.invalidate_cache_local()

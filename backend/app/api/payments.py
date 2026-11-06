@@ -1,6 +1,7 @@
+import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
@@ -20,6 +21,8 @@ from app.services.store_scope import assert_order_store_access, require_bound_st
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/payments", tags=["支付"])
+
+logger = logging.getLogger(__name__)
 
 
 class RefundCreate(BaseModel):
@@ -432,6 +435,7 @@ async def refund_payment(
     request: Request,
     db: DbSession,
     user: CurrentUser,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=64),
 ):
     """管理端直接退款（仅店长/超管）。
 
@@ -451,33 +455,43 @@ async def refund_payment(
     if (order.channel or "").upper() == "POS" and user.role.code not in ("SUPER_ADMIN", "STORE_ADMIN"):
         raise AppException(40301, "收银渠道订单请走退款审批（店长/管理员执行）")
     assert_order_store_access(user, order)
-    row = await PaymentService.refund(db, payment, data.amount, data.reason, operator_id=user.id)
-    from app.services.audit_service import AuditService
-
-    await AuditService.log_refund(
+    row = await PaymentService.refund(
         db,
-        user_id=user.id,
-        refund_no=row.refund_no,
-        payment_no=payment.payment_no,
-        amount=row.amount,
-        reason=data.reason,
-        request=request,
-        extra={"order_id": order.id, "status": row.status},
-        store_id=order.store_id,
+        payment,
+        data.amount,
+        data.reason,
+        operator_id=user.id,
+        idempotency_key=idempotency_key,
     )
-    if row.status == "SUCCESS":
-        await db.commit()
-        await ws_manager.notify_order_event(
-            "ORDER_REFUNDED",
-            {
-                "order_id": order.id,
-                "order_no": order.order_no,
-                "payment_no": payment.payment_no,
-                "refund_no": row.refund_no,
-                "amount": str(row.amount),
-                "store_id": order.store_id,
-            },
+    # 幂等重放只返回原退款状态；不得重复写审计记录或重复广播成功事件。
+    is_replay = bool(getattr(row, "_idempotent_replay", False))
+    if not is_replay:
+        from app.services.audit_service import AuditService
+
+        await AuditService.log_refund(
+            db,
+            user_id=user.id,
+            refund_no=row.refund_no,
+            payment_no=payment.payment_no,
+            amount=row.amount,
+            reason=data.reason,
+            request=request,
+            extra={"order_id": order.id, "status": row.status},
+            store_id=order.store_id,
         )
+        if row.status == "SUCCESS":
+            await db.commit()
+            await ws_manager.notify_order_event(
+                "ORDER_REFUNDED",
+                {
+                    "order_id": order.id,
+                    "order_no": order.order_no,
+                    "payment_no": payment.payment_no,
+                    "refund_no": row.refund_no,
+                    "amount": str(row.amount),
+                    "store_id": order.store_id,
+                },
+            )
     return success(
         {
             "refund_no": row.refund_no,
@@ -486,8 +500,8 @@ async def refund_payment(
             "message": (
                 "退款成功"
                 if row.status == "SUCCESS"
-                else "退款已受理，等待平台确认"
-                if row.status in ("PENDING", "PROCESSING", "UNKNOWN")
+                else ("退款异常，需在支付平台处理后重新查询" if row.status == "ABNORMAL" else "退款已受理，等待平台确认")
+                if row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")
                 else f"退款状态: {row.status}"
             ),
         },
@@ -533,16 +547,20 @@ async def _notify_paid_or_refunded(db: DbSession, result, *, transitioned: bool 
     ):
         order = await db.get(Order, result.order_id)
         if order:
-            await ws_manager.notify_order_event(
-                "ORDER_REFUNDED",
-                {
-                    "order_id": order.id,
-                    "order_no": order.order_no,
-                    "refund_no": result.refund_no,
-                    "amount": str(result.amount),
-                    "store_id": order.store_id,
-                },
-            )
+            try:
+                await ws_manager.notify_order_event(
+                    "ORDER_REFUNDED",
+                    {
+                        "order_id": order.id,
+                        "order_no": order.order_no,
+                        "refund_no": result.refund_no,
+                        "amount": str(result.amount),
+                        "store_id": order.store_id,
+                    },
+                )
+            except Exception:
+                # 数据库已提交；WebSocket 是可重取的实时提示，不能因此让支付平台重试已入账回调。
+                logger.exception("退款回调已提交，但 WebSocket 通知失败 order_id=%s", order.id)
     elif (
         isinstance(result, Payment)
         and result.status == "PAID"
@@ -550,10 +568,13 @@ async def _notify_paid_or_refunded(db: DbSession, result, *, transitioned: bool 
     ):
         order = await db.get(Order, result.order_id)
         if order:
-            await ws_manager.notify_order_event(
-                "ORDER_PAID",
-                {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
-            )
+            try:
+                await ws_manager.notify_order_event(
+                    "ORDER_PAID",
+                    {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
+                )
+            except Exception:
+                logger.exception("支付回调已提交，但 WebSocket 通知失败 order_id=%s", order.id)
 
 
 @router.post("/wechat/notify")
@@ -562,6 +583,8 @@ async def wechat_notify(request: Request, db: DbSession):
     body = await request.body()
     headers = dict(request.headers)
     result = await PaymentService.handle_callback(db, "WECHAT", headers, body)
+    # FastAPI yield 依赖默认在响应发送后执行；Webhook 必须先提交事实数据，再向微信 ACK。
+    await db.commit()
     await _notify_paid_or_refunded(db, result)
     return {"code": "SUCCESS", "message": "成功"}
 
@@ -578,6 +601,8 @@ async def alipay_notify(request: Request, db: DbSession):
     body = await request.body()
     headers = dict(request.headers)
     result = await PaymentService.handle_callback(db, "ALIPAY", headers, body)
+    # 必须在返回支付宝 success 前提交，避免平台停止重试而本地事务随后回滚。
+    await db.commit()
     await _notify_paid_or_refunded(db, result)
     return "success"
 
@@ -684,7 +709,7 @@ async def list_payments(
             select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
             .where(
                 PaymentRefund.payment_id.in_(ids),
-                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
             )
             .group_by(PaymentRefund.payment_id)
         )

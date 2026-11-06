@@ -56,7 +56,12 @@ async def search_pos_customers(
     if sid is None:
         raise AppException(40008, "请选择门店")
     rows, _total = await CustomerService.search_active_customers(
-        db, keyword, page=1, page_size=page_size, store_id=int(sid)
+        db,
+        keyword,
+        page=1,
+        page_size=page_size,
+        store_id=int(sid),
+        allow_global_exact_phone_fallback=True,
     )
     items = [
         {

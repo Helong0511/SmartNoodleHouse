@@ -44,9 +44,17 @@ async def test_record_sale_and_refund_writes_ledger():
     db.flush.assert_awaited()
 
     # 幂等：已有同 payment_id 的 SALE
-    existing = MagicMock()
+    existing = FinancialLedger(
+        store_id=1,
+        entry_type="SALE",
+        channel="WECHAT",
+        provider="WECHAT",
+        amount=Decimal("100.00"),
+        currency="CNY",
+        order_id=10,
+        payment_id=101,
+    )
     existing.id = 9
-    existing.entry_type = "SALE"
     hit = MagicMock()
     hit.scalar_one_or_none.return_value = existing
     db.execute = AsyncMock(return_value=hit)
@@ -128,3 +136,39 @@ async def test_ledger_net_revenue_can_be_negative(db_session):
     assert refunded == Decimal("80.00")
     assert net == Decimal("-30.00")
     assert net < 0  # 负净收入不被强制为 0
+
+
+
+@pytest.mark.asyncio
+async def test_financial_ledger_idempotency_rejects_changed_amount():
+    from app.core.exceptions import AppException
+
+    existing = FinancialLedger(
+        store_id=1,
+        entry_type="SALE",
+        channel="WECHAT",
+        provider="WECHAT",
+        amount=Decimal("100.00"),
+        currency="CNY",
+        order_id=10,
+        payment_id=101,
+    )
+    hit = MagicMock()
+    hit.scalar_one_or_none.return_value = existing
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=hit)
+    db.add = MagicMock()
+
+    with pytest.raises(AppException) as exc:
+        await FinancialLedgerService.record_sale(
+            db,
+            store_id=1,
+            amount=Decimal("99.00"),
+            channel="WECHAT",
+            provider="WECHAT",
+            order_id=10,
+            payment_id=101,
+        )
+
+    assert exc.value.code == 40996
+    db.add.assert_not_called()

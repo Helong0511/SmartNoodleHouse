@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.models import (
     DeliveryProductMap,
     PlatformStoreBinding,
+    Product,
     StoreProductStock,
 )
 from app.services.delivery_context import get_credentials_for_store
@@ -28,37 +29,53 @@ _PLATFORM_UNLIMITED = 9999
 
 
 async def _collect_stock_push_jobs(
-    db, store_id: int, product_id: int
-) -> list[tuple[str, Any, list[dict]]]:
-    """只读本地库存与映射，拼出平台推送任务（不含 HTTP）。"""
+    db, store_id: int, product_id: int, *, platform_filter: str | None = None
+) -> list[tuple[str, Any, list[dict], bool]]:
+    """读取本地库存与映射；可限定平台，以便每次推送前刷新快照。"""
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.id == product_id,
+                Product.store_id == store_id,
+            ).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if product is None:
+        logger.info("库存镜像跳过：餐品不属于门店 store=%s product=%s", store_id, product_id)
+        return []
+
     row = (
         await db.execute(
             select(StoreProductStock).where(
                 StoreProductStock.store_id == store_id,
                 StoreProductStock.product_id == product_id,
-            )
+            ).execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
+    # 商品主档停售具有最高优先级；门店库存覆盖不能把总部/主档已下架商品重新上架。
     if row is None:
-        logger.info("库存镜像跳过：门店库存行不存在 store=%s product=%s", store_id, product_id)
-        return []
-
-    if int(row.status) == 1:
-        s = int(row.stock or 0)
-        target = _PLATFORM_UNLIMITED if s >= UNLIMITED_STOCK else s
+        s = int(product.stock or 0)
+        on_shelf = product.status == "ON_SALE"
     else:
-        target = 0  # 门店停售 = 平台售罄
+        s = int(row.stock or 0)
+        on_shelf = int(row.status) == 1 and product.status == "ON_SALE"
+    target = (
+        _PLATFORM_UNLIMITED
+        if on_shelf and s >= UNLIMITED_STOCK
+        else max(0, s) if on_shelf else 0
+    )
 
     bindings = (
         await db.execute(
             select(PlatformStoreBinding).where(
                 PlatformStoreBinding.store_id == store_id,
                 PlatformStoreBinding.status == 1,
-            )
+                *([PlatformStoreBinding.platform == platform_filter] if platform_filter else []),
+            ).execution_options(populate_existing=True)
         )
     ).scalars().all()
 
-    jobs: list[tuple[str, Any, list[dict]]] = []
+    jobs: list[tuple[str, Any, list[dict], bool]] = []
     for binding in bindings:
         maps = (
             await db.execute(
@@ -67,7 +84,7 @@ async def _collect_stock_push_jobs(
                     DeliveryProductMap.platform == binding.platform,
                     DeliveryProductMap.product_id == product_id,
                     DeliveryProductMap.status == 1,
-                )
+                ).execution_options(populate_existing=True)
             )
         ).scalars().all()
         if not maps:
@@ -81,38 +98,50 @@ async def _collect_stock_push_jobs(
             for m in maps
         ]
         creds = await get_credentials_for_store(db, binding.platform, store_id)
-        jobs.append((binding.platform, creds, items))
+        if creds is None:
+            # 绑定存在但凭证读取失败/绑定被并发删除时，禁止使用 None 凭证继续请求。
+            # Provider 可能仍持有全局 App 凭证，误把请求发往错误门店。
+            raise RuntimeError(
+                f"外卖平台门店凭证不可用，拒绝库存同步 store={store_id} "
+                f"platform={binding.platform}"
+            )
+        jobs.append((binding.platform, creds, items, on_shelf))
     return jobs
 
 
 async def _execute_stock_push_jobs(
-    jobs: list[tuple[str, Any, list[dict]]],
+    jobs: list[tuple[str, Any, list[dict], bool]],
     *,
     store_id: int,
     product_id: int,
 ) -> int:
     """纯平台 HTTP：不持有 DB 会话。返回失败平台数。"""
     failures = 0
-    for platform, creds, items in jobs:
+    for platform, creds, items, on_shelf in jobs:
         try:
             provider = get_delivery_provider(platform, creds)
-            done = await provider.set_sku_stock(items)
-            if done <= 0:
+            stock_done = await provider.set_sku_stock(items)
+            shelf_done = await provider.set_sell_status(items, on_shelf=on_shelf)
+            if stock_done < len(items) or shelf_done < len(items):
                 failures += 1
                 logger.warning(
-                    "库存镜像平台返回0成功 store=%s platform=%s product=%s target=%s",
+                    "库存/上下架镜像未全部成功 store=%s platform=%s product=%s stock=%s on_shelf=%s stock_done=%s shelf_done=%s",
                     store_id,
                     platform,
                     product_id,
                     items[0].get("stock") if items else None,
+                    on_shelf,
+                    stock_done,
+                    shelf_done,
                 )
             else:
                 logger.info(
-                    "库存镜像成功 store=%s platform=%s product=%s stock=%s",
+                    "库存镜像成功 store=%s platform=%s product=%s stock=%s on_shelf=%s",
                     store_id,
                     platform,
                     product_id,
                     items[0].get("stock") if items else None,
+                    on_shelf,
                 )
         except Exception:  # noqa: BLE001 单平台失败累计后由 outbox 重试（覆盖推送幂等）
             failures += 1
@@ -134,6 +163,7 @@ async def _push_store_product_stock(db, store_id: int, product_id: int) -> int:
     return await _execute_stock_push_jobs(jobs, store_id=store_id, product_id=product_id)
 
 
+@register_outbox_handler("delivery_stock_base", "mirror")
 @register_outbox_handler("delivery_stock", "mirror")
 async def delivery_stock_mirror_handler(db, row) -> None:
     payload = json.loads(row.payload) if row.payload else {}
@@ -144,9 +174,26 @@ async def delivery_stock_mirror_handler(db, row) -> None:
         logger.warning("库存镜像事件缺少 store_id/product_id id=%s payload=%s", row.id, payload)
         return
     sid, pid = int(store_id), int(product_id)
-    jobs = await _collect_stock_push_jobs(db, sid, pid)
-    # claim 后的会话在此释放，平台 HTTP 不再占连接池
+    # 先取有效平台列表。每个平台真正发送前重新读取库存、上下架、映射和凭证，
+    # 读完立即 commit 释放连接，再执行 HTTP，避免后续平台沿用陈旧快照。
+    platform_rows = await db.execute(
+        select(PlatformStoreBinding.platform).where(
+            PlatformStoreBinding.store_id == sid,
+            PlatformStoreBinding.status == 1,
+        )
+    )
+    platforms = list(dict.fromkeys(str(p) for p in platform_rows.scalars().all() if p))
     await db.commit()
-    failures = await _execute_stock_push_jobs(jobs, store_id=sid, product_id=pid)
+
+    failures = 0
+    for platform in platforms:
+        db.expire_all()
+        jobs = await _collect_stock_push_jobs(
+            db, sid, pid, platform_filter=platform
+        )
+        await db.commit()
+        failures += await _execute_stock_push_jobs(
+            jobs, store_id=sid, product_id=pid
+        )
     if failures:
         raise RuntimeError(f"库存镜像存在 {failures} 个平台失败，等待 outbox 重试")

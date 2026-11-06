@@ -19,9 +19,13 @@ from app.services.system_settings_service import BUSINESS_SETTING_META, SystemSe
 @pytest.fixture(autouse=True)
 def _reset_settings_cache():
     SystemSettingsService.invalidate_cache_local()
+    # 测试按函数创建独立事件循环；模块级 asyncio.Lock 必须随 loop 一并重建。
     SystemSettingsService._seed_lock = asyncio.Lock()
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
     yield
     SystemSettingsService.invalidate_cache_local()
+    SystemSettingsService._seed_lock = asyncio.Lock()
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
 
 
 @pytest.fixture
@@ -107,14 +111,14 @@ async def test_concurrent_seed_same_session_safe(mem_db: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_update_and_read_cache(mem_db: AsyncSession):
-    with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=0)):
+    with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=1)):
         with patch.object(SystemSettingsService, "_bump_remote_version", new=AsyncMock(return_value=1)):
             await SystemSettingsService.update_business(mem_db, {"welcome_cooldown_seconds": 120})
             v = await SystemSettingsService.get_int(mem_db, "welcome_cooldown_seconds", 60)
             assert v == 120
             SystemSettingsService._cache = {"welcome_cooldown_seconds": "999"}
             SystemSettingsService._cache_at = time.monotonic()
-            SystemSettingsService._cache_ver = 0
+            SystemSettingsService._cache_ver = 1
             cached = await SystemSettingsService.get_int(mem_db, "welcome_cooldown_seconds", 60)
             assert cached == 999
             SystemSettingsService.invalidate_cache_local()

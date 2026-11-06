@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.exceptions import AppException
+from app.api.miniprogram_face import _is_supported_face_image
+from app.api.cameras import _is_valid_visitor_snapshot_bytes
+from app.services.visitor_snapshot_access import build_visitor_snapshot_url, verify_visitor_snapshot_signature
 from app.services.camera_credentials import (
     assert_camera_url_safe,
     prepare_camera_source,
@@ -33,6 +36,20 @@ def test_camera_url_blocks_link_local():
     """禁止 169.254.x.x 链路本地地址。"""
     with pytest.raises(AppException) as ei:
         assert_camera_url_safe("rtsp://admin:pass@169.254.1.1/Streaming/Channels/101")
+    assert ei.value.code == 40026
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "rtsp://admin:pass@[::ffff:127.0.0.1]/Streaming/Channels/101",
+        "rtsp://admin:pass@[::ffff:169.254.169.254]/Streaming/Channels/101",
+    ],
+)
+def test_camera_url_blocks_ipv4_mapped_ipv6_bypass(url):
+    """IPv4-mapped IPv6 必须继承映射 IPv4 的回环/链路本地拦截规则。"""
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe(url)
     assert ei.value.code == 40026
 
 
@@ -212,3 +229,171 @@ async def test_verify_liveness_challenge_expired_token():
     ):
         ok = await verify_liveness_challenge("expired_or_invalid_token")
     assert ok is False
+
+
+def test_camera_url_blocks_alibaba_metadata_endpoint():
+    """禁止阿里云 ECS 元数据地址，避免窃取实例角色凭据。"""
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://admin:pass@100.100.100.200/Streaming/Channels/101")
+    assert ei.value.code == 40026
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "ftp://192.168.1.100/camera",
+        "rtsp:///Streaming/Channels/101",
+    ],
+)
+def test_camera_url_rejects_unsupported_or_malformed_url(url):
+    """URL-like 输入不能因协议不支持或缺失主机而静默放行。"""
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe(url)
+    assert ei.value.code == 40026
+
+
+@pytest.mark.parametrize(
+    "image_bytes",
+    [
+        b"\xff\xd8\xff" + b"\x00" * 16,
+        b"\x89PNG\r\n\x1a\n" + b"\x00" * 16,
+    ],
+)
+def test_miniprogram_face_accepts_real_jpeg_png_magic_bytes(image_bytes):
+    assert _is_supported_face_image(image_bytes) is True
+
+
+@pytest.mark.parametrize(
+    "image_bytes",
+    [
+        b"BM" + b"\x00" * 32,
+        b"GIF89a" + b"\x00" * 32,
+        b"\xff\xd8" + b"\x00" * 32,
+        b"\x89PNG" + b"\x00" * 32,
+    ],
+)
+def test_miniprogram_face_rejects_unsupported_or_truncated_magic_bytes(image_bytes):
+    assert _is_supported_face_image(image_bytes) is False
+
+
+@pytest.mark.asyncio
+async def test_verify_liveness_challenge_rejects_claimed_action_mismatch():
+    from app.services.face_liveness_service import verify_liveness_challenge
+
+    fake_redis = MagicMock()
+    fake_redis.eval = AsyncMock(return_value='{"action": "blink", "customer_id": 1}')
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(face_liveness_mode="challenge"),
+    ):
+        ok = await verify_liveness_challenge(
+            "valid_token",
+            action_completed=True,
+            claimed_action="turn_left",
+            customer_id=1,
+        )
+    assert ok is False
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        (b"\xff\xd8\xff" + b"\x00" * 128, True),
+        (b"\x89PNG\r\n\x1a\n" + b"\x00" * 128, False),
+        (b"not-a-jpeg" + b"\x00" * 128, False),
+        (b"", False),
+    ],
+)
+def test_private_visitor_snapshot_accepts_only_jpeg_magic_and_size(data, expected):
+    assert _is_valid_visitor_snapshot_bytes(data) is expected
+
+ 
+def test_visitor_snapshot_signature_binds_event_store_and_object_key():
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlparse
+
+    settings = SimpleNamespace(
+        secret_encryption_key="current-secret-key",
+        secret_encryption_key_previous="",
+        face_encryption_key="face-key",
+        jwt_secret="jwt-key",
+    )
+    with patch("app.services.visitor_snapshot_access.get_settings", return_value=settings):
+        url = build_visitor_snapshot_url(10, 20, "visitors/2026/11/04/cam1_test.jpg", now=1_800_000_000)
+        query = parse_qs(urlparse(url).query)
+        exp = int(query["exp"][0])
+        sig = query["sig"][0]
+        assert verify_visitor_snapshot_signature(
+            10, 20, "visitors/2026/11/04/cam1_test.jpg", exp, sig, now=1_800_000_001
+        )
+        assert not verify_visitor_snapshot_signature(
+            11, 20, "visitors/2026/11/04/cam1_test.jpg", exp, sig, now=1_800_000_001
+        )
+        assert not verify_visitor_snapshot_signature(
+            10, 21, "visitors/2026/11/04/cam1_test.jpg", exp, sig, now=1_800_000_001
+        )
+        assert not verify_visitor_snapshot_signature(
+            10, 20, "visitors/2026/11/04/cam2_test.jpg", exp, sig, now=1_800_000_001
+        )
+        assert not verify_visitor_snapshot_signature(
+            10, 20, "visitors/2026/11/04/cam1_test.jpg", exp, sig, now=exp + 1
+        )
+
+def test_camera_url_fails_closed_when_hostname_dns_lookup_fails(monkeypatch):
+    """无法解析主机名时不得按安全目标放行。"""
+    import socket
+
+    def _fail_dns(host, port, *args, **kwargs):
+        raise socket.gaierror("temporary DNS failure")
+
+    monkeypatch.setattr("app.services.camera_credentials.socket.getaddrinfo", _fail_dns)
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://camera.example.invalid/Streaming/Channels/102")
+    assert ei.value.code == 40026
+
+
+def test_camera_worker_revalidates_target_before_open_and_reconnect(monkeypatch):
+    """运行时每次连接前都必须重新校验，旧数据库配置不能绕过保存时 SSRF 检查。"""
+    import camera.camera_manager as camera_manager
+
+    def _reject(_source):
+        raise AppException(40026, "DNS 解析到危险地址")
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.assert_camera_url_safe", _reject
+    )
+    capture = MagicMock()
+    monkeypatch.setattr(camera_manager.cv2, "VideoCapture", capture)
+
+    worker = camera_manager.CameraWorker(
+        999, "rtsp://camera.example/Streaming/Channels/102", 25
+    )
+    assert worker._connect() is False
+    capture.assert_not_called()
+    assert worker.status == "OFFLINE"
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "rtsp://192.168.1.10:99999/Streaming/Channels/102",
+        "rtsp://192.168.1.10:not-a-port/Streaming/Channels/102",
+    ],
+)
+def test_camera_url_rejects_invalid_ports(url):
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe(url)
+    assert ei.value.code == 40026
+
+
+def test_camera_url_rejects_empty_dns_answer(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [],
+    )
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://camera.example.invalid/Streaming/Channels/102")
+    assert ei.value.code == 40026
+

@@ -41,10 +41,13 @@ class FakeRedis:
     async def get(self, key):
         return self.store.get(key)
 
-    async def set(self, key, value, ex=None, nx=False):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
         if nx and key in self.store:
             return None
-        self.store[key] = value
+        if xx and key not in self.store:
+            return None
+        self.store[key] = str(value)
+        return True
         return True
 
     async def eval(self, script, numkeys, *args):
@@ -62,6 +65,31 @@ class FakeRedis:
             return 0
         raise AssertionError(f"unexpected Lua key count: {numkeys}")
 
+        keys = list(args[:numkeys])
+        argv = list(args[numkeys:])
+        if "redis.call('INCR'" in script and len(keys) == 1:
+            generation = int(self.store.get(keys[0]) or 0) + 1
+            self.store[keys[0]] = str(generation)
+            return generation
+        if "redis.call('SET', KEYS[2]" in script and len(keys) == 3:
+            lock_key, cache_key, generation_key = keys
+            token, raw, _ttl, expected_generation = argv
+            current_generation = self.store.get(generation_key) or "0"
+            if self.store.get(lock_key) == str(token) and current_generation == str(expected_generation):
+                self.store[cache_key] = str(raw)
+            return None
+        if "redis.call('GET', KEYS[1])" in script and len(keys) == 2:
+            generation_key, cache_key = keys
+            expected_generation = str(argv[0])
+            if (self.store.get(generation_key) or "0") == expected_generation:
+                return self.store.get(cache_key)
+            return None
+        if "redis.call('del'" in script.lower() and len(keys) == 1:
+            if self.store.get(keys[0]) == str(argv[0]):
+                return await self.delete(keys[0])
+        if "redis.call('expire'" in script.lower() and len(keys) == 1:
+            return 1 if self.store.get(keys[0]) == str(argv[0]) else 0
+        raise NotImplementedError("FakeRedis.eval 未覆盖该 Lua 脚本")
     async def delete(self, *keys):
         n = 0
         for k in keys:
@@ -80,7 +108,7 @@ class BrokenRedis(FakeRedis):
     async def get(self, key):
         raise RuntimeError("redis down")
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
         raise RuntimeError("redis down")
 
     async def scan_iter(self, match, count=None):
@@ -290,7 +318,7 @@ async def test_anonymous_vs_customer_cache_separated(db_session, fake_redis):
 
 
 @pytest.mark.asyncio
-async def test_redis_failure_degrades_gracefully(db_session, monkeypatch):
+async def test_redis_failure_without_cache_fails_closed_to_prevent_db_stampede(db_session, monkeypatch):
     async def _get():
         return BrokenRedis()
 
@@ -300,9 +328,12 @@ async def test_redis_failure_degrades_gracefully(db_session, monkeypatch):
     cat = await make_category(db, store.id, name="招牌面")
     await make_product(db, store.id, cat.id, name="小面", sales_count=10)
 
-    data = await _call(db, store)
-    assert data["items"]
-    assert data["cache_hit"] is False
+    # 推荐是非关键展示能力；Redis 不可用且本地无缓存时返回可重试 503，
+    # 不允许每个 worker 都绕过分布式锁并发回源查询画像/订单。
+    with pytest.raises(AppException) as exc:
+        await _call(db, store)
+    assert exc.value.code == 50301
+    assert exc.value.status_code == 503
 
 
 # ---------- TR-8.2 写后主动失效 ----------
@@ -323,9 +354,13 @@ async def test_paid_order_invalidates_customer_cache(db_session, fake_redis):
     # 下单支付 → record_paid_order_events 学习 + 主动失效
     order = await make_paid_order(db, cust.id, store.id, [(p, 1, [])])
     await TasteLearningService.record_paid_order_events(db, order.id)
-
-    keys_left = list(fake_redis.store.keys())
-    assert not any(f":c{cust.id}:" in k for k in keys_left), "支付后该顾客缓存应被清除"
+    # 个性化缓存失效在业务事务提交后执行；未提交前不能推进共享代际。
+    await db.commit()
+    # after_commit 会异步推进共享代际；旧代际键保留到 TTL，自然不可再命中。
+    import asyncio
+    await asyncio.sleep(0)
+    from app.core.cache_keys import reco_generation_key
+    assert fake_redis.store.get(reco_generation_key(cust.id)) == "1"
 
     third = await _call(db, store, customer=cust)
     assert third["cache_hit"] is False

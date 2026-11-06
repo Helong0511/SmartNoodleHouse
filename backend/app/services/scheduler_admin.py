@@ -88,6 +88,14 @@ else
 end
 """
 
+# compare-and-expire：只有仍持有当前 Token 的任务才能续租。
+_LUA_COMPARE_EXPIRE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
 # Lua：原子更新任务执行统计，避免 HGET→改计数→HSET 的丢更新
 _LUA_RECORD_JOB_RUN = """
 local prev = redis.call('hget', KEYS[1], ARGV[1])
@@ -127,6 +135,39 @@ _overrides_watch_task: asyncio.Task | None = None
 _local_overrides_ver: int = 0
 # 同进程内串行化同 job 的统计写入（跨 await 防交错）
 _job_stats_locks: dict[str, asyncio.Lock] = {}
+
+# Leader 丢失时主动取消当前进程内已启动的定时任务。
+# APScheduler.shutdown(wait=False) 只停止调度，不保证取消已经运行的 coroutine。
+_active_leader_job_tasks: set[asyncio.Task] = set()
+
+
+def active_leader_job_count() -> int:
+    """当前尚未退出的 Leader 定时任务数；用于降级时决定是否允许本进程重新竞选。"""
+    return sum(1 for task in tuple(_active_leader_job_tasks) if not task.done())
+
+
+async def cancel_active_leader_jobs(*, timeout: float = 5.0) -> int:
+    """取消并等待本进程正在运行的 Leader 定时任务，给事务清理留出有限时间。"""
+    current = asyncio.current_task()
+    tasks = [
+        task for task in tuple(_active_leader_job_tasks)
+        if task is not current and not task.done()
+    ]
+    for task in tasks:
+        task.cancel()
+    if not tasks:
+        return 0
+    done, pending = await asyncio.wait(
+        tasks, timeout=max(0.1, float(timeout))
+    )
+    if pending:
+        logger.error(
+            "等待 Leader 定时任务取消超时 count=%s pending=%s；可能存在屏蔽取消的外部 I/O",
+            len(tasks),
+            len(pending),
+        )
+    return len(tasks)
+
 
 
 class JobSkipped(Exception):
@@ -257,22 +298,40 @@ def leader_job(fn):
     - JobSkipped / 库表重建 / MySQL 断连：记 skipped，不抛给 APScheduler（避免 ERROR 刷屏）
     - CancelledError：记 skipped 后原样抛出（保证关机可中断）
     - 其它异常：记 error 后抛出
-    - 断连类：自动短重试一次
+    - 基础设施错误：记录 skipped，等待下一次调度，不对结果不确定的任务自动重放
     """
 
     async def _wrapped(*args, **kwargs):
         import time
 
         from app.core.leader_lock import confirm_leader_owned, is_leader_held
+        from app.core.leader_fencing import active_leader_epoch, leader_fence_scope
 
         if not is_leader_held():
             return None
         if not await confirm_leader_owned():
             return None
+        if active_leader_epoch() is None:
+            logger.critical(
+                "Leader job 拒绝执行：数据库 fencing epoch 未激活 job=%s",
+                getattr(fn, "__name__", "unknown"),
+            )
+            return None
+        from app.core.leader_fencing import confirm_database_epoch
+
+        if not await confirm_database_epoch():
+            logger.critical(
+                "Leader job 拒绝执行：数据库 fencing epoch 已被更新 job=%s",
+                getattr(fn, "__name__", "unknown"),
+            )
+            return None
         job_name = getattr(fn, "__name__", "")
         if job_name and not is_job_enabled(job_name):
             return None
         started = time.perf_counter()
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            _active_leader_job_tasks.add(current_task)
 
         async def _refresh_next_run() -> None:
             if not job_name:
@@ -289,16 +348,31 @@ def leader_job(fn):
         async def _finish(status: str, error: str | None = None) -> None:
             if not job_name:
                 return
-            await record_job_run(
-                job_name,
-                status=status,
-                duration_ms=int((time.perf_counter() - started) * 1000),
-                error=error,
-            )
-            await _refresh_next_run()
+            # 任务统计/下次运行时间属于观测数据，不能覆盖业务任务的真实结果，
+            # 尤其不能在 CancelledError 路径中因统计库故障吞掉取消信号。
+            try:
+                await record_job_run(
+                    job_name,
+                    status=status,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    error=error,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("记录定时任务执行统计失败 job=%s status=%s", job_name, status)
+            try:
+                await _refresh_next_run()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("刷新定时任务下次执行时间失败 job=%s", job_name, exc_info=True)
 
         async def _invoke():
-            return await fn(*args, **kwargs)
+            # ContextVar 会传播到本任务创建的 asyncio 子任务；每个 DB commit
+            # 都会在 SQLAlchemy before_commit 中验证 epoch 并锁住 fencing 行。
+            with leader_fence_scope():
+                return await fn(*args, **kwargs)
 
         try:
             try:
@@ -311,43 +385,25 @@ def leader_job(fn):
                 return None
             except Exception as first:
                 reason = infra_skip_reason(first)
-                if reason and is_retryable_infra(first):
-                    try:
-                        await asyncio.sleep(0.35)
-                        result = await _invoke()
-                    except asyncio.CancelledError:
-                        await _finish("skipped", "shutdown_cancelled")
-                        raise
-                    except JobSkipped as skip:
-                        await _finish("skipped", skip.reason)
-                        return None
-                    except Exception as second:
-                        reason2 = infra_skip_reason(second) or reason
-                        if reason2:
-                            logger.warning(
-                                "定时任务基础设施暂不可用（已重试） job=%s: %s",
-                                job_name,
-                                reason2,
-                            )
-                            await _finish("skipped", reason2)
-                            return None
-                        await _finish("error", str(second) or type(second).__name__)
-                        raise
-                elif reason:
+                if reason:
+                    # 连接中断可能发生在 DB COMMIT 已成功、客户端尚未收到确认之后。
+                    # 自动重放整个 job 会重复发券/推送/对账；交由下一次调度和行级幂等恢复。
                     logger.warning(
-                        "定时任务基础设施暂不可用 job=%s: %s",
+                        "定时任务基础设施暂不可用，跳过本次且不自动重放 job=%s: %s",
                         job_name,
                         reason,
                     )
                     await _finish("skipped", reason)
                     return None
-                else:
-                    await _finish("error", str(first) or type(first).__name__)
-                    raise
+                await _finish("error", str(first) or type(first).__name__)
+                raise
             await _finish("ok")
             return result
         except asyncio.CancelledError:
             raise
+        finally:
+            if current_task is not None:
+                _active_leader_job_tasks.discard(current_task)
 
     _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
     _wrapped.__qualname__ = getattr(fn, "__qualname__", _wrapped.__name__)
@@ -854,23 +910,59 @@ async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
 
     key = scheduler_job_lock_key(job_id)
     token = uuid.uuid4().hex
+    lease_ttl = max(5, int(ttl))
     acquired = False
     try:
         r = await get_redis()
-        acquired = bool(await r.set(key, token, nx=True, ex=max(5, int(ttl))))
+        acquired = bool(await r.set(key, token, nx=True, ex=lease_ttl))
     except Exception as e:
-        logger.warning("任务锁获取失败 job_id=%s: %s（fail-open 继续执行）", job_id, e)
-        # Redis 不可用时 fail-open：依赖 Leader fence，避免调度全停
-        yield True
+        # 任务锁是防止重复执行的最后一道跨进程保护；Redis 不可用时必须 fail-closed。
+        # 继续执行可能在 Leader 租约短暂分歧/网络分区时造成双重发券、重复对账或重复同步。
+        logger.error("任务锁获取失败 job_id=%s: %s（fail-closed 跳过本次任务）", job_id, e)
+        yield False
         return
     if not acquired:
         yield False
         return
+
+    owner_task = asyncio.current_task()
+    stop_renew = asyncio.Event()
+
+    async def _renew_lease() -> None:
+        # 任务可长于初始 TTL；续租失败即取消持锁任务，不能让旧执行者继续产生副作用。
+        interval = max(1.0, min(30.0, lease_ttl / 3.0))
+        while not stop_renew.is_set():
+            try:
+                await asyncio.wait_for(stop_renew.wait(), timeout=interval)
+                return
+            except asyncio.TimeoutError:
+                pass
+            try:
+                renewed = await r.eval(
+                    _LUA_COMPARE_EXPIRE, 1, key, token, lease_ttl
+                )
+            except Exception as e:
+                logger.error("任务锁续租异常 job_id=%s: %s，取消任务", job_id, e)
+                if owner_task is not None:
+                    owner_task.cancel()
+                return
+            if not renewed:
+                logger.error("任务锁已丢失 job_id=%s，取消旧持有者任务", job_id)
+                if owner_task is not None:
+                    owner_task.cancel()
+                return
+
+    renew_task = asyncio.create_task(_renew_lease())
     try:
         yield True
     finally:
+        stop_renew.set()
+        renew_task.cancel()
         try:
-            r = await get_redis()
+            await renew_task
+        except asyncio.CancelledError:
+            pass
+        try:
             await r.eval(_LUA_COMPARE_DELETE, 1, key, token)
         except Exception:
             logger.warning("任务锁释放失败 job_id=%s", job_id)

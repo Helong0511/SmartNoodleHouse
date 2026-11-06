@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import aliased
 
 from app.core.hot_cache import HotCache
+from app.core.exceptions import AppException
 from app.core.menu_cache import (
     bump_menu_version,
     get_menu_bundle,
@@ -72,6 +73,15 @@ def _bundle_schedule_id(bundle: dict[str, Any] | None) -> int | None:
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _bundle_version(bundle: dict[str, Any] | None) -> int:
+    if not bundle:
+        return 0
+    try:
+        return max(0, int(bundle.get("version") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _category_payload(cat: ProductCategory, store_name: str | None) -> dict[str, Any]:
@@ -225,13 +235,14 @@ def apply_menu_visibility(
 async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     """带 Redis + 进程内两级缓存的菜单 bundle，并确保 version>=1。
 
-    缓存命中时校验当前时段方案；跨午/晚市窗口切换时必须 bump 版本。
-    Redis 写入必须发生在 owner 租约释放之前，避免 Lua fencing 拒绝合法写入。
+    缓存命中时仍校验当前时段方案是否变化：跨午/晚市等窗口切换必须 bump 版本，
+    否则小程序携带旧 version 会一直收到 changed:false，分类顺序不更新。
     """
     sid = int(store_id)
     expected_sched = await _active_schedule_id(db, sid)
 
     def _bundle_has_visibility_meta(bundle: dict[str, Any] | None) -> bool:
+        """旧缓存若无 visibility_rule 字段，过滤会把限时菜当常显，须重建。"""
         if not bundle:
             return False
         products = bundle.get("products") or {}
@@ -242,91 +253,156 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         return "visibility_rule" in sample
 
     cached = await get_menu_bundle(sid)
+    # 在读取 Redis bundle 之后读取版本戳。版本键缺失/不可读时，缓存身份无法验证：
+    # Redis 可能只淘汰了 ver key 而保留旧 bundle，绝不能把 unknown 当作 generation 0 命中。
+    remote_version = await get_menu_version(sid)
+    if remote_version <= 0:
+        # 同时丢弃本进程缓存；Redis 不可用时也不能用跨 worker 无法失效的旧菜单兜底。
+        invalidate_local_menu_cache(sid)
     if (
-        cached is not None
+        remote_version > 0
+        and cached is not None
         and _bundle_schedule_id(cached) == expected_sched
         and _bundle_has_visibility_meta(cached)
+        and _bundle_version(cached) == remote_version
     ):
         return cached
 
+    lock_token: str | None = None
+    lock_ok = False
+    heartbeat_task: asyncio.Task | None = None
+    build_version: int | None = None
     hit = _BUILD_CACHE.get(sid)
-    current_version = await get_menu_version(sid)
+    # 本地缓存跨 worker 不会被直接删除；Redis 版本戳是远端失效广播。
+    # 版本不一致时必须丢弃本进程旧 bundle，否则其它 worker 的更新会被旧值遮住 60 秒。
+    if hit is not None and (
+        remote_version <= 0 or _bundle_version(hit) != remote_version
+    ):
+        _BUILD_CACHE.delete(sid)
+        hit = None
     if (
-        hit is not None
-        and int(hit.get("version") or 0) == current_version
+        remote_version > 0
+        and hit is not None
+        and _bundle_version(hit) == remote_version
         and _bundle_schedule_id(hit) == expected_sched
         and _bundle_has_visibility_meta(hit)
     ):
-        # 本地缓存必须与 Redis 当前版本严格匹配，不能把旧内容伪装成新版本。
-        lock_token = await try_acquire_rebuild_lock(sid)
-        try:
-            await set_menu_bundle(
-                sid, hit, owner_token=lock_token, expected_version=current_version
-            )
-            return hit
-        finally:
-            if lock_token:
-                await release_rebuild_lock(sid, owner_token=lock_token)
+        bundle = hit
+    else:
+        # Redis 锁负责跨进程协调；本地 single-flight 负责 Redis 故障/等待者兜底，
+        # 避免同一 worker 内所有请求在 300ms 等待后同时重建。
+        from app.core.async_utils import local_singleflight
 
-    lock_token = await try_acquire_rebuild_lock(sid)
-    if not lock_token:
-        # 有其他实例正在重建时，先等待缓存；再尝试一次获取租约。
-        waited = await wait_for_rebuild(sid, 0.3)
-        if (
-            waited is not None
-            and _bundle_schedule_id(waited) == expected_sched
-            and _bundle_has_visibility_meta(waited)
-        ):
-            # 等待期间版本可能再次变化；绝不把等待到的旧 bundle 改标为新版本。
-            waited_version = int(waited.get("version") or 0)
-            current_version = await get_menu_version(sid)
-            if waited_version == current_version:
-                return waited
-        lock_token = await try_acquire_rebuild_lock(sid)
+        async with local_singleflight(f"menu:{sid}"):
+            # 等待本地前一个请求期间，缓存可能已经被填充；必须二次检查。
+            cached_after_wait = await get_menu_bundle(sid)
+            remote_after_wait = await get_menu_version(sid)
+            if (
+                remote_after_wait > 0
+                and cached_after_wait is not None
+                and _bundle_version(cached_after_wait) == remote_after_wait
+                and _bundle_schedule_id(cached_after_wait) == expected_sched
+                and _bundle_has_visibility_meta(cached_after_wait)
+            ):
+                bundle = cached_after_wait
+            else:
+                hit_after_wait = _BUILD_CACHE.get(sid)
+                if (
+                    hit_after_wait is not None
+                    and remote_after_wait > 0
+                    and _bundle_version(hit_after_wait) != remote_after_wait
+                ):
+                    _BUILD_CACHE.delete(sid)
+                    hit_after_wait = None
+                if (
+                    remote_after_wait > 0
+                    and hit_after_wait is not None
+                    and _bundle_version(hit_after_wait) == remote_after_wait
+                    and _bundle_schedule_id(hit_after_wait) == expected_sched
+                    and _bundle_has_visibility_meta(hit_after_wait)
+                ):
+                    bundle = hit_after_wait
+                else:
+                    lock_token = await try_acquire_rebuild_lock(sid)
+                    lock_ok = lock_token is not None
+                    if lock_ok and lock_token:
+                        heartbeat_task = asyncio.create_task(maintain_rebuild_lock(sid, lock_token))
+                    if not lock_ok:
+                        # 跨进程持锁者可能仍在构建；短暂等待后再查缓存。
+                        waited = await wait_for_rebuild(sid, 2.0)
+                        if (
+                            remote_after_wait > 0
+                            and waited is not None
+                            and _bundle_version(waited) == remote_after_wait
+                            and _bundle_schedule_id(waited) == expected_sched
+                            and _bundle_has_visibility_meta(waited)
+                        ):
+                            bundle = waited
+                        else:
+                            # 未持有分布式锁时绝不能自行回源重建，否则每个 gunicorn
+                            # worker 都会在 300ms 后同时打穿 MySQL。宁可短暂返回
+                            # 503，也不在 Redis 故障/锁竞争时制造数据库雪崩。
+                            raise AppException(
+                                50301,
+                                "菜单正在更新或缓存协调服务暂不可用，请稍后重试",
+                                status_code=503,
+                            )
+                    else:
+                        bundle = None
+                    try:
+                        if bundle is None:
+                            # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
+                            if cached is not None or (
+                                hit is not None and _bundle_schedule_id(hit) != expected_sched
+                            ):
+                                invalidate_local_menu_cache(sid)
+                                await bump_menu_version(sid)
+                            # 先固定 DB 快照对应的菜单版本。若构建期间写路径 bump 版本，
+                            # 后续 Lua 发布会拒绝将旧快照写回 Redis。
+                            build_version = await get_menu_version(sid)
+                            if build_version <= 0:
+                                build_version = await bump_menu_version(sid)
+                            bundle = await build_menu_bundle(db, sid)
+                    except BaseException:
+                        if heartbeat_task is not None:
+                            heartbeat_task.cancel()
+                            await asyncio.gather(heartbeat_task, return_exceptions=True)
+                        if lock_ok:
+                            await release_rebuild_lock(sid, owner_token=lock_token)
+                        raise
 
-    heartbeat_task = (
-        asyncio.create_task(maintain_rebuild_lock(sid, lock_token))
-        if lock_token
-        else None
+    version = await get_menu_version(sid)
+    if version <= 0:
+        # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
+        version = await bump_menu_version(sid)
+    # 若版本在构建期间发生变化，返回旧版本号，促使客户端下一次请求重新拉取；
+    # 更重要的是绝不把旧快照伪装成最新版本发布到共享缓存。
+    response_version = (
+        build_version if build_version is not None and version != build_version else version
     )
-    try:
-        # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量。
-        if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
-            invalidate_local_menu_cache(sid)
-            await bump_menu_version(sid)
-        version = await get_menu_version(sid)
-        if version <= 0:
-            version = await bump_menu_version(sid)
-
-        bundle = None
-        stable_version = False
-        build_version = version
-        # 最多重建两次；若两次都遇到并发菜单变更，不伪造最新版本号，
-        # 只返回最后一次构建开始时的版本，并跳过两级缓存写入。
-        for _ in range(2):
-            build_version = await get_menu_version(sid) or build_version
-            candidate = await build_menu_bundle(db, sid)
-            latest_version = await get_menu_version(sid)
-            bundle = candidate
-            if latest_version <= 0 or latest_version == build_version:
-                stable_version = True
-                break
-            build_version = latest_version
-
-        bundle = {**(bundle or {}), "version": build_version}
-        if stable_version:
-            _BUILD_CACHE.put(sid, bundle)
-            # Lua 同时校验 owner token 与 version，旧构建不能覆盖更新后的 bundle。
-            await set_menu_bundle(
-                sid, bundle, owner_token=lock_token, expected_version=build_version
+    bundle = {**bundle, "version": response_version}
+    if lock_ok and lock_token:
+        try:
+            published = await set_menu_bundle(
+                sid,
+                bundle,
+                owner_token=lock_token,
+                expected_version=build_version if build_version is not None else version,
             )
-        return bundle
-    finally:
-        if heartbeat_task is not None:
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
-        if lock_token:
+            if published:
+                _BUILD_CACHE.put(sid, bundle)
+            else:
+                # 租约已丢失：不能把旧构建结果发布到 Redis 或本地共享缓存。
+                invalidate_local_menu_cache(sid)
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
             await release_rebuild_lock(sid, owner_token=lock_token)
+    elif cached is None and hit is None:
+        # 仅命中进程内 single-flight/缓存的分支，不向 Redis 发布未持锁结果。
+        pass
+    return bundle
 
 
 def invalidate_local_menu_cache(store_id: int) -> None:

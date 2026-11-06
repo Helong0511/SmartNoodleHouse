@@ -6,7 +6,8 @@ import socket
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from app.core.exceptions import AppException
-from app.services.face_service import FaceEncryption
+from app.services.face_service import FaceEncryption  # 仅用于解密历史摄像头口令
+from app.services.secret_encryption import SecretEncryptionService
 
 # P0: 摄像头 URL 禁止指向的元数据/危险端点（允许店内私网 RTSP）
 _BLOCKED_HOSTS = {
@@ -14,6 +15,7 @@ _BLOCKED_HOSTS = {
     "metadata.google.internal",
     "metadata",
     "fd00:ec2::254",  # IPv6 元数据
+    "100.100.100.200",  # Alibaba Cloud ECS metadata endpoint
     "localhost",
 }
 
@@ -21,6 +23,10 @@ _BLOCKED_HOSTS = {
 def _is_blocked_ip(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)
+        # IPv4-mapped IPv6（::ffff:a.b.c.d）必须按其映射的 IPv4 地址执行同一策略，
+        # 否则 ::ffff:127.0.0.1 / ::ffff:169.254.169.254 可绕过 IPv4 端点拦截。
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            return _is_blocked_ip(str(ip.ipv4_mapped))
         # 禁止回环、链路本地、未指定、组播；允许普通私网（店内摄像头）
         if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
             return True
@@ -43,7 +49,23 @@ def assert_camera_url_safe(source_url: str) -> None:
         return
     try:
         parsed = urlparse(source_url)
-    except Exception:
+        # URL-like 摄像头地址必须是明确支持的协议；解析异常或未知协议不得静默放行。
+        if "://" in source_url and parsed.scheme.lower() not in ("rtsp", "rtsps", "http", "https"):
+            raise AppException(40026, "摄像头地址协议不受支持")
+        if "://" in source_url and not parsed.hostname:
+            raise AppException(40026, "摄像头地址缺少有效主机名")
+        if "://" in source_url:
+            try:
+                port = parsed.port
+            except ValueError as exc:
+                raise AppException(40026, "摄像头地址端口格式非法") from exc
+            if port is not None and not (1 <= port <= 65535):
+                raise AppException(40026, "摄像头地址端口超出有效范围")
+    except AppException:
+        raise
+    except Exception as exc:
+        if "://" in source_url:
+            raise AppException(40026, "摄像头地址格式非法") from exc
         return
     if parsed.scheme not in ("rtsp", "rtsps", "http", "https"):
         return
@@ -62,11 +84,12 @@ def assert_camera_url_safe(source_url: str) -> None:
         pass
     try:
         infos = socket.getaddrinfo(host, None)
-    except OSError:
-        # 无法解析时不放行可疑主机名到云元数据别名；普通局域网主机名允许后续连接失败
-        if "metadata" in host or host.endswith(".internal"):
-            raise AppException(40026, f"摄像头地址禁止指向元数据/危险端点: {host}")
-        return
+    except OSError as exc:
+        # 无法解析就无法证明目标安全；拒绝保存，防止 DNS 故障/临时 NXDOMAIN
+        # 被当作安全放行，随后主机名解析结果变化指向内网管理面或云元数据。
+        raise AppException(40026, f"摄像头主机名无法解析，拒绝连接: {host}") from exc
+    if not infos:
+        raise AppException(40026, f"摄像头主机名没有有效 DNS 记录: {host}")
     for info in infos:
         addr = info[4][0]
         if _is_blocked_ip(str(addr)):
@@ -74,11 +97,21 @@ def assert_camera_url_safe(source_url: str) -> None:
 
 
 def encrypt_password(password: str) -> str:
-    enc = FaceEncryption()
-    return enc.encrypt(password.encode()).decode()
+    """新摄像头口令使用独立 SECRET_ENCRYPTION_KEY 加密。"""
+    value = SecretEncryptionService.encrypt(password)
+    if value is None:
+        raise ValueError("摄像头口令加密失败")
+    return value
 
 
 def decrypt_password(encrypted: str) -> str:
+    """优先解密新版本密文；兼容历史 FaceEncryption Fernet 密文。"""
+    if SecretEncryptionService.is_encrypted(encrypted):
+        value = SecretEncryptionService.decrypt(encrypted)
+        if value is None:
+            raise ValueError("摄像头口令密文无法解密，请检查 SECRET_ENCRYPTION_KEY")
+        return value
+    # 历史版本直接使用 FACE_ENCRYPTION_KEY，无版本前缀；只读兼容，后续保存时转为新密钥。
     enc = FaceEncryption()
     return enc.decrypt(encrypted.encode()).decode()
 

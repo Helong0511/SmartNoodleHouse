@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models import PlatformStoreBinding
 from app.services.secret_encryption import SecretEncryptionService
+
+logger = logging.getLogger(__name__)
 
 
 def _plain_token(stored: str | None) -> str | None:
@@ -159,10 +162,21 @@ async def get_credentials_for_store(
             extra = json.loads(binding.extra_config) if isinstance(binding.extra_config, str) else binding.extra_config
         except Exception:
             extra = {}
-    return PlatformCredentials(
+    credentials = PlatformCredentials(
         store_id=binding.store_id,
         platform_shop_id=binding.platform_shop_id,
         access_token=_plain_token(binding.access_token),
         refresh_token=_plain_token(binding.refresh_token),
         extra=extra,
     )
+    # 不允许 Provider 在门店凭证缺失时回退到 .env 全局凭证：
+    # 饿了么 token 是门店授权凭证；美团请求必须携带当前门店 shop_id。
+    # 解密失败、授权被撤销或配置不完整时返回 None，由调用方 fail-closed。
+    normalized_platform = platform.upper()
+    if normalized_platform == "ELEME" and not credentials.access_token:
+        logger.error("饿了么门店 access_token 缺失或解密失败 store_id=%s", store_id)
+        return None
+    if normalized_platform == "MEITUAN" and not credentials.platform_shop_id:
+        logger.error("美团门店 platform_shop_id 缺失 store_id=%s", store_id)
+        return None
+    return credentials

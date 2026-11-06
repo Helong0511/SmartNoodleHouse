@@ -6,7 +6,7 @@ import logging
 import time
 
 import cv2
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -26,6 +26,12 @@ from app.services.camera_credentials import (
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/cameras", tags=["摄像头"])
+
+def _is_valid_visitor_snapshot_bytes(data: bytes) -> bool:
+    """仅接受有 JPEG SOI 魔数且大小受限的访客抓拍。"""
+    return bool(data) and len(data) <= 10 * 1024 * 1024 and data.startswith(b"\xff\xd8\xff")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -278,6 +284,8 @@ async def visitor_events(
             cam_ids = (await db.execute(select(Camera.id).where(Camera.store_id == sid))).scalars().all()
             q = q.where(VisitorEvent.camera_id.in_(list(cam_ids) or [-1]))
     q = apply_date_range(q, VisitorEvent.event_time, date_from, date_to)
+    # 到期访客生物识别记录即使清理任务延迟，也不得继续展示或签发图片 URL。
+    q = q.where(VisitorEvent.expires_at > now_local())
     if event_type and event_type.strip():
         q = q.where(VisitorEvent.event_type == event_type.strip().upper())
 
@@ -302,6 +310,21 @@ async def visitor_events(
     )
     from app.models import Customer
     from app.services.customer_service import CustomerService
+    from app.services.face_service import VisitorService
+    from app.services.visitor_snapshot_access import build_visitor_snapshot_url
+
+    camera_ids = {int(e.camera_id) for e in rows if getattr(e, "camera_id", None)}
+    camera_store_map: dict[int, int] = {}
+    if camera_ids:
+        camera_store_map = {
+            int(cid): int(sid)
+            for cid, sid in (
+                await db.execute(
+                    select(Camera.id, Camera.store_id).where(Camera.id.in_(list(camera_ids)))
+                )
+            ).all()
+            if sid is not None
+        }
 
     cust_ids = {int(e.customer_id) for e in rows if getattr(e, "customer_id", None)}
     cust_map: dict[int, Customer] = {}
@@ -316,6 +339,13 @@ async def visitor_events(
     for e in rows:
         cid = int(e.customer_id) if getattr(e, "customer_id", None) else None
         cust = cust_map.get(cid) if cid else None
+        snapshot_key = VisitorService.uploads_url_to_key(e.snapshot_path)
+        store_for_snapshot = camera_store_map.get(int(e.camera_id)) if e.camera_id else None
+        snapshot_url = (
+            build_visitor_snapshot_url(int(e.id), int(store_for_snapshot), snapshot_key)
+            if snapshot_key and store_for_snapshot is not None
+            else None
+        )
         item = {
             "id": e.id,
             "visitor_no": e.visitor_no,
@@ -325,7 +355,8 @@ async def visitor_events(
             "event_type": e.event_type,
             "event_time": serialize_dt(e.event_time),
             "expires_at": serialize_dt(e.expires_at),
-            "snapshot_path": e.snapshot_path,
+            # 不再暴露可直接公开访问的 /uploads/visitors 路径，改为 5 分钟签名 URL。
+            "snapshot_url": snapshot_url,
             "is_member": bool(cid),
         }
         item.update(CustomerService.staff_customer_name_fields(cust))
@@ -340,6 +371,56 @@ async def visitor_events(
             "event_types": [t for t in type_rows if t],
         },
         request=request,
+    )
+
+
+@router.get("/visitors/snapshot/{event_id}")
+async def get_visitor_snapshot(
+    event_id: int,
+    exp: int,
+    sig: str,
+    db: DbSession,
+):
+    """短时 HMAC 签名访问访客抓拍；静态 /uploads/visitors 路径不再公开。"""
+    from app.services.face_service import VisitorService
+    from app.services.object_storage import get_storage
+    from app.services.visitor_snapshot_access import verify_visitor_snapshot_signature
+
+    event = await db.get(VisitorEvent, int(event_id))
+    current_time = now_local()
+    expires_at = getattr(event, "expires_at", None) if event else None
+    if expires_at is not None and getattr(expires_at, "tzinfo", None) is None:
+        expires_at = expires_at.replace(tzinfo=current_time.tzinfo)
+    if not event or not event.snapshot_path or (
+        expires_at is not None and expires_at <= current_time
+    ):
+        raise AppException(40425, "访客抓拍不存在或访问链接已过期", status_code=404)
+    camera = await db.get(Camera, int(event.camera_id))
+    if not camera or camera.store_id is None:
+        raise AppException(40425, "访客抓拍不存在或访问链接已过期", status_code=404)
+    object_key = VisitorService.uploads_url_to_key(event.snapshot_path)
+    if not object_key or not verify_visitor_snapshot_signature(
+        int(event.id), int(camera.store_id), object_key, exp, sig
+    ):
+        raise AppException(40425, "访客抓拍不存在或访问链接已过期", status_code=404)
+    try:
+        data = await get_storage().get_bytes(object_key)
+    except FileNotFoundError:
+        raise AppException(40425, "访客抓拍文件不存在", status_code=404) from None
+    except Exception as exc:
+        logger.warning("读取访客抓拍失败 event_id=%s: %s", event_id, exc)
+        raise AppException(50325, "访客抓拍暂时无法读取", status_code=503) from exc
+    if not _is_valid_visitor_snapshot_bytes(data):
+        raise AppException(40425, "访客抓拍文件无效", status_code=404)
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": 'inline; filename="visitor.jpg"',
+        },
     )
 
 

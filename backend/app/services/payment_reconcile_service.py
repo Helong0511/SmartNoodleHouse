@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
@@ -18,7 +19,8 @@ def _dec(v: Any) -> Decimal | None:
     if v is None or v == "":
         return None
     try:
-        return Decimal(str(v).strip().replace(",", ""))
+        value = Decimal(str(v).strip().replace(",", ""))
+        return value if value.is_finite() else None
     except (InvalidOperation, ValueError):
         return None
 
@@ -30,21 +32,40 @@ def parse_channel_bill_csv(channel: str, text: str) -> list[dict[str, Any]]:
     生产可先用脚本裁剪官方账单再导入。
     """
     rows: list[dict[str, Any]] = []
+    seen_trade_numbers: set[str] = set()
     reader = csv.DictReader(io.StringIO(text.lstrip("\ufeff")))
     if not reader.fieldnames:
-        return rows
-    # 兼容列名
-    for raw in reader:
-        keys = {k.strip().lower(): k for k in raw.keys() if k}
-        trade_key = keys.get("trade_no") or keys.get("transaction_id") or keys.get("渠道交易号")
-        amt_key = keys.get("amount") or keys.get("应结订单金额") or keys.get("金额")
-        pay_key = keys.get("payment_no") or keys.get("out_trade_no") or keys.get("商户订单号")
-        if not trade_key or not amt_key:
+        raise ValueError("渠道账单缺少 CSV 表头")
+    # 兼容列名；缺少关键列时必须拒绝，不能把错误文件当作零交易账单。
+    keys = {k.strip().lower(): k for k in reader.fieldnames if k}
+    trade_key = keys.get("trade_no") or keys.get("transaction_id") or keys.get("渠道交易号")
+    amt_key = keys.get("amount") or keys.get("应结订单金额") or keys.get("金额")
+    pay_key = keys.get("payment_no") or keys.get("out_trade_no") or keys.get("商户订单号")
+    if not trade_key or not amt_key:
+        raise ValueError("渠道账单缺少交易号或金额列")
+    for row_no, raw in enumerate(reader, start=2):
+        # 允许文件末尾空行，但不允许非空数据行被静默跳过。
+        if not any(str(v or "").strip() for v in raw.values()):
             continue
         trade_no = str(raw.get(trade_key) or "").strip()
         amount = _dec(raw.get(amt_key))
-        if not trade_no or amount is None:
-            continue
+        if not trade_no:
+            raise ValueError(f"渠道账单第 {row_no} 行缺少交易号")
+        if amount is None:
+            raise ValueError(f"渠道账单第 {row_no} 行金额无效或非有限数值")
+        # CNY 金额最多两位小数；拒绝 NaN/Infinity、负数和精度异常，防止错误账单被当作有效数据。
+        if amount < 0:
+            raise ValueError(f"渠道账单金额不能为负数: {trade_no}")
+        try:
+            if amount != amount.quantize(Decimal("0.01")):
+                raise ValueError(f"渠道账单金额最多两位小数: {trade_no}")
+        except InvalidOperation as exc:
+            raise ValueError(f"渠道账单金额超出有效范围: {trade_no}") from exc
+        # 交易号是渠道账单的唯一匹配键；重复行不能通过 dict 覆盖静默丢失，
+        # 否则 channel_count 与差异数会失真，可能把重复扣款/账单异常当成正常。
+        if trade_no in seen_trade_numbers:
+            raise ValueError(f"渠道账单存在重复交易号: {trade_no}")
+        seen_trade_numbers.add(trade_no)
         rows.append(
             {
                 "channel": channel.upper(),
@@ -71,14 +92,45 @@ class PaymentReconcileService:
         if ch not in ("WECHAT", "ALIPAY"):
             raise ValueError("channel 仅支持 WECHAT/ALIPAY")
 
+        # 已存在批次时加行锁，串行化同渠道/日期的重跑；首次并发创建则由唯一键兜底。
         existing = (
             await db.execute(
-                select(PaymentReconcileBatch).where(
+                select(PaymentReconcileBatch)
+                .where(
                     PaymentReconcileBatch.channel == ch,
                     PaymentReconcileBatch.bill_date == bill_date,
                 )
+                .with_for_update()
             )
         ).scalar_one_or_none()
+        if existing is None:
+            candidate = PaymentReconcileBatch(
+                channel=ch,
+                bill_date=bill_date,
+                status="PENDING",
+                created_by=created_by,
+            )
+            try:
+                # SAVEPOINT 保护唯一键竞争，不回滚调用方事务中此前已完成的业务写入。
+                async with db.begin_nested():
+                    db.add(candidate)
+                    await db.flush()
+                existing = candidate
+            except IntegrityError:
+                # 另一并发导入先创建了相同批次；读取并锁定赢家，复用同一批次。
+                existing = (
+                    await db.execute(
+                        select(PaymentReconcileBatch)
+                        .where(
+                            PaymentReconcileBatch.channel == ch,
+                            PaymentReconcileBatch.bill_date == bill_date,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    raise
+
         if existing and existing.status == "DONE":
             # 重跑：清旧差异
             old = (
@@ -92,14 +144,11 @@ class PaymentReconcileService:
             batch.status = "PENDING"
             batch.error_message = None
         else:
-            batch = existing or PaymentReconcileBatch(
-                channel=ch,
-                bill_date=bill_date,
-                status="PENDING",
-                created_by=created_by,
-            )
-            if existing is None:
-                db.add(batch)
+            batch = existing
+            batch.status = "PENDING"
+            batch.error_message = None
+            if batch.created_by is None and created_by is not None:
+                batch.created_by = created_by
         batch.source_filename = source_filename
         await db.flush()
 
@@ -114,8 +163,9 @@ class PaymentReconcileService:
                             and_(
                                 Payment.provider == ch,
                                 Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
-                                Payment.created_at >= start,
-                                Payment.created_at < end,
+                                # 对账日按渠道实际支付成功时间，而非本地创建支付单时间归属。
+                                Payment.paid_at >= start,
+                                Payment.paid_at < end,
                             )
                         )
                     )
@@ -126,9 +176,15 @@ class PaymentReconcileService:
             by_no: dict[str, Payment] = {}
             for p in local_payments:
                 if p.provider_trade_no:
-                    by_trade[str(p.provider_trade_no)] = p
+                    trade_key = str(p.provider_trade_no)
+                    if trade_key in by_trade and by_trade[trade_key].id != p.id:
+                        raise ValueError(f"本地支付记录存在重复渠道交易号: {trade_key}")
+                    by_trade[trade_key] = p
                 if p.payment_no:
-                    by_no[str(p.payment_no)] = p
+                    payment_key = str(p.payment_no)
+                    if payment_key in by_no and by_no[payment_key].id != p.id:
+                        raise ValueError(f"本地支付记录存在重复支付单号: {payment_key}")
+                    by_no[payment_key] = p
 
             channel_by_trade = {r["channel_trade_no"]: r for r in channel_rows}
             diffs: list[PaymentReconcileDiff] = []
@@ -136,7 +192,12 @@ class PaymentReconcileService:
             for trade_no, crow in channel_by_trade.items():
                 local = by_trade.get(trade_no)
                 if not local and crow.get("local_payment_no"):
-                    local = by_no.get(str(crow["local_payment_no"]))
+                    candidate = by_no.get(str(crow["local_payment_no"]))
+                    # 只有本地尚无渠道交易号时才允许用商户支付单号补匹配；
+                    # 若本地已有另一个渠道交易号，必须同时暴露渠道 LONG + 本地 SHORT，
+                    # 不可用商户单号掩盖交易号串单/账单错误。
+                    if candidate and not candidate.provider_trade_no:
+                        local = candidate
                 if not local:
                     diffs.append(
                         PaymentReconcileDiff(

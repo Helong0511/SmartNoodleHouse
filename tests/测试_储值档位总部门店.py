@@ -75,6 +75,7 @@ def test_category_map_payload_prefers_store_platform_name():
     product = SimpleNamespace(
         product_no="P1",
         name="牛肉面",
+        status="ON_SALE",
         description="",
         price=Decimal("18.00"),
         stock=999,
@@ -110,6 +111,7 @@ def test_category_map_payload_falls_back_to_local_name():
     product = SimpleNamespace(
         product_no="P2",
         name="凉面",
+        status="ON_SALE",
         description="",
         price=Decimal("12.00"),
         stock=10,

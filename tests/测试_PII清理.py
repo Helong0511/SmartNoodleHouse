@@ -13,7 +13,7 @@ from app.services.pii_cleanup_service import (
 
 @pytest.mark.asyncio
 async def test_anonymize_issues_update_with_correct_filters():
-    """UPDATE 语句应包含 recipient_phone IS NOT NULL + order_id IN (子查询)。"""
+    """订单、退款、回调日志的原始 PII payload 均按同一截止时间清理。"""
     db = MagicMock()
     result = MagicMock()
     result.rowcount = 3
@@ -24,13 +24,35 @@ async def test_anonymize_issues_update_with_correct_filters():
     assert n == 3
     assert db.commit.await_count == 1
 
-    stmt = db.execute.await_args[0][0]
+    # execute 顺序为 DeliveryOrder、DeliveryRefund、CallbackLog、WebhookInbox；
+    # await_args 只指向最后一次调用，必须检查首条 SQL。
+    stmt = db.execute.await_args_list[0].args[0]
     stmt_str = str(stmt).lower()
     assert "delivery_orders" in stmt_str
     assert "recipient_phone" in stmt_str
     assert "is not null" in stmt_str
     assert "recipient_name" in stmt_str
     assert "rider_phone" in stmt_str
+    # 关键回归：清理子查询必须按完成/取消时间与 cutoff 比较，不能只判断时间非空。
+    assert "completed_at" in stmt_str
+    assert "cancelled_at" in stmt_str
+    assert " < " in stmt_str
+    assert "raw_payload" in stmt_str
+    assert db.execute.await_count == 4
+    refund_stmt = db.execute.await_args_list[1].args[0]
+    callback_stmt = db.execute.await_args_list[2].args[0]
+    assert "delivery_refunds" in str(refund_stmt)
+    assert "raw_payload" in str(refund_stmt)
+    assert "delivery_callback_logs" in str(callback_stmt)
+    assert "payload" in str(callback_stmt)
+    inbox_stmt = db.execute.await_args_list[3].args[0]
+    inbox_sql = str(inbox_stmt).lower()
+    assert "webhook_inbox" in inbox_sql
+    inbox_params = inbox_stmt.compile().params
+    assert "FAILED" in {str(value).upper() for value in inbox_params.values()}
+    assert "next_retry_at is null" in inbox_sql
+    assert "received_at" in inbox_sql
+    assert "payload" in inbox_sql
 
 
 @pytest.mark.asyncio

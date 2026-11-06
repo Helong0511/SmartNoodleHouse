@@ -10,6 +10,7 @@ from app.core.exceptions import AppException
 from app.models import Order, OrderItem, PrintJob, Store
 from app.services.print_service import (
     MAX_PRINT_ATTEMPTS,
+    STALE_PRINTING_SEC,
     PrintService,
     _escape_print_text,
     _prepare_job_content,
@@ -196,3 +197,81 @@ async def test_claim_print_job_atomic(db_session):
 
     again = await PrintService.claim_print_job(db_session, job.id, worker="other")
     assert again is None
+
+@pytest.mark.asyncio
+async def test_duplicate_print_trigger_does_not_reset_or_resend_active_job(db_session, monkeypatch):
+    """重复 Webhook/Outbox 触发不得重置正在执行的打印任务或再次出纸。"""
+    from app.core.config import get_settings
+    from app.core.response import now_local
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("XPYUN_ENABLED", "true")
+    monkeypatch.setenv("PRINTER_MODE", "local")
+    monkeypatch.setenv("PRINTER_HOST", "192.168.1.200")
+    get_settings.cache_clear()
+
+    store, order = await _seed_paid_order(db_session)
+    job = PrintJob(
+        store_id=store.id,
+        order_id=order.id,
+        ticket_type="KITCHEN",
+        content="<C>already printing</C><CUT>",
+        content_hash="active-hash",
+        status="PRINTING",
+        attempt_count=1,
+        locked_at=now_local(),
+        locked_by="original-print-owner",
+    )
+    db_session.add(job)
+    await db_session.commit()
+
+    with patch("app.services.print_service.EscposClient.print_ticket", new_callable=AsyncMock) as mock_print:
+        result = await PrintService.print_order(db_session, order.id)
+        explicit_retry = await PrintService.print_order(
+            db_session, order.id, print_job_id=job.id
+        )
+        mock_print.assert_not_awaited()
+
+    await db_session.refresh(job)
+    assert result["deduplicated"] is True
+    assert explicit_retry["deduplicated"] is True
+    assert result["print_job_id"] == job.id
+    assert explicit_retry["print_job_id"] == job.id
+    assert job.status == "PRINTING"
+    assert job.locked_by == "original-print-owner"
+    assert job.attempt_count == 1
+    get_settings.cache_clear()
+
+
+
+@pytest.mark.asyncio
+async def test_stale_print_recovery_emits_critical_uncertain_result_alert(db_session, caplog):
+    import logging
+    from datetime import timedelta
+
+    from app.core.response import now_local
+
+    store, order = await _seed_paid_order(db_session)
+    job = PrintJob(
+        store_id=store.id,
+        order_id=order.id,
+        ticket_type="KITCHEN",
+        content="<C>uncertain</C><CUT>",
+        content_hash="uncertain-stale-print",
+        status="PRINTING",
+        attempt_count=1,
+        locked_at=now_local() - timedelta(seconds=STALE_PRINTING_SEC + 1),
+        locked_by="crashed-worker",
+    )
+    db_session.add(job)
+    await db_session.commit()
+
+    with caplog.at_level(logging.CRITICAL, logger="app.services.print_service"):
+        reclaimed = await PrintService.reclaim_stale_printing(db_session)
+
+    await db_session.refresh(job)
+    assert reclaimed == 1
+    assert job.status == "RETRYING"
+    assert job.locked_at is None
+    assert job.locked_by is None
+    assert any("PRINT RESULT UNCERTAIN" in record.message for record in caplog.records)

@@ -102,7 +102,7 @@ def test_schema_model_table_alignment():
 
 if __name__ == "__main__":
     sql_tables = parse_sql_schema(ROOT / "sql" / "struct.sql")
-    model_tables = parse_models(ROOT / "backend" / "app" / "models" / "__init__.py")
+    model_tables = parse_models(ROOT / "backend" / "app" / "models")
     print("tables model-only:", sorted(set(model_tables) - set(sql_tables)))
     print("tables sql-only:", sorted(set(sql_tables) - set(model_tables)))
     for tname in sorted(model_tables):

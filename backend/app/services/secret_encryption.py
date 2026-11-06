@@ -75,17 +75,33 @@ class SecretEncryptionService:
         except ValueError:
             logger.warning("密文格式异常，无法解密")
             return None
-        try:
-            return cls._fernet(version).decrypt(token.encode()).decode()
-        except InvalidToken:
-            try:
-                return _fernet_from_material(cls._material(), legacy=True).decrypt(token.encode()).decode()
-            except (InvalidToken, ValueError, RuntimeError) as exc:
-                logger.warning("密文解密失败(含旧派生) version=%s: %s", version, exc)
-                return None
-        except (ValueError, RuntimeError) as exc:
-            logger.warning("密文解密失败 version=%s: %s", version, exc)
+        if version != CURRENT_KEY_VERSION:
+            logger.warning("不支持的业务密文版本: %s", version)
             return None
+
+        settings = get_settings()
+        materials = [
+            (settings.secret_encryption_key or settings.face_encryption_key or "").strip(),
+            (getattr(settings, "secret_encryption_key_previous", None) or "").strip(),
+        ]
+        # 先尝试当前密钥，再尝试上一把密钥；兼容旧版「截断+右侧补0」派生。
+        for material in dict.fromkeys(value for value in materials if value):
+            try:
+                return _fernet_from_material(material, legacy=False).decrypt(token.encode()).decode()
+            except InvalidToken:
+                try:
+                    return _fernet_from_material(material, legacy=True).decrypt(token.encode()).decode()
+                except InvalidToken:
+                    continue
+                except (ValueError, RuntimeError) as exc:
+                    logger.warning("业务密文旧派生解密失败 version=%s: %s", version, exc)
+                    continue
+            except (ValueError, RuntimeError) as exc:
+                logger.warning("业务密文解密失败 version=%s: %s", version, exc)
+                continue
+
+        logger.warning("业务密文解密失败：当前密钥与上一把密钥均无法解密 version=%s", version)
+        return None
 
     @classmethod
     def key_version(cls, stored: str | None) -> str | None:

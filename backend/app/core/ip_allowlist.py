@@ -21,13 +21,25 @@ WEBHOOK_PATHS = (
 )
 
 
+def _normalize_ip(value: str | None) -> str | None:
+    """只接受合法 IP 字面量并统一压缩格式，拒绝端口、脏值和任意字符串。"""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return ipaddress.ip_address(raw).compressed
+    except ValueError:
+        return None
+
+
 def client_ip(request: Request) -> str:
     """解析真实客户端 IP。
 
     仅当 request.client.host 属于 TRUSTED_PROXY_IPS 时，才信任
     X-Real-IP / X-Forwarded-For；否则直接使用直连 peer，防止客户端伪造绕过白名单与限流。
     """
-    peer = request.client.host if request.client else ""
+    peer_raw = request.client.host if request.client else ""
+    peer = _normalize_ip(peer_raw) or peer_raw
     settings = get_settings()
     from app.services.system_settings_service import SystemSettingsService
 
@@ -39,7 +51,7 @@ def client_ip(request: Request) -> str:
     if not trusted or not peer or not ip_allowed(peer, trusted):
         return peer
 
-    real = (request.headers.get("x-real-ip") or "").strip()
+    real = _normalize_ip(request.headers.get("x-real-ip"))
     if real:
         return real
     xff = (request.headers.get("x-forwarded-for") or "").strip()
@@ -48,11 +60,14 @@ def client_ip(request: Request) -> str:
         # 从右向左跳过可信代理，取第一个非可信 IP；
         # 最左段由客户端可伪造，直接采用会被绕过白名单与限流
         for part in reversed(parts):
-            if not ip_allowed(part, trusted):
-                return part
-        # 整条链均为可信代理（异常场景）：回退最左段
-        if parts:
-            return parts[0]
+            candidate = _normalize_ip(part)
+            if candidate and not ip_allowed(candidate, trusted):
+                return candidate
+        # 整条链均为可信代理或含非法项：回退最左侧第一个合法地址。
+        for part in parts:
+            candidate = _normalize_ip(part)
+            if candidate:
+                return candidate
     return peer
 
 
@@ -64,11 +79,15 @@ def _parse_allowlist(raw: str) -> list[ipaddress._BaseNetwork | ipaddress._BaseA
             continue
         try:
             if "/" in part:
-                items.append(ipaddress.ip_network(part, strict=False))
+                network = ipaddress.ip_network(part, strict=False)
+                # /0 等价于信任全网；用于 trusted_proxy_ips 时会让任意客户端伪造转发头。
+                if network.prefixlen == 0:
+                    raise ValueError("全网段不允许作为 IP 白名单")
+                items.append(network)
             else:
                 items.append(ipaddress.ip_address(part))
         except ValueError:
-            logger.warning("忽略非法 IP 白名单项: %s", part)
+            logger.debug("忽略非法 IP 白名单项: %s", part)
     return items
 
 
@@ -107,17 +126,18 @@ class WebhookAllowlistMiddleware(BaseHTTPMiddleware):
         )
         allowlist = _parse_allowlist(raw)
         if not allowlist:
-            # 生产未配置白名单时告警但放行（避免误杀）；可用 WEBHOOK_REQUIRE_ALLOWLIST=true 强制
+            # 生产必须 fail-closed：动态配置被清空或包含非法项时，不得静默放行支付/外卖回调。
             require = SystemSettingsService.resolved_bool_sync(
                 "webhook_require_allowlist",
                 bool(getattr(settings, "webhook_require_allowlist", False)),
             )
-            if settings.is_production and require:
+            if settings.is_production or require:
+                logger.error("Webhook IP 白名单为空或无有效项，拒绝回调 path=%s", path)
                 return json_error_response(
                     request,
                     status_code=403,
                     code=403,
-                    message="Webhook IP 白名单未配置",
+                    message="Webhook IP 白名单未配置或无有效项",
                 )
             return await call_next(request)
 

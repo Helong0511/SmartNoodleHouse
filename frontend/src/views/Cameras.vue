@@ -96,9 +96,9 @@
         <el-table-column label="抓拍" width="88" align="center">
           <template #default="{ row }">
             <el-image
-              v-if="row.snapshot_path"
-              :src="snapUrl(row.snapshot_path)"
-              :preview-src-list="[snapUrl(row.snapshot_path)]"
+              v-if="row.snapshot_url"
+              :src="snapUrl(row.snapshot_url)"
+              :preview-src-list="[snapUrl(row.snapshot_url)]"
               :preview-teleported="true"
               fit="cover"
               class="snap-thumb"

@@ -9,9 +9,10 @@ from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
 from app.models import DeliveryOrder, Order
-from app.services.delivery_context import PlatformCredentials
+from app.services.delivery_context import PlatformCredentials, get_credentials_for_store
 from app.services.delivery_providers import get_delivery_provider
 from app.services.print_tasks import handle_deferred_print
+from app.services.outbox_worker import register_outbox_handler
 
 logger = logging.getLogger(__name__)
 
@@ -85,3 +86,59 @@ async def _rollback_confirm(order_id: int | None, platform: str, platform_order_
             )
         await db.commit()
         logger.error("平台接单失败，已回滚本地状态 order_id=%s platform=%s", d_order.order_id, platform)
+
+
+@register_outbox_handler("delivery_manual", "confirm")
+@register_outbox_handler("webhook_task", "execute")
+async def execute_webhook_outbox_task(db, row) -> None:
+    """执行已持久化的 Webhook 副作用任务。
+
+    任务 payload 不保存平台密钥；每次执行均按 store_id 重新读取有效门店凭证。
+    Outbox 采用至少一次投递，平台 API 必须可安全重试；本地状态由各业务服务幂等保护。
+    """
+    import json
+
+    payload = json.loads(row.payload or "{}")
+    if not isinstance(payload, dict):
+        raise ValueError("webhook outbox payload must be an object")
+    action = str(payload.get("action") or "").lower()
+    if action == "print_ticket":
+        order_id = int(payload.get("order_id") or 0)
+        if not order_id:
+            raise ValueError("print_ticket missing order_id")
+        from app.services.print_service import PrintService, TICKET_CANCEL, TICKET_KITCHEN, TICKET_URGE
+
+        ticket_type = str(payload.get("ticket_type") or TICKET_KITCHEN).upper()
+        if ticket_type not in (TICKET_KITCHEN, TICKET_URGE, TICKET_CANCEL):
+            raise ValueError("invalid print ticket type")
+        await PrintService.print_order(db, order_id, ticket_type=ticket_type)
+        return
+
+    platform = str(payload.get("platform") or "").upper()
+    platform_order_id = str(payload.get("platform_order_id") or "")
+    store_id = int(payload.get("store_id") or 0)
+    if platform not in {"MEITUAN", "ELEME"} or not platform_order_id or store_id <= 0:
+        raise ValueError("webhook platform task missing platform/order/store")
+    credentials = await get_credentials_for_store(db, platform, store_id)
+    if credentials is None:
+        raise RuntimeError(f"门店平台凭证不可用，拒绝执行任务 store={store_id} platform={platform}")
+    # 先释放数据库事务/连接，再执行外部 HTTP。
+    await db.commit()
+    provider = get_delivery_provider(platform, credentials)
+    if action == "confirm_order":
+        ok = await provider.confirm_order(platform_order_id)
+        if ok is False and payload.get("rollback_on_fail"):
+            await _rollback_confirm(payload.get("order_id"), platform, platform_order_id)
+            return
+        if ok is False:
+            raise RuntimeError("平台接单确认失败")
+    elif action == "cancel_order":
+        ok = await provider.cancel_order(platform_order_id, str(payload.get("reason") or "商家取消"))
+        if ok is False:
+            raise RuntimeError("平台取消订单失败")
+    elif action == "reply_urge":
+        ok = await provider.reply_urge(platform_order_id, payload.get("raw") or {})
+        if ok is False:
+            raise RuntimeError("平台催单回复失败")
+    else:
+        raise ValueError(f"unsupported webhook outbox action: {action}")

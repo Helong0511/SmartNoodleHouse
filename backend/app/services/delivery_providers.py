@@ -235,7 +235,10 @@ class MeituanProvider(DeliveryProvider):
             "logistics_code": data.get("logistics_code") or order_obj.get("logistics_code"),
             "rider_name": data.get("rider_name") or data.get("courier_name"),
             "rider_phone": data.get("rider_phone") or data.get("courier_phone"),
-            "refund_id": str(data.get("refund_id") or data.get("refundId") or ""),
+            "refund_id": str(
+                data.get("refund_id") or data.get("refundId") or data.get("refund_no")
+                or data.get("refundNo") or data.get("out_refund_no") or ""
+            ),
             "refund_amount": Decimal(str(data.get("refund_amount") or data.get("refundAmount") or "0")),
             "reason": data.get("reason") or data.get("refund_reason"),
         }
@@ -250,6 +253,10 @@ class MeituanProvider(DeliveryProvider):
             logger.warning("[MEITUAN mock] %s %s", path, biz_params)
             return {"data": "ok", "_mock": True}
 
+        if self.credentials.store_id is not None and not self.credentials.platform_shop_id:
+            raise ValueError(
+                f"美团门店凭证缺少 platform_shop_id，拒绝使用全局默认门店 store_id={self.credentials.store_id}"
+            )
         if self.credentials.platform_shop_id and "app_poi_code" not in biz_params:
             biz_params = {**biz_params, "app_poi_code": self.credentials.platform_shop_id}
 
@@ -266,6 +273,8 @@ class MeituanProvider(DeliveryProvider):
             resp = await client.post(url, data=params)
         else:
             resp = await client.get(url, params=params)
+        # HTTP 4xx/5xx 不能仅凭 JSON body 中的 data=ok 被误判为平台成功。
+        resp.raise_for_status()
         try:
             data = resp.json()
         except Exception:
@@ -326,10 +335,19 @@ class MeituanProvider(DeliveryProvider):
                 "app_food_code": payload["app_food_code"],
                 "name": payload["name"],
                 "description": payload.get("description", ""),
+                "category_name": payload.get("category_name", "默认分类"),
                 "price": payload["price"],
                 "box_price": payload.get("box_price", "0"),
                 "min_order_count": payload.get("min_order_count", 1),
-                "skus": payload.get("skus") or [{"sku_id": payload["app_food_code"], "price": payload["price"], "spec": "默认"}],
+                "is_sold_out": int(payload.get("is_sold_out", 0)),
+                "skus": payload.get("skus") or [
+                    {
+                        "sku_id": payload["app_food_code"],
+                        "price": payload["price"],
+                        "spec": "默认",
+                        "stock": payload.get("stock", 9999),
+                    }
+                ],
             },
             ensure_ascii=False,
         )
@@ -382,7 +400,7 @@ class MeituanProvider(DeliveryProvider):
                 "name": p["name"],
                 "description": p.get("description", ""),
                 "price": p["price"],
-                "is_sold_out": 0,
+                "is_sold_out": int(p.get("is_sold_out", 0)),
                 "min_order_count": p.get("min_order_count", 1) or 1,
                 "unit": "份",
                 "box_price": str(p.get("box_price", 0) or 0),
@@ -555,14 +573,26 @@ class ElemeProvider(DeliveryProvider):
             "logistics_code": order.get("logisticsCode") or data.get("logistics_code"),
             "rider_name": (order.get("deliveryMan") or {}).get("name") if isinstance(order.get("deliveryMan"), dict) else None,
             "rider_phone": (order.get("deliveryMan") or {}).get("phone") if isinstance(order.get("deliveryMan"), dict) else None,
-            "refund_id": str(data.get("refundId") or order.get("refundId") or ""),
+            "refund_id": str(
+                data.get("refundId") or order.get("refundId") or data.get("refund_id")
+                or data.get("refundOrderId") or order.get("refundOrderId") or data.get("refund_no") or ""
+            ),
             "refund_amount": Decimal(str(order.get("refundAmount") or data.get("refund_amount") or "0")),
             "reason": order.get("refundReason") or data.get("reason"),
         }
 
     async def _rpc(self, action: str, params: dict[str, Any]) -> dict:
         settings = get_settings()
-        token = self.credentials.access_token or settings.eleme_access_token
+        # 显式门店上下文只能使用该门店授权 token；不得静默回退到另一门店的全局 token。
+        token = (
+            self.credentials.access_token
+            if self.credentials.store_id is not None
+            else self.credentials.access_token or settings.eleme_access_token
+        )
+        if self.credentials.store_id is not None and not token:
+            raise ValueError(
+                f"饿了么门店 access_token 缺失，拒绝使用全局 token store_id={self.credentials.store_id}"
+            )
         if not settings.eleme_app_id or not settings.eleme_app_secret or not token:
             if settings.is_production or not settings.allow_delivery_mock:
                 raise ValueError("饿了么未配置，禁止 Mock 成功")
@@ -585,11 +615,19 @@ class ElemeProvider(DeliveryProvider):
         url = settings.eleme_api_base.rstrip("/") + "/"
         client = await get_http_client()
         resp = await client.post(url, json=payload)
+        # JSON-RPC 错误体可能不含 error 字段；HTTP 非 2xx 必须先失败。
+        resp.raise_for_status()
         try:
             data = resp.json()
         except Exception:
             logger.error("饿了么响应非 JSON: %s", resp.text[:200])
             return {"error": resp.text[:200]}
+        if not isinstance(data, dict):
+            logger.error("饿了么响应结构无效 action=%s type=%s", action, type(data).__name__)
+            return {"error": {"code": "INVALID_RESPONSE", "message": "响应必须为 JSON 对象"}}
+        if data.get("error") is None and "result" not in data:
+            logger.error("饿了么响应缺少 result/error action=%s", action)
+            return {"error": {"code": "INVALID_RESPONSE", "message": "响应缺少 result 字段"}}
         if data.get("error"):
             logger.error("饿了么 API 失败 %s: %s", action, data)
         return data
@@ -642,7 +680,14 @@ class ElemeProvider(DeliveryProvider):
                 "name": payload["name"],
                 "description": payload.get("description", ""),
                 "categoryName": payload.get("category_name", "默认"),
-                "specs": [{"specId": payload["app_food_code"], "name": "默认", "price": payload["price"]}],
+                "specs": [
+                    {
+                        "specId": payload["app_food_code"],
+                        "name": "默认",
+                        "price": payload["price"],
+                        "stock": int(payload.get("stock", 9999)),
+                    }
+                ],
             },
         )
         ok = _ok_or_mock(data, ok_expr=data.get("error") is None)
@@ -654,6 +699,23 @@ class ElemeProvider(DeliveryProvider):
             except Exception:
                 result = {}
         platform_id = str(result.get("itemId") or result.get("id") or "") if ok else None
+        if ok and not platform_id and not data.get("_mock"):
+            return {
+                "ok": False,
+                "platform_id": None,
+                "error": "饿了么成功响应缺少 itemId，拒绝写入错误商品映射",
+            }
+        if ok and platform_id:
+            shelf_done = await self.set_sell_status(
+                [{"platform_sku_id": platform_id}],
+                on_shelf=int(payload.get("is_sold_out", 0)) == 0,
+            )
+            if shelf_done < 1:
+                return {
+                    "ok": False,
+                    "platform_id": platform_id,
+                    "error": "饿了么商品已创建，但上下架状态同步失败",
+                }
         return {"ok": ok, "platform_id": platform_id or None, "error": None if ok else str(data.get("error"))}
 
     async def sync_prices(self, items: list[dict]) -> int:

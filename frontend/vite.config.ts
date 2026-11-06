@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'node:path'
+import { env } from 'node:process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 
@@ -8,7 +9,7 @@ import type { Socket } from 'node:net'
  * Vite 开发服务器配置
  *
  * 【本地调试】npm run dev
- *   - host: 0.0.0.0 → 手机可通过局域网 IP 访问 H5 扫码页
+ *   - 默认仅监听 127.0.0.1；手机联调需显式设置 VITE_DEV_HOST=0.0.0.0，且不得暴露公网
  *   - /api、/uploads 代理到 127.0.0.1:8000（后端须已启动）
  *   - 后端 uvicorn --reload 重启瞬间常见 ECONNRESET：代理回 502 JSON，前端可重试
  *   - VITE_API_BASE_URL 在项目根 .env 中设为 /api
@@ -19,6 +20,8 @@ import type { Socket } from 'node:net'
  */
 
 const BACKEND = 'http://127.0.0.1:8000'
+// 安全默认只监听本机；手机联调时显式设置 VITE_DEV_HOST=0.0.0.0，且仅在可信局域网使用。
+const DEV_HOST = env.VITE_DEV_HOST || '127.0.0.1'
 
 const TRANSIENT_PROXY_CODES = new Set([
   'ECONNRESET',
@@ -76,8 +79,7 @@ export default defineConfig({
     alias: { '@': resolve(import.meta.dirname, 'src') },
   },
   server: {
-    // 允许手机通过 http://192.168.x.x:5173 访问（配合 .env H5_PUBLIC_BASE_URL）
-    host: '0.0.0.0',
+    host: DEV_HOST,
     port: 5173,
     proxy: {
       '/api': {

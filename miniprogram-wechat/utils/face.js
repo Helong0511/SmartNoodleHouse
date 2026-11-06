@@ -120,6 +120,7 @@ async function enrollFaceWelcome() {
       image_base64: b64,
       liveness_token: token,
       action_completed: true,
+      claimed_action: challenge && challenge.action,
     })
   } catch (e) {
     throw new Error(friendlyNetError(e))

@@ -127,7 +127,7 @@ TASK_CATALOG: list[dict] = [
         "id": "drain_outbox_events",
         "title": "消费 Outbox 事件",
         "category": "可靠投递",
-        "description": "处理支付副作用、退款补偿等事务型 outbox。",
+        "description": "处理支付副作用、退款补偿、推荐缓存失效等事务型 Outbox 事件。",
         "default_schedule": {"type": "interval", "unit": "seconds", "every": 30},
     },
     {
@@ -714,7 +714,7 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def drain_outbox_events():
-        """DB outbox worker：消费支付副作用/退款补偿等事务型事件。"""
+        """DB outbox worker：消费支付、退款补偿与推荐缓存失效等事务型事件。"""
         n = await process_pending_outbox(limit=30)
         if n:
             logger.info("Outbox events processed: %s", n)

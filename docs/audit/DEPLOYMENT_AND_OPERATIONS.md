@@ -159,7 +159,7 @@
 
 - DB：`pool_size + max_overflow` 显式配置；要求 `gunicorn -w × (pool_size+overflow) ≤ MySQL max_connections`（P1-401，config 注释明示）。
 - `pool_pre_ping=True` + `pool_recycle` 剔除失效连接。
-- Redis：单连接用于锁/限流/缓存，WS Pub/Sub 独立订阅连接。
+- Redis：每个 API Worker 独立使用 `BlockingConnectionPool`，默认每进程上限 50、池耗尽最多等待 0.75 秒；总连接上限约 `Gunicorn Worker 数 × REDIS_MAX_CONNECTIONS`，另需预留运维/监控/其他服务连接。WebSocket Pub/Sub 从对应 Worker 的连接池借用连接；不得按“全应用单连接”估算。
 - 摄像头/支付外部调用统一走 [http_client.py](file:///e:/SmartNoodleHouse/backend/app/core/http_client.py) 共享 httpx client，lifespan 关闭，防连接泄漏。
 - TTS 队列有界（100）防内存膨胀（P1-402）。
 

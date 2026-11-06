@@ -58,12 +58,12 @@ async def test_redis_job_lock_exclusive():
 
 
 @pytest.mark.asyncio
-async def test_redis_job_lock_fail_open_on_redis_error():
+async def test_redis_job_lock_fails_closed_on_redis_error():
     from app.services.scheduler_admin import redis_job_lock
 
     with patch("app.core.redis_client.get_redis", AsyncMock(side_effect=RuntimeError("down"))):
         async with redis_job_lock("t2") as ok:
-            assert ok is True
+            assert ok is False
 
 
 @pytest.mark.asyncio
@@ -247,3 +247,239 @@ async def test_leader_job_business_error_still_raises():
         with pytest.raises(RuntimeError, match="logic bug"):
             await wrapped()
     assert calls and calls[-1]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_leader_loss_cancels_inflight_wrapped_jobs():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def long_job():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    long_job.__name__ = "test_long_leader_job"
+    wrapped = sa.leader_job(long_job)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-cancel-test")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-cancel-test")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock()),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        task = asyncio.create_task(wrapped())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert task in sa._active_leader_job_tasks
+        count = await sa.cancel_active_leader_jobs(timeout=1)
+        assert count == 1
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert cancelled.is_set()
+    assert task not in sa._active_leader_job_tasks
+
+
+@pytest.mark.asyncio
+async def test_leader_job_does_not_replay_after_ambiguous_database_disconnect():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+    from sqlalchemy.exc import OperationalError
+
+    class _Orig(Exception):
+        def __init__(self):
+            self.args = (2013, "Lost connection during query")
+            super().__init__(2013, "Lost connection during query")
+
+    calls = 0
+    statuses = []
+
+    async def maybe_committed_then_disconnected():
+        nonlocal calls
+        calls += 1
+        raise OperationalError("COMMIT", {}, _Orig())
+
+    async def record(job_id, *, status, duration_ms, error=None):
+        statuses.append(status)
+
+    maybe_committed_then_disconnected.__name__ = "ambiguous_commit_job"
+    wrapped = sa.leader_job(maybe_committed_then_disconnected)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-ambiguous")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-ambiguous")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", side_effect=record),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        assert await wrapped() is None
+    assert calls == 1
+    assert statuses == ["skipped"]
+
+
+
+@pytest.mark.asyncio
+async def test_scheduler_stats_failure_does_not_swallow_leader_cancellation():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    started = asyncio.Event()
+
+    async def long_job():
+        started.set()
+        await asyncio.Event().wait()
+
+    long_job.__name__ = "test_stats_failure_cancel"
+    wrapped = sa.leader_job(long_job)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-stats-cancel")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-stats-cancel")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock(side_effect=RuntimeError("stats db down"))),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        task = asyncio.create_task(wrapped())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await sa.cancel_active_leader_jobs(timeout=1) == 1
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert task.done()
+    assert task not in sa._active_leader_job_tasks
+
+
+@pytest.mark.asyncio
+async def test_scheduler_stats_failure_does_not_change_success_result():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    async def successful_job():
+        return "business-result"
+
+    successful_job.__name__ = "test_stats_failure_success"
+    wrapped = sa.leader_job(successful_job)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-stats-success")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-stats-success")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock(side_effect=RuntimeError("stats db down"))),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        assert await wrapped() == "business-result"
+
+
+
+@pytest.mark.asyncio
+async def test_active_leader_job_count_tracks_only_running_tasks():
+    from app.services import scheduler_admin as sa
+
+    finished = asyncio.Event()
+
+    async def running():
+        await finished.wait()
+
+    task = asyncio.create_task(running())
+    sa._active_leader_job_tasks.add(task)
+    try:
+        assert sa.active_leader_job_count() >= 1
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        sa._active_leader_job_tasks.discard(task)
+
+    assert sa.active_leader_job_count() == 0
+
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_leader_jobs_has_bounded_wait_for_cancel_resistant_task():
+    from app.services import scheduler_admin as sa
+
+    release = asyncio.Event()
+
+    async def cancellation_resistant():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # 模拟第三方 I/O / 任务错误地吞掉取消信号。
+            await release.wait()
+
+    task = asyncio.create_task(cancellation_resistant())
+    sa._active_leader_job_tasks.add(task)
+    # 确保协程已进入可捕获 CancelledError 的 await，再触发取消。
+    await asyncio.sleep(0)
+    try:
+        count = await sa.cancel_active_leader_jobs(timeout=0.1)
+        assert count == 1
+        assert not task.done()
+        assert sa.active_leader_job_count() >= 1
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        sa._active_leader_job_tasks.discard(task)
+
+    assert sa.active_leader_job_count() == 0
+
+
+
+@pytest.fixture(autouse=True)
+def _activate_test_database_leader_epoch(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.core import leader_fencing
+
+    leader_fencing.activate_leader_epoch(100, "test-worker")
+    monkeypatch.setattr(
+        leader_fencing,
+        "confirm_database_epoch",
+        AsyncMock(return_value=True),
+    )
+    yield
+    leader_fencing.deactivate_leader_epoch("test-worker")
+
+
+
+@pytest.mark.asyncio
+async def test_leader_job_refuses_to_run_without_database_epoch():
+    from app.core import leader_lock, leader_fencing
+    from app.services import scheduler_admin as sa
+
+    called = False
+
+    async def job():
+        nonlocal called
+        called = True
+
+    job.__name__ = "must_not_run_without_epoch"
+    wrapped = sa.leader_job(job)
+    leader_fencing.deactivate_leader_epoch()
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-no-db-epoch")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-no-db-epoch")
+
+    with patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)):
+        assert await wrapped() is None
+
+    assert called is False

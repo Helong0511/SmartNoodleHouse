@@ -44,7 +44,10 @@ async def test_balance_debit_locks_customer_before_ledger_and_stays_idempotent()
         balance_gift=Decimal("8.00"),
         balance_principal=Decimal("2.00"),
     )
-    ledger = SimpleNamespace(id=4)
+    ledger = SimpleNamespace(
+        id=4, customer_id=1, order_id=8, payment_id=None, store_id=1,
+        delta_principal=Decimal("-2.00"), delta_gift=Decimal("-1.00"),
+    )
     order: list[str] = []
 
     async def execute(stmt, params=None):
