@@ -21,6 +21,7 @@ class FakeRedis:
         self.delete_calls: list[str] = []
         self.incr_calls: list[str] = []
         self.expire_calls: list[tuple] = []
+        self.eval_calls: list[tuple] = []
 
     async def get(self, key):
         return self.store.get(key)
@@ -40,6 +41,20 @@ class FakeRedis:
                 del self.store[k]
                 deleted += 1
         return deleted
+
+    async def eval(self, script, numkeys, *args):
+        self.eval_calls.append((script, numkeys, args))
+        keys, argv = args[:numkeys], args[numkeys:]
+        if not keys or not argv or self.store.get(keys[0]) != str(argv[0]):
+            return 0
+        if 'DEL' in script.upper():
+            return await self.delete(keys[0])
+        if 'SET' in script.upper() and len(keys) >= 2 and len(argv) >= 2:
+            self.store[keys[1]] = argv[1]
+            ttl = int(argv[2]) if len(argv) > 2 else None
+            self.set_calls.append((keys[1], argv[1], None, ttl))
+            return 'OK'
+        return 0
 
     async def incr(self, key):
         self.incr_calls.append(key)
@@ -205,15 +220,15 @@ async def test_menu_cache_bump_always_expire():
 async def test_reco_cache_lock_acquire_release():
     from app.services import reco_cache
     fake = FakeRedis()
-    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
-        ok1 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
-        assert ok1 is True
-        ok2 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
-        assert ok2 is False
-        await reco_cache.release_reco_lock(1, 1, "default", "a")
-        ok3 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
-        assert ok3 is True
-
+    with patch.object(reco_cache, 'get_redis', _patch_get_redis(fake)):
+        token1 = await reco_cache.try_acquire_reco_lock(1, 1, 'default', 'a')
+        assert isinstance(token1, str) and token1
+        token2 = await reco_cache.try_acquire_reco_lock(1, 1, 'default', 'a')
+        assert token2 is None
+        await reco_cache.release_reco_lock(1, 1, 'default', 'a', owner_token=token1)
+        token3 = await reco_cache.try_acquire_reco_lock(1, 1, 'default', 'a')
+        assert isinstance(token3, str) and token3 != token1
+        await reco_cache.release_reco_lock(1, 1, 'default', 'a', owner_token=token3)
 
 # ── reco_cache jitter TTL ──
 
@@ -221,13 +236,17 @@ async def test_reco_cache_lock_acquire_release():
 async def test_reco_cache_set_uses_jitter():
     from app.services import reco_cache
     fake = FakeRedis()
-    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
-        await reco_cache.set_cached_reco(1, 1, "default", "a", {"items": []}, "")
+    with patch.object(reco_cache, 'get_redis', _patch_get_redis(fake)):
+        token = await reco_cache.try_acquire_reco_lock(1, 1, 'default', 'a')
+        assert token
+        published = await reco_cache.set_cached_reco_if_owner(
+            1, 1, 'default', 'a', {'items': []}, '', token,
+        )
+        assert published is True
         key, value, nx, ex = fake.set_calls[-1]
-        # TTL 应在 96-144 范围内（120 ±20%）
         assert ex is not None
         assert 96 <= ex <= 144
-
+        await reco_cache.release_reco_lock(1, 1, 'default', 'a', owner_token=token)
 
 # ── reco_cache invalidate_customer 延迟双删 ──
 
@@ -236,13 +255,15 @@ async def test_reco_cache_invalidate_uses_retry(monkeypatch):
     from app.services import reco_cache
     fake = FakeRedis()
     # 预填充一些推荐缓存键
-    fake.store["snh:reco:c1:s1:default:a"] = "{}"
+    from app.core.cache_keys import reco_key
+    cache_key = reco_key(1, 1, 'default', 'a')
+    fake.store[cache_key] = '{}'
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
         # 禁用延迟双删的 sleep
         monkeypatch.setattr("asyncio.sleep", AsyncMock())
         await reco_cache.invalidate_customer(1)
-        # 应该调用了 delete
-        assert len(fake.delete_calls) > 0
+        assert cache_key in fake.delete_calls
+        assert cache_key not in fake.store
 
 
 # ── auth TTL 补全 ──
