@@ -72,17 +72,10 @@ return {bundle, version}
 
 
 async def get_menu_version(store_id: int) -> int:
-    """读取持久化菜单版本；兼容迁移旧版 30 天 TTL 版本键。"""
+    """读取当前门店的持久化菜单版本；新门店从 0 开始。"""
     try:
         r = await get_redis()
-        key = menu_version_key(store_id)
-        raw = await r.get(key)
-        if raw is None:
-            # 旧键为 snh:menu:ver:{store_id}。首次访问时原子迁移到同 hash slot 的新键。
-            legacy = await r.get(f"snh:menu:ver:{int(store_id)}")
-            if legacy is not None:
-                await r.set(key, str(legacy), nx=True)
-                raw = await r.get(key)
+        raw = await r.get(menu_version_key(store_id))
         return int(raw or 0)
     except Exception:
         return 0
@@ -97,10 +90,6 @@ async def bump_menu_version(store_id: int) -> int:
     try:
         r = await get_redis()
         key = menu_version_key(store_id)
-        if await r.get(key) is None:
-            legacy = await r.get(f"snh:menu:ver:{int(store_id)}")
-            if legacy is not None:
-                await r.set(key, str(legacy), nx=True)
         version = int(await r.incr(key))
         await delete_with_retry(r, menu_bundle_key(store_id))
         return version
