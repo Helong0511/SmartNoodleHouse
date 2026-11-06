@@ -996,12 +996,16 @@ class DeliveryService:
         """
         rows = (
             await db.execute(
-                select(OutboxEvent.payload).where(
+                select(OutboxEvent.payload)
+                .where(
                     OutboxEvent.aggregate_type == "webhook_task",
                     OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "FAILED")),
                     OutboxEvent.event_kind.like("deferred_%"),
                     OutboxEvent.payload.like("%cancel_order%"),
                 )
+                # MySQL 默认 REPEATABLE READ 下，前面的 hint SELECT 可能已建立旧快照；
+                # 必须用 locking/current read 看见等待 Order 锁期间刚提交的取消意图。
+                .with_for_update()
             )
         ).scalars().all()
         for raw_payload in rows:
