@@ -515,11 +515,21 @@ class DeliveryService:
     @classmethod
     async def merchant_confirm(cls, db: AsyncSession, order_id: int) -> tuple[Order, list[dict]]:
         """商家手动接单：本地 CONFIRMED + 异步平台 confirm。"""
-        order = await db.get(Order, order_id)
+        # Serialize manual-confirm attempts so concurrent double clicks cannot create
+        # multiple platform confirmations. A later retry after rollback can still proceed.
+        order = (
+            await db.execute(
+                select(Order).where(Order.id == int(order_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not order:
             raise AppException(40404, "订单不存在")
         d_order = (
-            await db.execute(select(DeliveryOrder).where(DeliveryOrder.order_id == order_id))
+            await db.execute(
+                select(DeliveryOrder)
+                .where(DeliveryOrder.order_id == int(order_id))
+                .with_for_update()
+            )
         ).scalar_one_or_none()
         if not d_order:
             raise AppException(40450, "非外卖订单")

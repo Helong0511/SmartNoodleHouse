@@ -803,3 +803,16 @@ def test_outbox_dead_letter_error_display_redacts_common_credentials():
     json_safe = _safe_error('{"access_token":"json-secret","apiAuthToken":"app-secret"}')
     assert "json-secret" not in json_safe
     assert "app-secret" not in json_safe
+
+
+
+def test_manual_delivery_confirm_retry_event_kinds_resolve_to_shared_handler():
+    """每次失败后的新接单尝试使用 confirm_<uuid>，仍由白名单 handler 执行。"""
+    from types import SimpleNamespace
+    from app.services import delivery_tasks  # noqa: F401 — register handler
+    from app.services.outbox_worker import OUTBOX_HANDLERS, _resolve_outbox_handler
+
+    handler = OUTBOX_HANDLERS[("delivery_manual", "confirm")]
+    for event_kind in ("confirm_0123456789abcdef", "confirm_abcdef0123456789"):
+        row = SimpleNamespace(aggregate_type="delivery_manual", event_kind=event_kind)
+        assert _resolve_outbox_handler(row) is handler

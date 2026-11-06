@@ -63,6 +63,8 @@ def _resolve_outbox_handler(row: OutboxEvent) -> OutboxHandler | None:
         handler = OUTBOX_HANDLERS.get(("reco_cache", "invalidate"))
     if handler is None and row.aggregate_type == "webhook_task" and row.event_kind.startswith("deferred_"):
         handler = OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    if handler is None and row.aggregate_type == "delivery_manual" and row.event_kind.startswith("confirm_"):
+        handler = OUTBOX_HANDLERS.get(("delivery_manual", "confirm"))
     return handler
 
 
