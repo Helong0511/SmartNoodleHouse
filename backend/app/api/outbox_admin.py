@@ -347,15 +347,16 @@ async def resolve_unknown_dead_letter(
             await db.flush()
             local_reconciled = True
     elif (
-        row.aggregate_type == "delivery_manual"
+        row.aggregate_type in ("delivery_manual", "webhook_task")
         and isinstance(payload, dict)
         and str(payload.get("action") or "").lower() == "confirm_order"
     ):
         # 手动接单在发起平台确认前已本地置为 CONFIRMED/ACCEPTED；
         # 未知结果人工核实成功时，补齐/验证本地摘要后再关闭 Outbox。
         try:
-            order_id = int(payload.get("order_id") or row.aggregate_id or 0)
-            delivery_order_id = int(row.aggregate_id)
+            order_id = int(payload.get("order_id") or (
+                row.aggregate_id if row.aggregate_type == "delivery_manual" else 0
+            ) or 0)
             payload_store_id = int(payload.get("store_id") or 0)
             platform = str(payload.get("platform") or "").upper()
             platform_order_id = str(payload.get("platform_order_id") or "")
@@ -363,7 +364,10 @@ async def resolve_unknown_dead_letter(
             raise AppException(40910, "接单事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409) from exc
         if (
             order_id <= 0
-            or delivery_order_id != order_id
+            or (
+                row.aggregate_type == "delivery_manual"
+                and int(row.aggregate_id) != order_id
+            )
             or payload_store_id <= 0
             or not platform
             or not platform_order_id
