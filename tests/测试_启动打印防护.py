@@ -30,12 +30,15 @@ def _base_prod(**kwargs):
         cors_origins="https://order.example.com",
         h5_public_base_url="https://order.example.com",
         secret_encryption_key="S7nB3qW9sE2mY6tR1uI5oP8aL4xC0vN2zM",
+        database_url="mysql+aiomysql://user:strong-password@db.example.internal:3306/snh",
+        allow_loopback_production_services=False,
         enable_rate_limit=True,
         allow_opencv_face_fallback=False,
         wechat_mch_id="1900000000",
         wechat_api_v3_key="k" * 32,
         wechat_cert_serial_no="ABC123",
         wechat_app_id="wxapp",
+        wechat_app_secret="wechat-app-secret-real",
         wechat_platform_public_key="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds3xfn/ygWy\n-----END PUBLIC KEY-----",
         wechat_platform_serial_no="TEST-PLATFORM-SERIAL",
         wechat_platform_cert_path="",
@@ -184,3 +187,183 @@ async def test_print_order_raises_when_enabled_but_incomplete(db_session, monkey
         await PrintService.print_order(db_session, order.id)
     assert ei.value.code == 50040
     get_settings.cache_clear()
+
+
+def test_prod_rejects_loopback_mysql_and_redis_without_explicit_opt_in():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                database_url="mysql+aiomysql://user:strong-password@127.0.0.1:3306/snh",
+                redis_url="redis://:strong-redis-password@127.0.0.1:6379/0",
+            )
+        )
+
+
+def test_prod_allows_loopback_mysql_and_redis_with_explicit_opt_in():
+    validate_settings(
+        _base_prod(
+            database_url="mysql+aiomysql://user:strong-password@127.0.0.1:3306/snh",
+            redis_url="redis://:strong-redis-password@[::1]:6379/0",
+            allow_loopback_production_services=True,
+        )
+    )
+
+
+def test_prod_loopback_redis_still_requires_password():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                redis_url="redis://127.0.0.1:6379/0",
+                allow_loopback_production_services=True,
+            )
+        )
+
+
+def test_prod_rejects_mysql_root_account():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                database_url="mysql+aiomysql://root:strong-password@db.example.internal:3306/snh",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "mysql://user:strong-password@db.example.internal:3306/snh",
+        "mysql+pymysql://user:strong-password@db.example.internal:3306/snh",
+    ],
+)
+def test_prod_rejects_sync_mysql_drivers(database_url):
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(database_url=database_url))
+
+
+def test_prod_rejects_placeholder_database_password():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                database_url="mysql+aiomysql://app_user:REPLACE_WITH_DB_PASSWORD@db.example.internal:3306/snh",
+            )
+        )
+
+
+def test_prod_rejects_placeholder_redis_password():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                redis_url="rediss://:REPLACE_WITH_REDIS_PASSWORD@redis.example.com:6379/0",
+            )
+        )
+
+
+def test_prod_rejects_placeholder_wechat_app_id():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(wechat_app_id="wx_REPLACE_WITH_APP_ID")
+        )
+
+
+def test_prod_rejects_placeholder_alipay_app_id():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                alipay_app_id="REPLACE_WITH_ALIPAY_APP_ID",
+                alipay_private_key="real-private-key",
+                alipay_public_key="real-public-key",
+                alipay_seller_id="2088000000000000",
+            )
+        )
+
+
+def test_prod_rejects_partial_wechat_credentials():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(wechat_app_secret="")
+        )
+
+
+def test_prod_rejects_partial_alipay_credentials():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                alipay_app_id="2021000000000001",
+                alipay_private_key="real-private-key",
+                alipay_public_key="",
+            )
+        )
+
+
+def test_prod_requires_valid_alipay_aes_key_when_phone_binding_enabled():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_alipay_phone_bind=True,
+                alipay_aes_key="replace_with_alipay_aes_key_base64==",
+            )
+        )
+
+
+def test_prod_requires_alipay_credentials_when_phone_binding_enabled():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_alipay_phone_bind=True,
+                alipay_aes_key="MDEyMzQ1Njc4OWFiY2RlZg==",
+            )
+        )
+
+
+def test_prod_requires_wechat_app_secret_when_phone_binding_enabled():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_wx_phone_bind=True,
+                wechat_app_secret="REPLACE_WITH_WECHAT_APP_SECRET",
+            )
+        )
+
+
+def test_prod_allows_empty_webhook_allowlist_only_when_explicitly_not_required():
+    validate_settings(
+        _base_prod(
+            webhook_ip_allowlist="",
+            webhook_require_allowlist=False,
+        )
+    )
+
+
+def test_prod_rejects_empty_webhook_allowlist_when_required():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                webhook_ip_allowlist="",
+                webhook_require_allowlist=True,
+            )
+        )
+
+
+def test_prod_rejects_invalid_nonempty_webhook_allowlist_even_when_optional():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                webhook_ip_allowlist="not-an-ip",
+                webhook_require_allowlist=False,
+            )
+        )
+
+
+def test_production_env_template_matches_single_host_startup_policy():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = (root / ".env.production.example").read_text(encoding="utf-8")
+    assert "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true" in env
+    assert "WEBHOOK_REQUIRE_ALLOWLIST=false" in env
+    assert "WEBHOOK_IP_ALLOWLIST=" in env
+    assert "ENABLE_ALIPAY_PHONE_BIND=false" in env
+    assert "ENABLE_WX_PHONE_BIND=false" in env
+    assert "\nALIPAY_APP_ID=\n" in env
+    assert "\nWECHAT_APP_ID=\n" in env
+    assert "\nWECHAT_APP_SECRET=\n" in env

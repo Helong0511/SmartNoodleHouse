@@ -1,6 +1,7 @@
 """生产启动校验：危险默认配置必须显式覆盖。"""
 from __future__ import annotations
 
+import base64
 import ipaddress
 import logging
 import re
@@ -12,8 +13,21 @@ from app.core.config import Settings
 logger = logging.getLogger(__name__)
 
 
-def _production_redis_url_errors(raw_url: str) -> list[str]:
-    """严格解析 redis:// 与 rediss://，不能用字符串中是否含 @ 判断密码。"""
+def _is_loopback_host(hostname: str | None) -> bool:
+    """识别 localhost、IPv4/IPv6 回环地址，避免字符串判断漏过 IPv6。"""
+    host = (hostname or "").strip().lower().rstrip(".")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _production_redis_url_errors(
+    raw_url: str, *, allow_loopback: bool = False
+) -> list[str]:
+    """严格解析 Redis URL；单机 loopback 仅允许显式 opt-in 且仍须密码。"""
     value = (raw_url or "").strip()
     errors: list[str] = []
     try:
@@ -24,10 +38,15 @@ def _production_redis_url_errors(raw_url: str) -> list[str]:
         return ["生产环境 REDIS_URL 格式无效，须为 redis:// 或 rediss:// URL"]
     if parsed.scheme.lower() not in ("redis", "rediss") or not hostname:
         errors.append("生产环境 REDIS_URL 须使用有效的 redis:// 或 rediss:// 地址")
-    if hostname in ("localhost", "127.0.0.1", "::1"):
-        errors.append("生产环境 REDIS_URL 不得指向 localhost/回环地址，须为生产 Redis 地址")
+    if _is_loopback_host(hostname) and not allow_loopback:
+        errors.append(
+            "生产环境 REDIS_URL 指向 localhost/回环地址；单机部署须显式设置 "
+            "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true，并确保 Redis 仅监听 loopback 且启用密码"
+        )
     if not password:
         errors.append("生产环境 REDIS_URL 必须配置 Redis 密码（支持 ACL username:password）")
+    elif re.search(r"replace[_-]|your[-_]password|example\.com", password, re.IGNORECASE):
+        errors.append("生产环境 REDIS_URL 密码仍为示例占位值，必须替换为真实强密码")
     return errors
 
 _DANGEROUS_JWT = {
@@ -242,11 +261,25 @@ def validate_settings(settings: Settings) -> None:
 
     webhook_allow = (getattr(settings, "webhook_ip_allowlist", None) or "").strip()
     if is_prod:
-        invalid_webhook_entries = _invalid_ip_allowlist_entries(webhook_allow)
+        require_webhook_allowlist = bool(
+            getattr(settings, "webhook_require_allowlist", False)
+        )
+        invalid_webhook_entries = (
+            _invalid_ip_allowlist_entries(webhook_allow) if webhook_allow else []
+        )
         if invalid_webhook_entries:
             errors.append(
                 "生产 WEBHOOK_IP_ALLOWLIST 必须是有效 IP/CIDR 列表；非法项: "
                 + ", ".join(invalid_webhook_entries)
+            )
+        elif not webhook_allow and require_webhook_allowlist:
+            errors.append(
+                "WEBHOOK_REQUIRE_ALLOWLIST=true 时必须配置所有已启用支付/外卖平台的官方回调出口 IP/CIDR"
+            )
+        elif not webhook_allow:
+            warnings.append(
+                "生产未启用 Webhook IP 白名单：支付/外卖回调仍必须通过平台签名、商户身份、金额/订单校验和幂等检查；"
+                "如所有已启用平台均提供稳定官方出口 IP/CIDR，可配置白名单并启用 WEBHOOK_REQUIRE_ALLOWLIST"
             )
 
     if is_prod:
@@ -262,14 +295,54 @@ def validate_settings(settings: Settings) -> None:
                 "生产 TRUSTED_PROXY_IPS 为空：将不信任任何转发头，反代后的请求会统一按代理 IP 限流"
             )
 
-    # P1-41: 生产环境必需配置项不得使用开发默认值
-    db_url = (getattr(settings, "database_url", None) or "").strip().lower()
-    if is_prod and ("sqlite" in db_url or "localhost" in db_url or "127.0.0.1" in db_url):
-        errors.append("生产环境 DATABASE_URL 不得使用 sqlite/localhost，须为生产 MySQL 地址")
+    # P1-41: 生产环境必需配置项不得使用开发默认值。
+    # 单机部署可将 MySQL/Redis 安全绑定到 loopback；默认拒绝，必须显式 opt-in。
+    allow_loopback_services = bool(
+        getattr(settings, "allow_loopback_production_services", False)
+    )
+    db_url = (getattr(settings, "database_url", None) or "").strip()
+    if is_prod:
+        try:
+            parsed_db = urlsplit(db_url)
+            db_scheme = parsed_db.scheme.lower()
+            db_host = parsed_db.hostname
+        except Exception:
+            parsed_db = None
+            db_scheme = ""
+            db_host = None
+        if db_scheme != "mysql+aiomysql" or not db_host:
+            errors.append("生产环境 DATABASE_URL 必须使用 mysql+aiomysql 异步驱动 URL；禁止同步 MySQL 驱动、SQLite 或无效连接串")
+        else:
+            db_user = (parsed_db.username or "").strip().lower()
+            db_password = parsed_db.password or ""
+            if not db_user or not db_password:
+                errors.append("生产环境 DATABASE_URL 必须配置专用数据库用户名和密码")
+            elif db_user == "root":
+                errors.append("生产环境 DATABASE_URL 禁止使用 MySQL root 账号，须使用最小权限应用账号")
+            elif re.search(
+                r"replace[_-]|your[-_]password|example\.com",
+                db_password,
+                re.IGNORECASE,
+            ):
+                errors.append("生产环境 DATABASE_URL 密码仍为示例占位值，必须替换为真实强密码")
+            if _is_loopback_host(db_host) and not allow_loopback_services:
+                errors.append(
+                    "生产环境 DATABASE_URL 指向 localhost/回环地址；单机部署须显式设置 "
+                    "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true，多机部署请使用私网数据库地址"
+                )
 
     redis_url = (getattr(settings, "redis_url", None) or "").strip()
     if is_prod:
-        errors.extend(_production_redis_url_errors(redis_url))
+        errors.extend(
+            _production_redis_url_errors(
+                redis_url, allow_loopback=allow_loopback_services
+            )
+        )
+        if allow_loopback_services:
+            warnings.append(
+                "已允许生产 MySQL/Redis 使用 loopback；请确认服务仅绑定 127.0.0.1/::1，"
+                "Redis 启用 ACL/密码，且云安全组/防火墙未向公网开放数据库端口"
+            )
     if is_prod:
         # maxmemory 与持久化为 Redis 服务端配置，代码层无法验证，但须提醒运维检查
         warnings.append(
@@ -296,21 +369,51 @@ def validate_settings(settings: Settings) -> None:
             v = str(value or "").strip()
             return bool(v) and bool(_placeholder_re.search(v))
 
-        wechat_ok = bool(
-            getattr(settings, "wechat_mch_id", None)
-            and getattr(settings, "wechat_api_v3_key", None)
-            and getattr(settings, "wechat_cert_serial_no", None)
-            and getattr(settings, "wechat_app_id", None)
+        wechat_required_fields = (
+            "wechat_mch_id",
+            "wechat_api_v3_key",
+            "wechat_cert_serial_no",
+            "wechat_app_id",
+            "wechat_app_secret",
         )
+        wechat_any = any(
+            str(getattr(settings, field, None) or "").strip()
+            for field in wechat_required_fields
+        )
+        wechat_ok = all(
+            str(getattr(settings, field, None) or "").strip()
+            for field in wechat_required_fields
+        )
+        if wechat_any and not wechat_ok:
+            errors.append(
+                "微信支付配置不完整：MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID/APP_SECRET 必须配齐，"
+                "避免支付可用但小程序身份/授权链路不可用"
+            )
         if wechat_ok:
-            for label in ("wechat_app_secret", "wechat_api_v3_key"):
+            for label in wechat_required_fields:
                 if _is_placeholder(getattr(settings, label, None)):
-                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实密钥")
-        alipay_ok = bool(
-            getattr(settings, "alipay_app_id", None)
-            and getattr(settings, "alipay_private_key", None)
-            and getattr(settings, "alipay_public_key", None)
+                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实配置")
+        alipay_required_fields = (
+            "alipay_app_id",
+            "alipay_private_key",
+            "alipay_public_key",
         )
+        alipay_any = any(
+            str(getattr(settings, field, None) or "").strip()
+            for field in alipay_required_fields
+        )
+        alipay_ok = all(
+            str(getattr(settings, field, None) or "").strip()
+            for field in alipay_required_fields
+        )
+        if alipay_any and not alipay_ok:
+            errors.append(
+                "支付宝支付配置不完整：APP_ID/应用私钥/支付宝公钥必须配齐，或全部留空停用该渠道"
+            )
+        if alipay_ok:
+            for label in alipay_required_fields:
+                if _is_placeholder(getattr(settings, label, None)):
+                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实配置")
         for label in ("wechat_notify_url", "alipay_notify_url", "meituan_notify_url", "eleme_notify_url"):
             if _is_placeholder(getattr(settings, label, None)):
                 errors.append(f"生产配置 {label.upper()} 仍为占位域名（your-domain），回调将无法送达")
@@ -323,6 +426,25 @@ def validate_settings(settings: Settings) -> None:
             or (getattr(settings, "alipay_seller_email", None) or "").strip()
         ):
             errors.append("生产启用支付宝时须配置 ALIPAY_SELLER_ID 或 ALIPAY_SELLER_EMAIL")
+        if getattr(settings, "enable_alipay_phone_bind", False):
+            aes_key = (getattr(settings, "alipay_aes_key", None) or "").strip()
+            try:
+                decoded_aes_key = base64.b64decode(aes_key, validate=True)
+            except Exception:
+                decoded_aes_key = b""
+            if len(decoded_aes_key) not in (16, 24, 32):
+                errors.append(
+                    "启用支付宝手机号授权时，生产 ALIPAY_AES_KEY 必须是 Base64 编码的 16/24/32 字节 AES 密钥"
+                )
+            if not alipay_ok:
+                errors.append("启用支付宝手机号授权时必须配置真实 ALIPAY_APP_ID/私钥/公钥")
+        if getattr(settings, "enable_wx_phone_bind", False):
+            wx_app_id = (getattr(settings, "wechat_app_id", None) or "").strip()
+            wx_app_secret = (getattr(settings, "wechat_app_secret", None) or "").strip()
+            if not wx_app_id or not wx_app_secret or _is_placeholder(wx_app_id) or _is_placeholder(wx_app_secret):
+                errors.append(
+                    "启用微信手机号授权时必须配置真实 WECHAT_APP_ID 和 WECHAT_APP_SECRET"
+                )
         if wechat_ok:
             plat_key = (getattr(settings, "wechat_platform_public_key", None) or "").strip()
             plat_cert = (getattr(settings, "wechat_platform_cert_path", None) or "").strip()

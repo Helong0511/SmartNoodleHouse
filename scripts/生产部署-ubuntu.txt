@@ -23,6 +23,13 @@ cd /path/to/SmartNoodleHouse
 cp .env.production.example .env
 nano .env
 # 必改：JWT_SECRET、DATABASE_URL、域名、微信/支付宝密钥
+# 单机同机部署：.env.production.example 默认使用 127.0.0.1 连接 MySQL/Redis，
+#   ALLOW_LOOPBACK_PRODUCTION_SERVICES=true 仅允许这两个依赖走 loopback；
+#   确认 MySQL bind-address=127.0.0.1、Redis bind=127.0.0.1 且 requirepass/ACL 已启用，
+#   云安全组/防火墙不得向公网开放 3306/6379。远程依赖请设该开关 false 并使用私网地址。
+# Webhook IP 白名单：只有当所有已启用平台均有稳定官方回调出口 IP/CIDR 时才设
+#   WEBHOOK_REQUIRE_ALLOWLIST=true 并填全；否则保持 false，系统仍强制验签、商户身份、
+#   金额/订单校验和幂等。微信支付官方 IP 段以其《回调通知注意事项》最新版本为准。
 
 # ── 2. 后端依赖与迁移 ──
 cd backend
