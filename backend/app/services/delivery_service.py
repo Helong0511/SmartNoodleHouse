@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -251,22 +252,37 @@ class DeliveryService:
         # 对规范化后的完整事件内容做摘要：完全相同的回调稳定去重，不同内容不会撞同一个业务键。
         payload = dumps_json(raw)
         if not event_id:
+            canonical_payload = json.dumps(
+                raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+            )
             digest = hashlib.sha256(
-                f"{platform.upper()}|{event_type}|{platform_order_id or ''}|{payload}".encode("utf-8")
+                f"{platform.upper()}|{event_type}|{platform_order_id or ''}|{canonical_payload}".encode("utf-8")
             ).hexdigest()
             event_id = f"sha256:{digest}"
-        # 截断 payload，避免无限期保存大量 PII
-        db.add(
-            DeliveryCallbackLog(
-                platform=platform.upper(),
-                event_type=event_type,
-                event_id=event_id,
-                platform_order_id=platform_order_id,
-                order_id=order_id,
-                payload=payload,
-            )
+        # 截断 payload，避免无限期保存大量 PII；重复事件日志仅在唯一键冲突时忽略。
+        log_row = DeliveryCallbackLog(
+            platform=platform.upper(),
+            event_type=event_type,
+            event_id=event_id,
+            platform_order_id=platform_order_id,
+            order_id=order_id,
+            payload=payload,
         )
-        await db.flush()
+        try:
+            async with db.begin_nested():
+                db.add(log_row)
+                await db.flush()
+        except IntegrityError:
+            existing = (
+                await db.execute(
+                    select(DeliveryCallbackLog).where(
+                        DeliveryCallbackLog.platform == platform.upper(),
+                        DeliveryCallbackLog.event_id == event_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                raise
 
     @classmethod
     async def _add_item_options(

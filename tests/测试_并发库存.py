@@ -16,11 +16,20 @@ def test_make_event_id_prefers_request_id():
     assert eid == "MEITUAN:R1"
 
 
-def test_make_event_id_stable_hash():
-    a = make_event_id("ELEME", {"type": "217"}, b"abc")
-    b = make_event_id("ELEME", {"type": "217"}, b"abc")
-    c = make_event_id("ELEME", {"type": "217"}, b"abd")
-    assert a == b and a != c
+def test_make_event_id_stable_hash_uses_canonical_payload():
+    # 已验签的结构化 payload 是事件身份来源；传输层 JSON 排版不应改变事件 ID。
+    raw = {"type": "217", "order_id": "order-1"}
+    a = make_event_id("ELEME", raw, b'{"type":"217","order_id":"order-1"}')
+    b = make_event_id("ELEME", raw, b'{ "order_id": "order-1", "type": "217" }')
+    changed = make_event_id(
+        "ELEME", {"type": "217", "order_id": "order-1", "status": "DELIVERED"}, b"abc"
+    )
+    empty_a = make_event_id("ELEME", {}, b"abc")
+    empty_b = make_event_id("ELEME", {}, b"abd")
+    assert a == b
+    assert a != changed
+    # 无结构化 payload 时才回退到原始 body 指纹。
+    assert empty_a != empty_b
 
 
 def test_cannot_paid_twice_via_staff():

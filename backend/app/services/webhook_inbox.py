@@ -75,7 +75,14 @@ def make_event_id(platform: str, raw: dict[str, Any], body: bytes) -> str:
     elif raw.get("orderId"):
         order_id = str(raw["orderId"])
     event = str(raw.get("type") or raw.get("event") or raw.get("status") or "")
-    digest = hashlib.sha256(body).hexdigest()[:24]
+    # 无官方事件 ID 时按已验签后的结构化 payload 计算指纹。
+    # JSON 空白、字段顺序或表单编码差异不应让同一事件重复入 Inbox。
+    canonical_payload = (
+        json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        if raw
+        else body.decode("utf-8", errors="replace")
+    )
+    digest = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()[:24]
     return f"{platform}:{order_id}:{event}:{digest}"
 
 
