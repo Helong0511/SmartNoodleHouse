@@ -44,6 +44,8 @@ def _production_redis_url_errors(
         )
     if not password:
         errors.append("生产环境 REDIS_URL 必须配置 Redis 密码（支持 ACL username:password）")
+    elif re.search(r"replace[_-]|your[-_]password|example\\.com", password, re.IGNORECASE):
+        errors.append("生产环境 REDIS_URL 密码仍为示例占位值，必须替换为真实强密码")
     return errors
 
 _DANGEROUS_JWT = {
@@ -309,11 +311,24 @@ def validate_settings(settings: Settings) -> None:
             db_host = None
         if db_scheme not in ("mysql+aiomysql", "mysql+pymysql", "mysql") or not db_host:
             errors.append("生产环境 DATABASE_URL 须为有效 MySQL URL，禁止 SQLite 或无效连接串")
-        elif _is_loopback_host(db_host) and not allow_loopback_services:
-            errors.append(
-                "生产环境 DATABASE_URL 指向 localhost/回环地址；单机部署须显式设置 "
-                "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true，多机部署请使用私网数据库地址"
-            )
+        else:
+            db_user = (parsed_db.username or "").strip().lower()
+            db_password = parsed_db.password or ""
+            if not db_user or not db_password:
+                errors.append("生产环境 DATABASE_URL 必须配置专用数据库用户名和密码")
+            elif db_user == "root":
+                errors.append("生产环境 DATABASE_URL 禁止使用 MySQL root 账号，须使用最小权限应用账号")
+            elif re.search(
+                r"replace[_-]|your[-_]password|example\\.com",
+                db_password,
+                re.IGNORECASE,
+            ):
+                errors.append("生产环境 DATABASE_URL 密码仍为示例占位值，必须替换为真实强密码")
+            if _is_loopback_host(db_host) and not allow_loopback_services:
+                errors.append(
+                    "生产环境 DATABASE_URL 指向 localhost/回环地址；单机部署须显式设置 "
+                    "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true，多机部署请使用私网数据库地址"
+                )
 
     redis_url = (getattr(settings, "redis_url", None) or "").strip()
     if is_prod:
