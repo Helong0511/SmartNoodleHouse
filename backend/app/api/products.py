@@ -33,7 +33,7 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services.audit_service import AuditService
-from app.services.recommendation_service import invalidate_store_caches
+from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.services.taste_profile_service import profile_payload, recompute_product
 from app.services.category_require import (
@@ -599,7 +599,7 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         await recompute_product(db, int(product.id))
     except Exception:
         logger.exception("新品口味画像自动推导失败 product_id=%s", product.id)
-    await invalidate_store_caches(int(product.store_id))
+    await enqueue_menu_cache_invalidation(db, int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id, "product_no": product.product_no}, request=request)
 
 
@@ -725,7 +725,7 @@ async def update_product(
         await recompute_product(db, int(product.id))
     except Exception:
         logger.exception("餐品更新后口味画像重算失败 product_id=%s", product.id)
-    await invalidate_store_caches(int(product.store_id))
+    await enqueue_menu_cache_invalidation(db, int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id}, request=request)
 
 
@@ -783,7 +783,7 @@ async def delete_product(product_id: int, request: Request, db: DbSession, user:
     await db.execute(delete(DeliveryProductMap).where(DeliveryProductMap.product_id == product_id))
     await db.delete(product)
     await db.flush()
-    await invalidate_store_caches(int(product.store_id))
+    await enqueue_menu_cache_invalidation(db, int(product.store_id))
     await AuditService.log_staff(
         db,
         user=user,
