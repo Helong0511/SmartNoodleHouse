@@ -1,8 +1,11 @@
 """外卖平台异步回传任务（回调先应答，再调平台 API）"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
+
+import httpx
 
 from sqlalchemy import select
 
@@ -12,9 +15,30 @@ from app.models import DeliveryOrder, Order
 from app.services.delivery_context import PlatformCredentials, get_credentials_for_store
 from app.services.delivery_providers import get_delivery_provider
 from app.services.print_tasks import handle_deferred_print
-from app.services.outbox_worker import register_outbox_handler
+from app.services.outbox_worker import ExternalSideEffectUncertain, register_outbox_handler
 
 logger = logging.getLogger(__name__)
+
+
+async def _call_external_side_effect(action: str, platform: str, platform_order_id: str, operation):
+    """识别请求已可能送达下游但响应未知的传输故障，禁止 Outbox 自动重发。"""
+    try:
+        return await operation()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code >= 500:
+            raise ExternalSideEffectUncertain(
+                f"{platform} {action} order={platform_order_id}: HTTP {exc.response.status_code}; "
+                "平台可能已执行，请核实平台订单状态后再处理"
+            ) from exc
+        raise
+    except httpx.TransportError as exc:
+        # 连接尚未建立/连接池未分配时可以安全重试；其他传输中断可能发生在请求发送之后。
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+            raise
+        raise ExternalSideEffectUncertain(
+            f"{platform} {action} order={platform_order_id}: {type(exc).__name__}; "
+            "请求结果未知，请核实平台订单状态后再处理"
+        ) from exc
 
 
 async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
@@ -126,18 +150,27 @@ async def execute_webhook_outbox_task(db, row) -> None:
     await db.commit()
     provider = get_delivery_provider(platform, credentials)
     if action == "confirm_order":
-        ok = await provider.confirm_order(platform_order_id)
+        ok = await _call_external_side_effect(
+            action, platform, platform_order_id,
+            lambda: provider.confirm_order(platform_order_id),
+        )
         if ok is False and payload.get("rollback_on_fail"):
             await _rollback_confirm(payload.get("order_id"), platform, platform_order_id)
             return
         if ok is False:
             raise RuntimeError("平台接单确认失败")
     elif action == "cancel_order":
-        ok = await provider.cancel_order(platform_order_id, str(payload.get("reason") or "商家取消"))
+        ok = await _call_external_side_effect(
+            action, platform, platform_order_id,
+            lambda: provider.cancel_order(platform_order_id, str(payload.get("reason") or "商家取消")),
+        )
         if ok is False:
             raise RuntimeError("平台取消订单失败")
     elif action == "reply_urge":
-        ok = await provider.reply_urge(platform_order_id, payload.get("raw") or {})
+        ok = await _call_external_side_effect(
+            action, platform, platform_order_id,
+            lambda: provider.reply_urge(platform_order_id, payload.get("raw") or {}),
+        )
         if ok is False:
             raise RuntimeError("平台催单回复失败")
     else:
