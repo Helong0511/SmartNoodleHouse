@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -19,7 +19,12 @@ from app.services.outbox_worker import ExternalSideEffectUncertain, register_out
 logger = logging.getLogger(__name__)
 
 
-async def _call_external_side_effect(action: str, platform: str, platform_order_id: str, operation):
+async def _call_external_side_effect(
+    action: str,
+    platform: str,
+    platform_order_id: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> Any:
     """识别请求已可能送达下游但响应未知的传输故障，禁止 Outbox 自动重发。"""
     try:
         return await operation()
