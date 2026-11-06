@@ -35,4 +35,6 @@ def test_ubuntu_deployment_instructions_cover_redis_kernel_and_memory_checks():
     assert "python3.11 -m venv .venv" in instructions
     assert "pip install -r requirements.lock" in instructions
     assert "python scripts/check_requirements_lock.py" in instructions
+    assert "chmod 600 .env" in instructions
+    assert "chmod 640 /etc/redis/redis.conf" in instructions
     assert "maxmemory-policy noeviction" in instructions
