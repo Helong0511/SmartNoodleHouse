@@ -528,14 +528,14 @@ async def sync_refund(refund_no: str, request: Request, db: DbSession, user: Cur
     if before_status != "SUCCESS" and row.status == "SUCCESS" and order:
         try:
             await ws_manager.notify_order_event(
-            "ORDER_REFUNDED",
-            {
-                "order_id": order.id,
-                "order_no": order.order_no,
-                "refund_no": row.refund_no,
-                "amount": str(row.amount),
-                "store_id": order.store_id,
-            },
+                "ORDER_REFUNDED",
+                {
+                    "order_id": order.id,
+                    "order_no": order.order_no,
+                    "refund_no": row.refund_no,
+                    "amount": str(row.amount),
+                    "store_id": order.store_id,
+                },
             )
         except Exception:
             # The refund transaction is already committed; a transient websocket failure
