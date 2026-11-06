@@ -22,6 +22,8 @@
 cd /path/to/SmartNoodleHouse
 cp .env.production.example .env
 nano .env
+sudo chown root:www-data .env
+sudo chmod 640 .env  # systemd 由 root 读取；应用进程 www-data 也需读取 Pydantic env_file
 # 必改：JWT_SECRET、DATABASE_URL、域名、微信/支付宝密钥
 # 单机同机部署：.env.production.example 默认使用 127.0.0.1 连接 MySQL/Redis，
 #   ALLOW_LOOPBACK_PRODUCTION_SERVICES=true 仅允许这两个依赖走 loopback；
@@ -31,11 +33,55 @@ nano .env
 #   WEBHOOK_REQUIRE_ALLOWLIST=true 并填全；否则保持 false，系统仍强制验签、商户身份、
 #   金额/订单校验和幂等。微信支付官方 IP 段以其《回调通知注意事项》最新版本为准。
 
-# ── 2. 后端依赖与迁移 ──
+# ── Redis 单机基线（外部托管 Redis 可跳过安装，仅落实等价安全配置）──
+# 本机 Redis 默认只监听 127.0.0.1；禁止绑定 0.0.0.0/公网地址。
+sudo apt install -y redis-server
+sudo cp redis.conf.example /etc/redis/redis.conf
+sudo nano /etc/redis/redis.conf
+# 必须先把 requirepass 替换成随机强密码，并与 .env 的 REDIS_URL 密码保持一致；按主机内存调整 maxmemory。
+sudo chown root:redis /etc/redis/redis.conf
+sudo chmod 640 /etc/redis/redis.conf  # 限制 Redis 密码配置文件读取权限
+sudo systemctl enable redis-server
+sudo systemctl restart redis-server
+sudo systemctl --no-pager --full status redis-server
+
+# ── Redis 主机与内存基线（生产必做）──
+# Redis 官方建议开启 overcommit，避免 RDB/AOF 后台 fork 在 Linux 内存策略下失败：
+sudo tee /etc/sysctl.d/99-smart-noodle-redis.conf >/dev/null <<'EOF'
+vm.overcommit_memory = 1
+EOF
+sudo sysctl --system
+# Redis 配置必须显式设置 maxmemory 与 maxmemory-policy noeviction；本仓库 redis.conf.example
+# 默认 512mb 仅为小型单店示例，部署前按实测内存、MySQL/OS 预算及 AOF/RDB fork 峰值调整。
+# 本项目 Redis 混合保存缓存、限流、一次性凭证、活体挑战和分布式锁，禁止 allkeys-lru。
+# 达到 maxmemory 后写入应报 OOM 并触发关键路径 fail-closed/缓存降级，而不是淘汰安全状态。
+# Redis 启动后用认证安全地检查内存/持久化/拒绝写入指标（不要把密码写进命令行历史）：
+#   read -rsp 'Redis password: ' REDISCLI_AUTH; echo; export REDISCLI_AUTH
+#   redis-cli --no-auth-warning INFO memory | grep -E 'used_memory_human|maxmemory_human|mem_fragmentation_ratio'
+#   redis-cli --no-auth-warning INFO stats | grep -E 'evicted_keys|expired_keys|rejected_connections'
+#   redis-cli --no-auth-warning INFO persistence | grep -E 'rdb_last_bgsave_status|aof_last_write_status|aof_rewrite_in_progress'
+#   unset REDISCLI_AUTH
+# 告警：used_memory 接近 maxmemory、evicted_keys 非零、拒绝写入、AOF/RDB 状态异常、磁盘空间不足。
+# Redis 官方还建议关闭 Transparent Huge Pages；先执行并在重启后验证：
+#   echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+
+# ── 2. Python 运行时、后端依赖与迁移 ──
+# Ubuntu 22.04 默认 python3 通常是 3.10；本项目 CI/锁文件目标为 Python 3.11+，不可直接用系统 python3。
+sudo apt update
+sudo apt install -y software-properties-common
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev build-essential
+python3.11 --version
 cd backend
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+# 使用仓库维护的直接依赖固定版本清单，避免生产部署无意漂移到未经 CI 验证的新版本。
+pip install -r requirements.lock
+cd ..
+python scripts/check_requirements_lock.py
+cd backend
 alembic upgrade head
 
 # ── 3. 前端构建 ──
