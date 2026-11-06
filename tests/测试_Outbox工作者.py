@@ -220,11 +220,11 @@ async def test_claim_pending_outbox_requires_remaining_attempt_budget():
 
 @pytest.mark.asyncio
 async def test_stock_menu_invalidation_outbox_is_enqueued_in_business_transaction(monkeypatch):
-    from app.services import stock_service, outbox_worker
+    from app.services import stock_service, menu_cache_service
 
     enqueue = AsyncMock(return_value=(MagicMock(), True))
     deduct = AsyncMock()
-    monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
+    monkeypatch.setattr(menu_cache_service, "enqueue_outbox", enqueue)
     monkeypatch.setattr(stock_service, "deduct_stock", deduct)
 
     await stock_service.deduct_for_order_items(
