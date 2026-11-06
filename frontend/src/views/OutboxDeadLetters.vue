@@ -130,7 +130,7 @@ async function replay(row: OutboxDeadLetter) {
   try {
     const { value } = await ElMessageBox.prompt(
       row.result_unknown
-        ? `事件 #${row.id} 的平台执行结果未知。请先核实对应外卖平台/打印设备确实没有执行；原因中必须包含“下游核实未执行”，否则系统拒绝重放。`
+        ? `事件 #${row.id} 的平台执行结果未知。请先核实对应外卖平台确实没有执行；原因中必须包含“下游核实未执行”，否则系统拒绝重放。`
         : `将事件 #${row.id} 重新放入待处理队列。请填写故障修复情况或重放原因（至少 8 个字符）。`,
       '确认人工重放',
       {
@@ -143,7 +143,7 @@ async function replay(row: OutboxDeadLetter) {
         inputValidator: (value: string) => {
           if (value.trim().length < 8) return '原因至少需要 8 个字符'
           if (row.result_unknown && !value.includes('下游核实未执行')) {
-            return '结果未知事件必须先核实平台/设备状态，并在原因中写入“下游核实未执行”'
+            return '结果未知事件必须先核实平台订单状态，并在原因中写入“下游核实未执行”'
           }
           return true
         },
@@ -164,8 +164,8 @@ async function replay(row: OutboxDeadLetter) {
 async function resolveAsSuccess(row: OutboxDeadLetter) {
   try {
     const { value } = await ElMessageBox.prompt(
-      `请确认已核实对应外卖平台/打印设备已成功执行。关闭后系统不会再次发送该操作。`,
-      '核实外部操作已成功',
+      `请确认已核实对应外卖平台已成功执行。关闭后系统不会再次发送该操作。`,
+      '核实平台操作已成功',
       {
         confirmButtonText: '确认关闭死信',
         cancelButtonText: '取消',
@@ -176,7 +176,7 @@ async function resolveAsSuccess(row: OutboxDeadLetter) {
     )
     resolvingId.value = row.id
     await resolveOutboxDeadLetter(row.id, value.trim())
-    ElMessage.success(`事件 #${row.id} 已按外部平台成功结果关闭`)
+    ElMessage.success(`事件 #${row.id} 已按平台成功结果关闭`)
     await load()
   } catch (error: any) {
     if (error === 'cancel' || error === 'close') return
