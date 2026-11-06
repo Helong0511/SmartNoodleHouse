@@ -212,10 +212,10 @@ def test_unknown_external_result_requires_explicit_reconciliation_before_replay(
     assert _is_external_result_unknown(marker)
     assert not _is_external_result_unknown("ordinary provider failure")
     with pytest.raises(AppException):
-        _require_external_result_replay_confirmation(marker, False)
-    _require_external_result_replay_confirmation(marker, True)
+        _require_external_result_replay_confirmation(marker, False, "")
+    _require_external_result_replay_confirmation(marker, True, "下游核实未执行；订单仍待接单")
     with pytest.raises(AppException):
-        _require_external_result_replay_confirmation("ordinary failure", True)
+        _require_external_result_replay_confirmation("ordinary failure", True, "下游核实未执行；核对完成")
 
 
 @pytest.mark.asyncio
