@@ -1168,6 +1168,8 @@ async def test_resolve_cancel_unknown_outbox_reconciles_order_before_marking_don
             "action": "cancel_order",
             "order_id": 701,
             "store_id": 7,
+            "platform": "MEITUAN",
+            "platform_order_id": "MT-701",
             "reason": "商家缺货",
         }),
     )
@@ -1228,7 +1230,13 @@ async def test_resolve_cancel_unknown_outbox_rejects_store_mismatch():
         aggregate_type="webhook_task",
         aggregate_id=602,
         event_kind="deferred_cancel_order",
-        payload=json.dumps({"action": "cancel_order", "order_id": 702, "store_id": 7}),
+        payload=json.dumps({
+            "action": "cancel_order",
+            "order_id": 702,
+            "store_id": 7,
+            "platform": "MEITUAN",
+            "platform_order_id": "MT-702",
+        }),
     )
     order = SimpleNamespace(id=702, store_id=8, status="CONFIRMED")
     delivery_order = SimpleNamespace(id=602, order_id=702, delivery_status="ACCEPTED")
