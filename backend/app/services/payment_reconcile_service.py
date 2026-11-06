@@ -161,6 +161,35 @@ class PaymentReconcileService:
 
         try:
             channel_rows = parse_channel_bill_csv(ch, bill_csv)
+            if scope_id > 0 and channel_rows:
+                # 门店级账单必须保留商户支付单号，以便阻止把同一商户号的总部总账
+                # 误导入单店批次。无法判断归属的行宁可拒绝，也不制造跨店 LONG 差异。
+                if any(not row.get("local_payment_no") for row in channel_rows):
+                    raise ValueError("门店级对账账单必须包含商户支付单号列（payment_no/out_trade_no）")
+                payment_numbers = list(
+                    dict.fromkeys(str(row["local_payment_no"]) for row in channel_rows)
+                )
+                # 账单可能包含其他门店的有效交易；检查已知商户单号的真实归属。
+                # 未在本地找到的单号仍保留为 LONG 差异，供门店核查渠道侧孤儿交易。
+                for offset in range(0, len(payment_numbers), 500):
+                    chunk = payment_numbers[offset : offset + 500]
+                    ownership_rows = (
+                        await db.execute(
+                            select(Payment.payment_no, Order.store_id, RechargeOrder.store_id)
+                            .outerjoin(Order, Payment.order_id == Order.id)
+                            .outerjoin(RechargeOrder, Payment.recharge_order_id == RechargeOrder.id)
+                            .where(
+                                Payment.provider == ch,
+                                Payment.payment_no.in_(chunk),
+                            )
+                        )
+                    ).all()
+                    for payment_no, order_store_id, recharge_store_id in ownership_rows:
+                        owner_store_id = order_store_id or recharge_store_id
+                        if owner_store_id is None or int(owner_store_id) != scope_id:
+                            raise ValueError(
+                                f"门店账单包含其他门店或无法确认归属的支付单: {payment_no}"
+                            )
             start = datetime.combine(bill_date, time.min).replace(tzinfo=now_local().tzinfo)
             end = start + timedelta(days=1)
             local_payments = list(
