@@ -30,6 +30,8 @@ def _base_prod(**kwargs):
         cors_origins="https://order.example.com",
         h5_public_base_url="https://order.example.com",
         secret_encryption_key="S7nB3qW9sE2mY6tR1uI5oP8aL4xC0vN2zM",
+        database_url="mysql+aiomysql://user:strong-password@db.example.internal:3306/snh",
+        allow_loopback_production_services=False,
         enable_rate_limit=True,
         allow_opencv_face_fallback=False,
         wechat_mch_id="1900000000",
