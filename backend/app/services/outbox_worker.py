@@ -337,6 +337,32 @@ async def _mark_uncertain(db: AsyncSession, outbox_id: int, err: str, *, wid: st
     )
 
 
+async def _mark_done_after_handler(db: AsyncSession, outbox_id: int, *, wid: str) -> None:
+    """handler 已成功后，即使辅助幂等标记失败也不能重发外部副作用。"""
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == int(outbox_id),
+            OutboxEvent.status == "PROCESSING",
+            OutboxEvent.locked_by == wid,
+        )
+        .values(
+            status="DONE",
+            processed_at=now_local(),
+            last_error=None,
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+        )
+    )
+    await db.commit()
+    if int(result.rowcount or 0) != 1:
+        logger.critical(
+            "Outbox handler succeeded but DONE state could not be persisted id=%s; inspect/reconcile before retry",
+            outbox_id,
+        )
+
+
 async def process_outbox_item(outbox_id: int) -> bool:
     """原子认领、租约续期、幂等分发；库存镜像按 sync_version 收敛而非一次性去重。"""
     async with AsyncSessionLocal() as db:
@@ -466,12 +492,19 @@ async def process_outbox_item(outbox_id: int) -> bool:
                         ttl_seconds=86400 * 7, mark_redis=False,
                     )
                     if not acquired:
-                        await db.rollback()
-                        await _mark_failed(db, row, "idempotency_already_exists_after_handler", wid=wid)
-                        return True
+                        # handler 已成功执行；重复幂等标记不应触发外部副作用重放。
+                        logger.warning(
+                            "Outbox idempotency marker already exists after successful handler; completing event id=%s",
+                            outbox_id,
+                        )
                 except Exception as exc:
+                    # handler 已成功执行，辅助幂等记录失败不能把事件重新排队，否则会重复执行下游副作用。
+                    logger.exception(
+                        "Outbox idempotency marker write failed after handler success id=%s: %s",
+                        outbox_id, exc,
+                    )
                     await db.rollback()
-                    await _mark_failed(db, row, f"idempotency_write_failed: {exc}", wid=wid)
+                    await _mark_done_after_handler(db, outbox_id, wid=wid)
                     return True
 
             await db.commit()
