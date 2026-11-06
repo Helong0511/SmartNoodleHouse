@@ -62,6 +62,7 @@ const router = createRouter({
         { path: 'store-info', component: () => import('@/views/StoreInfo.vue'), meta: { title: '门店信息', anyPermission: ['table:manage', 'order:read', 'product:read', 'settings:store', 'system:manage'], allowStoreAdmin: true, denyCashier: true } },
         { path: 'welcome-logs', component: () => import('@/views/WelcomeLogs.vue'), meta: { title: '迎宾日志', permission: 'welcome:manage', denyCashier: true } },
         { path: 'audit-logs', component: () => import('@/views/AuditLogs.vue'), meta: { title: '操作日志', permission: 'audit:read', denyCashier: true } },
+        { path: 'outbox-dead-letters', component: () => import('@/views/OutboxDeadLetters.vue'), meta: { title: 'Outbox 死信', permission: 'system:manage', denyCashier: true, superAdminOnly: true } },
         { path: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置', permission: 'system:manage', denyCashier: true } },
       ]
     },
