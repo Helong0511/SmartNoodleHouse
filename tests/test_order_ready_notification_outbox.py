@@ -6,21 +6,47 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_order_ready_notification_is_enqueued_for_originating_channel_in_calling_transaction(monkeypatch):
+@pytest.mark.parametrize(
+    ("order_channel", "expected_event", "expected_payload_channel"),
+    [
+        ("WECHAT", "order_ready_wechat", "wechat"),
+        ("wechat", "order_ready_wechat", "wechat"),
+        ("ALIPAY", "order_ready_alipay", "alipay"),
+        ("alipay", "order_ready_alipay", "alipay"),
+    ],
+)
+async def test_order_ready_notification_is_enqueued_for_originating_channel_in_calling_transaction(
+    monkeypatch, order_channel, expected_event, expected_payload_channel
+):
     from app.services import order_lifecycle, outbox_worker
 
     enqueue = AsyncMock(return_value=(MagicMock(), True))
     monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
     db = object()
-    order = SimpleNamespace(id=321, customer_id=77, channel="WECHAT")
+    order = SimpleNamespace(id=321, customer_id=77, channel=order_channel)
 
     await order_lifecycle.notify_order_ready_subscribe(db, order)
 
     assert enqueue.await_count == 1
-    assert enqueue.await_args.kwargs["event_kind"] == "order_ready_wechat"
+    assert enqueue.await_args.kwargs["event_kind"] == expected_event
     assert enqueue.await_args.kwargs["aggregate_type"] == "order_notification"
     assert enqueue.await_args.args[0] is db
-    assert enqueue.await_args.kwargs["payload"]["channel"] == "wechat"
+    assert enqueue.await_args.kwargs["payload"]["channel"] == expected_payload_channel
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order_channel", ["H5", "POS", "MEITUAN", "ELEME", "", None, "UNKNOWN"])
+async def test_order_ready_notification_skips_non_mini_program_channels(monkeypatch, order_channel):
+    from app.services import order_lifecycle, outbox_worker
+
+    enqueue = AsyncMock(return_value=(MagicMock(), True))
+    monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
+
+    await order_lifecycle.notify_order_ready_subscribe(
+        object(), SimpleNamespace(id=321, customer_id=77, channel=order_channel)
+    )
+
+    enqueue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
