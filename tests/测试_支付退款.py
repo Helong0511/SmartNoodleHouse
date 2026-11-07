@@ -521,6 +521,8 @@ async def test_scheduled_refund_poll_rejects_success_with_wrong_amount(monkeypat
     id_result.scalars.return_value.all.return_value = [77]
     claim_result = MagicMock()
     claim_result.rowcount = 1
+    # The conditional UPDATE increments retry_count and uses it as the fencing version.
+    refund.retry_count = 1
     row_result = MagicMock()
     row_result.scalar_one_or_none.return_value = refund
 
