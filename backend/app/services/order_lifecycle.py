@@ -193,16 +193,22 @@ async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
     """
     if not order or not order.customer_id or not order.id:
         return
+    # 只向创建订单时实际使用的小程序渠道发送订阅通知。
+    # H5/POS/外卖订单没有对应小程序订阅授权，不得因会员同时绑定两个账号而双发。
+    channel = str(getattr(order, "channel", "") or "").strip().upper()
+    platform = {"WECHAT": "wechat", "ALIPAY": "alipay"}.get(channel)
+    if platform is None:
+        return
+
     from app.services.outbox_worker import enqueue_outbox
 
-    for channel in ("wechat", "alipay"):
-        await enqueue_outbox(
-            db,
-            aggregate_type="order_notification",
-            aggregate_id=int(order.id),
-            event_kind=f"order_ready_{channel}",
-            payload={"order_id": int(order.id), "channel": channel},
-        )
+    await enqueue_outbox(
+        db,
+        aggregate_type="order_notification",
+        aggregate_id=int(order.id),
+        event_kind=f"order_ready_{platform}",
+        payload={"order_id": int(order.id), "channel": platform},
+    )
 
 
 def _infer_assert_kind(source: str) -> str:
