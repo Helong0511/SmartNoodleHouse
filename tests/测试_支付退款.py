@@ -352,10 +352,6 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
 
     observed = []
 
-    async def query_refund(**kwargs):
-        observed.append("channel_query")
-        return {"status": "PROCESSING", "refund_no": "RF901", "payment_no": "PAY12"}
-
     async def execute(statement):
         sql = str(statement).lower()
         if "payments.order_id" in sql and "for update" not in sql:
@@ -380,10 +376,6 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
     with patch(
         "app.services.payment_service._validate_refund_callback_binding"
     ), patch(
-        "app.services.payment_service.alipay_client.trade_refund_query",
-        new_callable=AsyncMock,
-        side_effect=query_refund,
-    ), patch(
         "app.services.payment_service.PaymentService._finalize_refund",
         new_callable=AsyncMock,
         return_value=row,
@@ -400,10 +392,11 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
                 "refund_status": "SUCCESS",
             },
             "receipt-901",
+            provider_query_result={"status": "PROCESSING", "refund_no": "RF901", "payment_no": "PAY12"},
         )
 
     assert result is row
-    assert observed == ["refund_read", "channel_query", "payment_peek", "order_lock", "payment_lock", "refund_lock"]
+    assert observed == ["refund_read", "payment_peek", "order_lock", "payment_lock", "refund_lock"]
     finalize.assert_awaited_once()
 
 
