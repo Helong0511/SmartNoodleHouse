@@ -32,11 +32,11 @@ def _wechat_settings():
     )
 
 
-def _wechat_call(inner, serial="ABCD"):
+def _wechat_call(inner, serial="ABCD", event_type="TRANSACTION.SUCCESS"):
     inner.setdefault("appid", "wx-app-1")
     body = json.dumps(
         {
-            "event_type": "TRANSACTION.SUCCESS",
+            "event_type": event_type,
             "resource": {"ciphertext": "YQ==", "nonce": "123456789012"},
         },
         separators=(",", ":"),
@@ -53,6 +53,81 @@ def _wechat_call(inner, serial="ABCD"):
         "app.services.payment_verify._load_wechat_platform_public_key", return_value=key
     ), patch.object(WechatPayVerifier, "_decrypt_resource", return_value=json.dumps(inner)):
         return WechatPayVerifier().verify_and_parse(headers, body)
+
+
+
+def _wechat_refund_call(*, event_type="REFUND.SUCCESS", refund_status="SUCCESS", total=1000, refund=300, currency="CNY"):
+    amount = {"total": total, "refund": refund}
+    if currency is not None:
+        amount["currency"] = currency
+    return _wechat_call(
+        {
+            "mchid": "1900000001",
+            "out_trade_no": "P1",
+            "transaction_id": "T1",
+            "out_refund_no": "R1",
+            "refund_id": "WX-R1",
+            "refund_status": refund_status,
+            "amount": amount,
+        },
+        event_type=event_type,
+    )
+
+
+def test_wechat_refund_callback_accepts_valid_success_payload():
+    result = _wechat_refund_call()
+    assert result["out_refund_no"] == "R1"
+    assert result["amount"]["refund"] == 300
+    assert result["refund_status"] == "SUCCESS"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("total", True), ("total", 1000.0), ("total", "1000"),
+    ("refund", False), ("refund", 300.5), ("refund", "300"),
+])
+def test_wechat_refund_callback_rejects_non_integer_fen(field, value):
+    values = {"total": 1000, "refund": 300, "currency": "CNY"}
+    values[field] = value
+    with pytest.raises(ValueError, match="整数分"):
+        _wechat_call(
+            {
+                "mchid": "1900000001", "out_trade_no": "P1", "transaction_id": "T1",
+                "out_refund_no": "R1", "refund_id": "WX-R1", "refund_status": "SUCCESS",
+                "amount": values,
+            },
+            event_type="REFUND.SUCCESS",
+        )
+
+
+def test_wechat_refund_callback_accepts_official_payload_without_currency_field():
+    result = _wechat_refund_call(currency=None)
+    assert result["amount"]["refund"] == 300
+
+
+@pytest.mark.parametrize("currency", ["", "   ", "USD", "HKD"])
+def test_wechat_refund_callback_rejects_invalid_provided_currency(currency):
+    with pytest.raises(ValueError, match="CNY"):
+        _wechat_refund_call(currency=currency)
+
+
+def test_wechat_refund_callback_rejects_refund_greater_than_total():
+    with pytest.raises(ValueError, match="范围非法"):
+        _wechat_refund_call(total=100, refund=101)
+
+
+def test_wechat_refund_callback_rejects_event_status_mismatch():
+    with pytest.raises(ValueError, match="事件类型与退款状态不匹配"):
+        _wechat_refund_call(event_type="REFUND.SUCCESS", refund_status="PROCESSING")
+
+
+def test_wechat_refund_callback_accepts_closed_terminal_notification():
+    result = _wechat_refund_call(event_type="REFUND.CLOSED", refund_status="CLOSED")
+    assert result["refund_status"] == "CLOSED"
+
+
+def test_wechat_abnormal_refund_callback_requires_abnormal_status():
+    result = _wechat_refund_call(event_type="REFUND.ABNORMAL", refund_status="ABNORMAL")
+    assert result["refund_status"] == "ABNORMAL"
 
 
 def test_wechat_transaction_callback_requires_matching_merchant():
@@ -94,6 +169,20 @@ def test_wechat_transaction_callback_requires_positive_amount():
         )
 
 
+@pytest.mark.parametrize("total", [True, False, 100.0, 100.5, "100", "100.0", None])
+def test_wechat_transaction_callback_rejects_non_integer_fen_amount(total):
+    with pytest.raises(ValueError, match="整数分"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": total, "currency": "CNY"},
+            }
+        )
+
+
 def test_wechat_transaction_callback_rejects_non_cny():
     with pytest.raises(ValueError, match="CNY"):
         _wechat_call(
@@ -103,6 +192,20 @@ def test_wechat_transaction_callback_rejects_non_cny():
                 "transaction_id": "T1",
                 "trade_state": "SUCCESS",
                 "amount": {"total": 100, "currency": "USD"},
+            }
+        )
+
+
+@pytest.mark.parametrize("currency", [None, "", "   "])
+def test_wechat_transaction_callback_rejects_missing_currency(currency):
+    with pytest.raises(ValueError, match="明确提供 CNY"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 100, "currency": currency},
             }
         )
 
