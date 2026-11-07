@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -3417,7 +3417,12 @@ class PaymentService:
 
     @classmethod
     async def _defer_refund_poll(
-        cls, refund_id: int, *, reason: str, delay_seconds: int | None = None
+        cls,
+        refund_id: int,
+        *,
+        reason: str,
+        delay_seconds: int | None = None,
+        claim_version: int | None = None,
     ) -> None:
         """记录一次未决查单并设置下次执行时间；只锁退款行，不等待支付/订单行。"""
         from datetime import timedelta
@@ -3436,10 +3441,17 @@ class PaymentService:
                 await db.commit()
                 return
             now = naive_local_now()
-            if row.next_retry_at is not None and row.next_retry_at > now:
-                await db.commit()
-                return
-            row.retry_count = int(row.retry_count or 0) + 1
+            # Claimed workers may replace their own lease. A stale worker must
+            # never overwrite a newer worker's retry schedule.
+            if claim_version is not None:
+                if int(row.retry_count or 0) != int(claim_version):
+                    await db.commit()
+                    return
+            else:
+                if row.next_retry_at is not None and row.next_retry_at > now:
+                    await db.commit()
+                    return
+                row.retry_count = int(row.retry_count or 0) + 1
             delay = (
                 int(delay_seconds)
                 if delay_seconds is not None
@@ -3483,31 +3495,50 @@ class PaymentService:
 
         done = 0
         for rid in ids:
+            claim_version: int | None = None
             try:
-                # 第一阶段只读取快照，随后立即提交释放连接/锁；绝不持锁调用渠道 HTTP。
+                # 原子领取：把到期时间推进到短租约，并递增 retry_count 作为 fencing
+                # version。多个 Worker 即使同时读到同一 ID，也只有一个 UPDATE 能成功。
                 async with AsyncSessionLocal() as db:
+                    claim_now = naive_local_now()
+                    claim_until = claim_now + timedelta(minutes=2)
+                    claim = await db.execute(
+                        update(PaymentRefund)
+                        .where(
+                            PaymentRefund.id == int(rid),
+                            PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
+                            or_(
+                                PaymentRefund.next_retry_at.is_(None),
+                                PaymentRefund.next_retry_at <= claim_now,
+                            ),
+                        )
+                        .values(
+                            retry_count=func.coalesce(PaymentRefund.retry_count, 0) + 1,
+                            next_retry_at=claim_until,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if int(getattr(claim, "rowcount", 0) or 0) != 1:
+                        await db.commit()
+                        continue
                     row = (
                         await db.execute(
-                            select(PaymentRefund)
-                            .where(
-                                PaymentRefund.id == int(rid),
-                                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
-                                or_(
-                                    PaymentRefund.next_retry_at.is_(None),
-                                    PaymentRefund.next_retry_at <= naive_local_now(),
-                                ),
-                            )
-                            .with_for_update(skip_locked=True)
+                            select(PaymentRefund).where(PaymentRefund.id == int(rid))
                         )
                     ).scalar_one_or_none()
                     if row is None:
+                        await db.commit()
                         continue
+                    claim_version = int(row.retry_count or 0)
                     before = row.status
                     payment = await db.get(Payment, row.payment_id)
                     if not payment:
                         await db.commit()
                         await cls._defer_refund_poll(
-                            int(rid), reason="退款关联的支付记录不存在", delay_seconds=1800
+                            int(rid),
+                            reason="退款关联的支付记录不存在",
+                            delay_seconds=1800,
+                            claim_version=claim_version,
                         )
                         continue
                     refund_snapshot = SimpleNamespace(
@@ -3536,12 +3567,17 @@ class PaymentService:
                 except Exception as e:
                     logger.warning("退款查询失败 refund_no=%s: %s", refund_snapshot.refund_no, e)
                     await cls._defer_refund_poll(
-                        int(rid), reason=f"渠道退款查询异常: {type(e).__name__}: {e}", delay_seconds=60
+                        int(rid),
+                        reason=f"渠道退款查询异常: {type(e).__name__}: {e}",
+                        claim_version=claim_version,
                     )
                     continue
                 if result is None:
                     await cls._defer_refund_poll(
-                        int(rid), reason="退款查询渠道未配置或暂不支持", delay_seconds=1800
+                        int(rid),
+                        reason="退款查询渠道未配置或暂不支持",
+                        delay_seconds=1800,
+                        claim_version=claim_version,
                     )
                     continue
 
@@ -3562,7 +3598,10 @@ class PaymentService:
                     if current_payment is None:
                         await db.rollback()
                         await cls._defer_refund_poll(
-                            int(rid), reason="退款查单期间原支付记录无法锁定", delay_seconds=1800
+                            int(rid),
+                            reason="退款查单期间原支付记录无法锁定",
+                            delay_seconds=1800,
+                            claim_version=claim_version,
                         )
                         continue
                     row = (
@@ -3572,7 +3611,13 @@ class PaymentService:
                             .with_for_update()
                         )
                     ).scalar_one_or_none()
-                    if row is None or row.status == "SUCCESS":
+                    if (
+                        row is None
+                        or row.status not in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")
+                        or int(row.retry_count or 0) != int(claim_version or -1)
+                    ):
+                        # 回调已终结记录，或租约过期后被新 Worker 重新领取：
+                        # 当前结果已失去所有权，不能再修改退款状态/资金账。
                         await db.commit()
                         continue
                     if (
@@ -3584,7 +3629,10 @@ class PaymentService:
                         await db.rollback()
                         logger.error("退款查单期间本地退款单发生变化，拒绝应用结果 refund_id=%s", rid)
                         await cls._defer_refund_poll(
-                            int(rid), reason="退款查单期间本地退款单关联或金额发生变化", delay_seconds=1800
+                            int(rid),
+                            reason="退款查单期间本地退款单关联或金额发生变化",
+                            delay_seconds=1800,
+                            claim_version=claim_version,
                         )
                         continue
 
@@ -3605,7 +3653,10 @@ class PaymentService:
                         await db.rollback()
                         logger.error("退款查单期间原支付记录发生变化，拒绝应用结果 refund_id=%s", rid)
                         await cls._defer_refund_poll(
-                            int(rid), reason="退款查单期间原支付记录关联、渠道或金额发生变化", delay_seconds=1800
+                            int(rid),
+                            reason="退款查单期间原支付记录关联、渠道或金额发生变化",
+                            delay_seconds=1800,
+                            claim_version=claim_version,
                         )
                         continue
 
@@ -3618,7 +3669,6 @@ class PaymentService:
                         source="REFUND_QUERY",
                     )
                     if row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
-                        row.retry_count = int(row.retry_count or 0) + 1
                         row.next_retry_at = naive_local_now() + timedelta(
                             seconds=_refund_poll_backoff_seconds(row.retry_count)
                         )
@@ -3650,7 +3700,9 @@ class PaymentService:
                 logger.warning("退款查单补偿异常 refund_id=%s: %s", rid, e)
                 try:
                     await cls._defer_refund_poll(
-                        int(rid), reason=f"退款查单异常: {type(e).__name__}: {e}", delay_seconds=60
+                        int(rid),
+                        reason=f"退款查单异常: {type(e).__name__}: {e}",
+                        claim_version=claim_version,
                     )
                 except Exception:
                     logger.exception("记录退款查单退避失败 refund_id=%s", rid)
