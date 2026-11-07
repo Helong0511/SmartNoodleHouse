@@ -43,7 +43,7 @@ def _base_prod(**kwargs):
         wechat_platform_serial_no="TEST-PLATFORM-SERIAL",
         wechat_platform_cert_path="",
         redis_url="rediss://:test-password@redis.example.com:6379/0",
-        rate_limit_fail_closed_paths="/api/auth/login,/api/auth/verify-password,/api/payments/,/api/miniprogram/wechat/login,/api/miniprogram/alipay/login,/api/miniprogram/auth/refresh,/api/delivery/meituan/notify,/api/delivery/eleme/notify",
+        rate_limit_fail_closed_paths="/api/auth/login,/api/auth/verify-password,/api/payments/,/api/miniprogram/wechat/login,/api/miniprogram/alipay/login,/api/miniprogram/auth/refresh,/api/miniprogram/member/phone,/api/delivery/meituan/notify,/api/delivery/eleme/notify",
         alipay_app_id="",
         alipay_private_key="",
         alipay_public_key="",

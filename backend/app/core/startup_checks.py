@@ -128,6 +128,7 @@ _REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS = (
     "/api/miniprogram/wechat/login",
     "/api/miniprogram/alipay/login",
     "/api/miniprogram/auth/refresh",
+    "/api/miniprogram/member/phone",
     "/api/delivery/meituan/notify",
     "/api/delivery/eleme/notify",
 )

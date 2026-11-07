@@ -159,7 +159,8 @@ def test_production_required_rate_limit_paths_are_covered():
     assert _missing_rate_limit_fail_closed_paths(
         "/api/auth/login,/api/auth/verify-password,/api/payments/,"
         "/api/miniprogram/wechat/login,/api/miniprogram/alipay/login,"
-        "/api/miniprogram/auth/refresh,/api/delivery/meituan/notify,"
+        "/api/miniprogram/auth/refresh,/api/miniprogram/member/phone,"
+        "/api/delivery/meituan/notify,"
         "/api/delivery/eleme/notify"
     ) == []
     assert _missing_rate_limit_fail_closed_paths("/api/auth/login,/api/payments/") == [
@@ -167,6 +168,7 @@ def test_production_required_rate_limit_paths_are_covered():
         "/api/miniprogram/wechat/login",
         "/api/miniprogram/alipay/login",
         "/api/miniprogram/auth/refresh",
+        "/api/miniprogram/member/phone",
         "/api/delivery/meituan/notify",
         "/api/delivery/eleme/notify",
     ]
@@ -183,6 +185,29 @@ def test_parent_prefix_covers_sensitive_rate_limit_paths():
         "/api/miniprogram/wechat/login",
         "/api/miniprogram/alipay/login",
         "/api/miniprogram/auth/refresh",
+        "/api/miniprogram/member/phone",
         "/api/delivery/meituan/notify",
         "/api/delivery/eleme/notify",
     ]
+
+
+
+@pytest.mark.asyncio
+async def test_phone_binding_path_fail_closed_on_redis_error():
+    from app.core.rate_limit import RateLimitMiddleware
+
+    mw = RateLimitMiddleware(app=MagicMock())
+    request = _request("/api/miniprogram/member/phone")
+    settings = SimpleNamespace(
+        is_production=True,
+        is_development=False,
+        enable_rate_limit=True,
+        rate_limit_fail_closed_paths="/api/miniprogram/member/phone",
+    )
+    next_call = AsyncMock(return_value=MagicMock(status_code=200))
+    with patch("app.core.rate_limit.get_settings", return_value=settings):
+        with patch("app.core.rate_limit.get_redis", AsyncMock(side_effect=RuntimeError("redis down"))):
+            with patch("app.core.rate_limit.client_ip", return_value="10.0.0.2"):
+                resp = await mw.dispatch(request, next_call)
+    assert resp.status_code == 503
+    next_call.assert_not_awaited()
