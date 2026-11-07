@@ -21,6 +21,7 @@ SENSITIVE_LIMITS = {
     "/api/miniprogram/wechat/login": (10, 60),
     "/api/miniprogram/alipay/login": (10, 60),
     "/api/miniprogram/auth/refresh": (30, 60),
+    "/api/miniprogram/member/phone": (10, 60),
     "/api/auth/verify-password": (20, 60),
     "/api/payments/": (60, 60),
     "/api/welcome/": (30, 60),
