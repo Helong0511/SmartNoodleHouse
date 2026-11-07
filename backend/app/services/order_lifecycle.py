@@ -187,22 +187,24 @@ async def apply_order_status(
 
 
 async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
-    """订单 READY 时在当前业务事务中持久化通知任务。
+    """订单 READY 时分别持久化微信、支付宝通知任务。
 
-    实际微信/支付宝 HTTP 调用由 Outbox worker 在订单事务提交后执行；
-    不能在未提交的事务中 create_task，否则可能先通知后回滚，或进程退出时丢失任务。
+    每个平台独立事件，避免一个平台成功、另一个平台失败后重试造成前者重复通知。
+    HTTP 调用由 Outbox worker 在订单事务提交后执行。
     """
     if not order or not order.customer_id or not order.id:
         return
     from app.services.outbox_worker import enqueue_outbox
 
-    await enqueue_outbox(
-        db,
-        aggregate_type="order_notification",
-        aggregate_id=int(order.id),
-        event_kind="order_ready",
-        payload={"order_id": int(order.id)},
-    )
+    for channel in ("wechat", "alipay"):
+        await enqueue_outbox(
+            db,
+            aggregate_type="order_notification",
+            aggregate_id=int(order.id),
+            event_kind=f"order_ready_{channel}",
+            payload={"order_id": int(order.id), "channel": channel},
+        )
+
 def _infer_assert_kind(source: str) -> str:
     s = (source or "").upper()
     if s in ("STAFF", "KITCHEN"):
