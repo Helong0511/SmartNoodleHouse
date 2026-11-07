@@ -418,16 +418,15 @@ async def send_order_ready_subscribe(
                 ValueError("WeChat subscribe response is not a valid errcode object")
             )
         raw_errcode = data.get("errcode")
-        if isinstance(raw_errcode, bool):
+        if isinstance(raw_errcode, bool) or not isinstance(raw_errcode, (int, str)):
             _raise_order_ready_transport_error(
-                ValueError("WeChat subscribe response contains a boolean errcode")
+                ValueError("WeChat subscribe response contains an invalid errcode type")
             )
-        try:
-            errcode = int(raw_errcode)
-        except (TypeError, ValueError):
+        if isinstance(raw_errcode, str) and not re.fullmatch(r"-?\\d+", raw_errcode.strip()):
             _raise_order_ready_transport_error(
                 ValueError("WeChat subscribe response contains a non-numeric errcode")
             )
+        errcode = int(raw_errcode)
         if errcode == 0:
             return True
         if errcode in {40001, 40014, 42001} and token_attempt == 0:
