@@ -19,6 +19,7 @@ def test_release_checklist_blocks_without_operator_acknowledgement():
     assert "[BLOCKED]" in result.stdout
     assert "BLK-001" in result.stdout
     assert "P1-R2" in result.stdout
+    assert "BLK-007" in result.stdout
 
 
 def test_release_checklist_requires_explicit_acknowledgement():
