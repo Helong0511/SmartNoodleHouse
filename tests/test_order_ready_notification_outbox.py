@@ -131,3 +131,32 @@ async def test_order_ready_outbox_enqueue_failure_is_not_silenced(monkeypatch):
         await order_lifecycle.notify_order_ready_subscribe(
             object(), SimpleNamespace(id=321, customer_id=77)
         )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "provider_name"),
+    [
+        ("app.services.wechat_mini_client", "WECHAT"),
+        ("app.services.alipay_mini_client", "ALIPAY"),
+    ],
+)
+def test_notification_transport_errors_distinguish_safe_connect_retry_from_unknown_result(
+    module_name, provider_name
+):
+    import importlib
+    import httpx
+
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    module = importlib.import_module(module_name)
+    classify = module._raise_order_ready_transport_error
+
+    # Connection setup failed before the request could be delivered: normal retry is safe.
+    connect_error = httpx.ConnectError("connection refused")
+    with pytest.raises(httpx.ConnectError):
+        classify(connect_error)
+
+    # A response timeout after sending may mean the provider already accepted the message.
+    # It must enter UNCERTAIN rather than automatically sending a duplicate.
+    with pytest.raises(ExternalSideEffectUncertain, match=provider_name):
+        classify(httpx.ReadTimeout("response timed out"))
