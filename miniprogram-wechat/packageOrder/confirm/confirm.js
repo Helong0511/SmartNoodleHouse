@@ -1427,7 +1427,11 @@ Page({
       auth.saveCart([])
       this.clearCheckoutNonce()
       prefUtil.clearPrefsCache(app)
-      await subscribe.requestOrderReadySubscribe()
+      try {
+        await subscribe.requestOrderReadySubscribe()
+      } catch (_) {
+        // 订阅授权是可选能力，不能阻断已成功的支付和订单结果页跳转。
+      }
       const pts =
         (payOutcome && payOutcome.sync && payOutcome.sync.points_earned) ||
           (payRes && payRes.points_earned)
