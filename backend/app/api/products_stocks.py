@@ -94,17 +94,34 @@ async def upsert_store_stock(
     if sid is None:
         raise AppException(40060, "请指定门店")
     assert_store_access(user, sid)
-    product = await db.get(Product, product_id)
+    # 与订单扣减/回库保持 Product -> StoreProductStock 的统一锁顺序。
+    product = (
+        await db.execute(
+            select(Product).where(Product.id == int(product_id)).with_for_update()
+        )
+    ).scalar_one_or_none()
     if not product:
+        raise AppException(40401, "餐品不存在")
+    if int(product.store_id) != int(sid):
+        raise AppException(40301, "餐品不属于该门店")
+    # 删除覆盖也先锁品牌餐品，再锁门店库存，避免与订单扣减锁序相反。
+    product = (
+        await db.execute(
+            select(Product).where(Product.id == int(product_id)).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if product is None:
         raise AppException(40401, "餐品不存在")
     if int(product.store_id) != int(sid):
         raise AppException(40301, "餐品不属于该门店")
     row = (
         await db.execute(
-            select(StoreProductStock).where(
+            select(StoreProductStock)
+            .where(
                 StoreProductStock.store_id == sid,
                 StoreProductStock.product_id == product_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row:
