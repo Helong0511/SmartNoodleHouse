@@ -101,11 +101,12 @@ async def get_phone_by_code(code: str) -> str:
     code_digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
     from app.services.webhook_replay import claim_once, release_claim
 
-    claimed = await claim_once("wx_phone_code", code_digest, ttl=600)
-    if not claimed:
+    claim_token = await claim_once("wx_phone_code", code_digest, ttl=600)
+    if not claim_token:
         raise AppException(40054, "授权码已使用或正在处理，请重新授权获取手机号")
     if not _claim_phone_code_local(code_digest):
-        await release_claim("wx_phone_code", code_digest)
+        # Redis claim 必须由本次请求的 owner token 释放，不能无条件删除其他请求的锁。
+        await release_claim("wx_phone_code", code_digest, claim_token)
         raise AppException(40054, "授权码已使用或正在处理，请重新授权获取手机号")
 
     settings = get_settings()
@@ -140,7 +141,7 @@ async def get_phone_by_code(code: str) -> str:
         return phone
     except Exception:
         # 换号失败允许重试同一 code（微信侧可能尚未消费）
-        await release_claim("wx_phone_code", code_digest)
+        await release_claim("wx_phone_code", code_digest, claim_token)
         _release_phone_code_local(code_digest)
         raise
 
