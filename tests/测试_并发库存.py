@@ -181,3 +181,91 @@ async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypa
     expected = [(2, 3, 7), (9, 3, 7)]
     assert restore_calls == expected
     assert deduct_calls == expected
+
+@pytest.mark.asyncio
+async def test_store_stock_upsert_locks_product_before_store_override(monkeypatch):
+    from app.api import products_stocks
+
+    product = SimpleNamespace(id=101, store_id=7)
+    row = SimpleNamespace(id=501, stock=4, status=1)
+
+    class Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDB:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(str(statement).lower())
+            return Result(product if len(self.statements) == 1 else row)
+
+        async def flush(self):
+            return None
+
+    db = FakeDB()
+    monkeypatch.setattr(products_stocks, "require_bound_store", lambda user, sid: 7)
+    monkeypatch.setattr(products_stocks, "assert_store_access", lambda user, sid: None)
+    monkeypatch.setattr(products_stocks, "success", lambda data, request: data)
+    monkeypatch.setattr(products_stocks, "enqueue_menu_cache_invalidation", AsyncMock())
+    monkeypatch.setattr(products_stocks.AuditService, "log_staff", AsyncMock())
+    monkeypatch.setattr("app.services.stock_service._emit_stock_mirror", AsyncMock())
+
+    await products_stocks.upsert_store_stock(
+        101, SimpleNamespace(store_id=7, stock=9, status=1),
+        request=None, db=db, user=SimpleNamespace(),
+    )
+
+    assert len(db.statements) == 2
+    assert "from products" in db.statements[0] and "for update" in db.statements[0]
+    assert "store_product_stocks" in db.statements[1] and "for update" in db.statements[1]
+
+
+@pytest.mark.asyncio
+async def test_store_stock_delete_locks_product_before_store_override(monkeypatch):
+    from app.api import products_stocks
+
+    product = SimpleNamespace(id=101, store_id=7)
+    row = SimpleNamespace(id=501)
+
+    class Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDB:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(str(statement).lower())
+            return Result(product if len(self.statements) == 1 else row)
+
+        async def delete(self, obj):
+            return None
+
+        async def flush(self):
+            return None
+
+    db = FakeDB()
+    monkeypatch.setattr(products_stocks, "require_bound_store", lambda user, sid: 7)
+    monkeypatch.setattr(products_stocks, "assert_store_access", lambda user, sid: None)
+    monkeypatch.setattr(products_stocks, "success", lambda data, request: data)
+    monkeypatch.setattr(products_stocks, "enqueue_menu_cache_invalidation", AsyncMock())
+    monkeypatch.setattr(products_stocks.AuditService, "log_staff", AsyncMock())
+    monkeypatch.setattr("app.services.stock_service._emit_stock_mirror", AsyncMock())
+
+    await products_stocks.delete_store_stock(
+        101, request=None, db=db, user=SimpleNamespace(), store_id=7,
+    )
+
+    assert len(db.statements) == 2
+    assert "from products" in db.statements[0] and "for update" in db.statements[0]
+    assert "store_product_stocks" in db.statements[1] and "for update" in db.statements[1]
+
