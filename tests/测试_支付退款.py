@@ -563,3 +563,41 @@ async def test_scheduled_refund_poll_rejects_success_with_wrong_amount(monkeypat
     defer.assert_awaited_once()
     assert defer.await_args.kwargs["claim_version"] == 1
     finalize.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_scheduled_refund_poll_skips_when_another_worker_claimed(monkeypatch):
+    """两个 Worker 同时扫描时，原子领取失败的一方不得调用支付渠道。"""
+    from app.services import payment_service
+    from app.services.payment_service import PaymentService
+
+    id_result = MagicMock()
+    id_result.scalars.return_value.all.return_value = [88]
+    first_db = MagicMock()
+    first_db.execute = AsyncMock(return_value=id_result)
+
+    claim_result = MagicMock()
+    claim_result.rowcount = 0
+    second_db = MagicMock()
+    second_db.execute = AsyncMock(return_value=claim_result)
+    second_db.commit = AsyncMock()
+
+    class SessionContext:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    sessions = iter((SessionContext(first_db), SessionContext(second_db)))
+    monkeypatch.setattr(payment_service, "AsyncSessionLocal", lambda: next(sessions))
+    query = AsyncMock()
+    monkeypatch.setattr(PaymentService, "_query_channel_refund", query)
+
+    assert await PaymentService.poll_pending_refunds(limit=10) == 0
+    query.assert_not_awaited()
+    claim_stmt = second_db.execute.call_args.args[0]
+    assert claim_stmt.is_update
+
