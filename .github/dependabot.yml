@@ -7,8 +7,6 @@ updates:
     open-pull-requests-limit: 10
     ignore:
       # These major updates require manual platform/licensing or runtime compatibility review.
-      - dependency-name: "zhdate"
-        update-types: ["version-update:semver-major"]
       - dependency-name: "insightface"
         update-types: ["version-update:semver-major"]
       - dependency-name: "redis"
