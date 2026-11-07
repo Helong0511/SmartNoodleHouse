@@ -159,6 +159,33 @@ class WechatPayVerifier:
                 raise ValueError("微信支付成功回调必须明确提供 CNY 币种")
             if str(inner.get("trade_state") or "").upper() != "SUCCESS":
                 raise ValueError("微信 TRANSACTION.SUCCESS 事件的交易状态不是 SUCCESS")
+        elif event_type in ("REFUND.SUCCESS", "REFUND.ABNORMAL"):
+            # 退款通知同样必须绑定原支付和单笔退款；amount.total/refund 均为整数分。
+            if not inner.get("out_trade_no") or not inner.get("transaction_id"):
+                raise ValueError("微信退款回调缺少原支付单号或渠道交易号")
+            if not inner.get("out_refund_no") or not inner.get("refund_id"):
+                raise ValueError("微信退款回调缺少商户退款单号或渠道退款号")
+            refund_status = str(inner.get("refund_status") or "").strip().upper()
+            expected_refund_status = "SUCCESS" if event_type == "REFUND.SUCCESS" else "ABNORMAL"
+            if refund_status != expected_refund_status:
+                raise ValueError("微信退款事件类型与退款状态不匹配")
+            amount = inner.get("amount")
+            if not isinstance(amount, dict):
+                raise ValueError("微信退款回调缺少金额对象")
+            total_raw = amount.get("total")
+            refund_raw = amount.get("refund")
+            if (
+                isinstance(total_raw, bool)
+                or not isinstance(total_raw, int)
+                or isinstance(refund_raw, bool)
+                or not isinstance(refund_raw, int)
+            ):
+                raise ValueError("微信退款回调金额必须为整数分")
+            if total_raw <= 0 or refund_raw <= 0 or refund_raw > total_raw:
+                raise ValueError("微信退款回调金额范围非法")
+            currency_raw = amount.get("currency")
+            if not isinstance(currency_raw, str) or currency_raw.strip().upper() != "CNY":
+                raise ValueError("微信退款回调必须明确提供 CNY 币种")
         return {
             "event_type": event_type,
             "out_trade_no": inner.get("out_trade_no"),
