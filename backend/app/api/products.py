@@ -607,7 +607,15 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
 async def update_product(
     product_id: int, data: ProductUpdate, request: Request, db: DbSession, user: CurrentUser
 ):
-    product = await db.get(Product, product_id)
+    # Product.stock 是无门店覆盖时的库存主值；订单扣减会先锁 Product。
+    # 管理端更新餐品（尤其 stock）也必须先取得同一行锁，避免与扣减/回库并发丢失更新。
+    product = (
+        await db.execute(
+            select(Product)
+            .where(Product.id == int(product_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
     if not product:
         return success(None, message="餐品不存在", request=request)
     assert_store_access(user, product.store_id)
@@ -710,6 +718,19 @@ async def update_product(
         for idx, gid in enumerate(data.option_group_ids):
             db.add(ProductOptionGroup(product_id=product.id, group_id=gid, sort_order=idx))
     await db.flush()
+    if "stock" in payload and product.store_id:
+        # 品牌库存是无门店覆盖时的有效库存；与订单扣减共用同一事务 Outbox，
+        # handler 重读最新有效库存（若有门店覆盖则以覆盖值为准）。
+        from app.services.stock_service import _emit_stock_mirror
+
+        await _emit_stock_mirror(
+            db,
+            store_id=int(product.store_id),
+            product_id=int(product.id),
+            mirror_id=int(product.id),
+            zero=int(product.stock or 0) <= 0,
+            aggregate_type="delivery_stock_base",
+        )
     await AuditService.log_staff(
         db,
         user=user,
