@@ -209,7 +209,7 @@ def format_birthday_display(birthday: date | None, calendar: str | None) -> str 
     if cal == CAL_SOLAR:
         return f"公历 {birthday.isoformat()}"
     z = _solar_to_lunar(birthday)
-    md = f"{z.getMonthInChinese()}{z.getDayInChinese()}"
+    md = f"{z.getMonthInChinese()}月{z.getDayInChinese()}"
     return f"农历 {md}（对应公历 {birthday.isoformat()}）"
 
 
