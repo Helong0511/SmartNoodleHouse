@@ -29,6 +29,19 @@ def _alipay_mini_configured() -> bool:
     return bool(s.alipay_app_id and s.alipay_private_key and s.alipay_public_key)
 
 
+def _raise_order_ready_transport_error(exc: Exception) -> None:
+    """连接建立前失败可安全重试；请求发出后响应未知时必须人工核实。"""
+    import httpx
+
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        raise exc
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    raise ExternalSideEffectUncertain(
+        f"ALIPAY order-ready notification result unknown: {type(exc).__name__}"
+    ) from exc
+
+
 async def _templatemessage_gateway(biz: dict[str, Any]) -> dict[str, Any]:
     """调用 alipay.open.app.mini.templatemessage.send。"""
     from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa2
@@ -92,11 +105,17 @@ async def send_order_ready_subscribe(
     }
     try:
         body = await _templatemessage_gateway(biz)
-        if str(body.get("code") or "") == "10000":
-            return True
-        logger.warning("支付宝出餐订阅失败 order=%s err=%s", order_no, body)
     except Exception as e:
-        logger.warning("支付宝出餐订阅异常 order=%s: %s", order_no, e)
+        logger.warning(
+            "支付宝出餐订阅请求异常 order=%s error_type=%s",
+            order_no,
+            type(e).__name__,
+        )
+        _raise_order_ready_transport_error(e)
+    if str(body.get("code") or "") == "10000":
+        return True
+    # 平台明确拒绝（例如用户未订阅/模板不匹配）是确定结果，不做自动重试。
+    logger.warning("支付宝出餐订阅被平台拒绝 order=%s err=%s", order_no, body)
     return False
 
 
