@@ -442,8 +442,9 @@ APP_ENV=production
 APP_DEBUG=false
 APP_HOST=127.0.0.1
 APP_PORT=8000
-DATABASE_URL=mysql+aiomysql://snh:密码@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4
-REDIS_URL=redis://127.0.0.1:6379/0
+DATABASE_URL=mysql+aiomysql://snh:URL_ENCODED_DB_PASSWORD@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4
+REDIS_URL=redis://:URL_ENCODED_REDIS_PASSWORD@127.0.0.1:6379/0
+ALLOW_LOOPBACK_PRODUCTION_SERVICES=true  # 仅同机单机部署；远程依赖使用私网地址并保持 false
 JWT_SECRET=随机32位以上
 FACE_ENCRYPTION_KEY=随机32位以上
 ALLOW_PAYMENT_MOCK=false
@@ -457,13 +458,15 @@ MINI_PROGRAM_ENV_VERSION=release
 VITE_API_BASE_URL=/api
 UPLOAD_DIR=/var/www/smart-noodle/uploads
 JSON_LOGS=true
-WEBHOOK_REQUIRE_ALLOWLIST=true
+WEBHOOK_REQUIRE_ALLOWLIST=false  # 只有配置全部已启用渠道的官方出口 CIDR 后才改为 true，并填写 WEBHOOK_IP_ALLOWLIST
 DISPLAY_SCREEN_TOKEN=随机一串
-PROCESS_ROLE=leader
+PROCESS_ROLE=auto  # systemd 多 Worker 由 Redis Leader 锁选主
 ENABLE_RECOGNITION_WORKER=1
 # WECHAT_* / ALIPAY_* / MEITUAN_* / ELEME_* 见 .env.production.example
 ALIPAY_AES_KEY=                    # 支付宝授权手机号解密，生产必填
 ```
+
+注意：数据库和 Redis 密码必须使用 URL 百分号编码（建议直接使用 URL-safe 随机密码）；同机部署才设置 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true`，跨主机部署必须使用私网地址并保持 `false`。
 
 生成随机密钥：
 

@@ -135,7 +135,8 @@ curl -sI https://your-domain.com/
 #   每日：python3 scripts/备份数据库.py --keep-days 14
 #   季度隔离库：export DRILL_DATABASE_URL=...; python3 scripts/备份恢复演练.py --restore-drill
 #   恢复（危险）：python3 scripts/恢复数据库.py backups/xxx.sql.gz --yes
-#   人工阻塞项：python3 scripts/上线前运维检查清单.py
+#   人工阻塞项：python3 scripts/上线前运维检查清单.py（默认退出码 2 / BLOCKED）
+#   全部人工事项逐项完成并核验证据后，才显式执行：python3 scripts/上线前运维检查清单.py --acknowledge
 
 # ── 9. 大表在线 DDL（P2-R2）──
 #   小表 / MySQL 8 支持的即时 DDL：优先 alembic（information_schema 幂等）。
