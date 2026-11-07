@@ -1904,6 +1904,31 @@ class PaymentService:
                 return result.scalar_one_or_none()
             # 无 DB receipt 可能是崩溃残留，也可能是另一请求尚未提交。
             # 继续由数据库唯一约束仲裁；当前请求没有 Redis 锁所有权，不得释放它。
+            # 上面的 SELECT 会隐式开启事务；在任何第三方 HTTP 前结束只读事务，
+            # 避免持有 DB 连接/事务等待支付宝退款查询。
+            await db.rollback()
+
+        # 支付宝退款回调需要 refund.query 确认单笔退款金额/状态。
+        # 必须在写入 PaymentCallbackReceipt、开启业务事务之前完成外部 HTTP。
+        # 否则会在未提交事务内等待渠道接口，造成连接池占用和回调并发阻塞。
+        alipay_refund_query_result = None
+        if parsed_probe.get("is_refund") and provider_u == "ALIPAY":
+            refund_no = str(parsed_probe.get("refund_no") or "").strip()
+            payment_no = str(parsed_probe.get("payment_no") or data.get("out_trade_no") or "").strip()
+            if not refund_no or not payment_no:
+                await release_claim(redis_channel, receipt, claim_token)
+                raise AppException(40302, "支付宝退款回调缺少支付单号或退款单号")
+            try:
+                alipay_refund_query_result = await alipay_client.trade_refund_query(
+                    payment_no=payment_no,
+                    refund_no=refund_no,
+                )
+            except Exception:
+                await release_claim(redis_channel, receipt, claim_token)
+                raise
+            if alipay_refund_query_result is not None and not isinstance(alipay_refund_query_result, dict):
+                await release_claim(redis_channel, receipt, claim_token)
+                raise AppException(50302, "支付宝退款查询返回格式异常，暂不确认退款结果")
 
         receipt_provider = f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
         try:
@@ -1943,7 +1968,14 @@ class PaymentService:
 
         try:
             if parsed_probe.get("is_refund"):
-                return await cls._apply_refund_callback(db, provider_u, data, parsed_probe, receipt)
+                return await cls._apply_refund_callback(
+                    db,
+                    provider_u,
+                    data,
+                    parsed_probe,
+                    receipt,
+                    provider_query_result=alipay_refund_query_result,
+                )
             return await cls._apply_payment_callback(db, provider_u, provider_inst, data, receipt)
         except Exception:
             # 回执与支付/退款业务写入属于同一 DB 事务；rollback 会原子撤销本请求的回执。
@@ -2167,6 +2199,8 @@ class PaymentService:
         data: dict,
         parsed: dict,
         receipt: str,
+        *,
+        provider_query_result: dict | None = None,
     ) -> PaymentRefund | None:
         refund_no = str(parsed.get("refund_no") or "").strip()
         # 退款通知必须携带商户退款请求号，并精确命中本地 refund_no。
@@ -2242,10 +2276,7 @@ class PaymentService:
 
             # 回调中的 refund_fee 不能证明当前 out_request_no 已成功；
             # 通过官方 refund.query 按单笔商户退款请求号核验，解决多次部分退款累计金额歧义。
-            query_result = await alipay_client.trade_refund_query(
-                payment_no=str(linked_payment.payment_no),
-                refund_no=str(row.refund_no),
-            )
+            query_result = provider_query_result or {}
             query_status = _resolve_alipay_refund_status({"refund_status": str((query_result or {}).get("status") or "PROCESSING").upper()})
             query_amount_raw = (query_result or {}).get("amount")
             if query_status == "SUCCESS":

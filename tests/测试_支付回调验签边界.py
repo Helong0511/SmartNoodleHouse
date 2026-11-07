@@ -370,11 +370,12 @@ async def test_alipay_callback_uses_exact_refund_query_amount_not_cumulative_ref
     monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
 
     result = await PaymentService._apply_refund_callback(
-        db, "ALIPAY", {}, parsed, "receipt-1"
+        db, "ALIPAY", {}, parsed, "receipt-1",
+        provider_query_result=query.return_value,
     )
 
     assert result is refund
-    query.assert_awaited_once_with(payment_no="P-100", refund_no="R-100")
+    query.assert_not_awaited()
     assert finalize.await_args.args[2] == "SUCCESS"
 
 
@@ -392,7 +393,10 @@ async def test_alipay_callback_can_confirm_by_query_when_optional_cumulative_fee
     finalize = AsyncMock(return_value=refund)
     monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
 
-    await PaymentService._apply_refund_callback(db, "ALIPAY", {}, parsed, "receipt-no-cumulative")
+    await PaymentService._apply_refund_callback(
+        db, "ALIPAY", {}, parsed, "receipt-no-cumulative",
+        provider_query_result={"status": "SUCCESS", "amount": "5.00", "raw": {}},
+    )
 
     assert finalize.await_args.args[2] == "SUCCESS"
 
@@ -411,7 +415,10 @@ async def test_alipay_callback_does_not_promote_waiting_refund_to_success(monkey
     finalize = AsyncMock(return_value=refund)
     monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
 
-    await PaymentService._apply_refund_callback(db, "ALIPAY", {}, parsed, "receipt-2")
+    await PaymentService._apply_refund_callback(
+        db, "ALIPAY", {}, parsed, "receipt-2",
+        provider_query_result={"status": "PROCESSING", "amount": None, "raw": {}},
+    )
 
     assert finalize.await_args.args[2] == "PROCESSING"
 
@@ -431,7 +438,10 @@ async def test_alipay_callback_rejects_refund_query_amount_mismatch(monkeypatch)
     monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
 
     with pytest.raises(AppException, match="本次退款金额"):
-        await PaymentService._apply_refund_callback(db, "ALIPAY", {}, parsed, "receipt-3")
+        await PaymentService._apply_refund_callback(
+            db, "ALIPAY", {}, parsed, "receipt-3",
+            provider_query_result={"status": "SUCCESS", "amount": "4.00", "raw": {}},
+        )
     finalize.assert_not_awaited()
 
 
