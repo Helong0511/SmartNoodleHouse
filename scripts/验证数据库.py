@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
 
 from sqlalchemy import text
 
@@ -301,7 +303,7 @@ async def main() -> None:
             ok = await _index_exists(db, table, index)
             print(f"[{'OK' if ok else 'WARN'}] index {table}.{index}")
             if not ok:
-                print(f"  hint: alembic upgrade head 或 sql/007_prod_indexes.sql")
+                print("  hint: alembic upgrade head 或 sql/007_prod_indexes.sql")
         if not await _table_exists(db, "alembic_version"):
             failures.append("missing alembic_version")
 
@@ -335,7 +337,9 @@ async def main() -> None:
             ok = await _check_exists(db, table, chk)
             print(f"[{'OK' if ok else 'FAIL'}] check {table}.{chk}")
             if not ok:
-                failures.append(f"missing check: {table}.{chk}（执行 alembic upgrade head 或 sql/009_product_stock_price_checks.sql）")
+                failures.append(
+                    f"missing check: {table}.{chk}（执行 alembic upgrade head 或 sql/009_product_stock_price_checks.sql）"
+                )
 
     if failures:
         print("\n校验失败:")
