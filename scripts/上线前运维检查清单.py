@@ -1,5 +1,11 @@
-"""打印审计阻塞项（BLK）人工动作清单，不访问外网。"""
+"""打印审计阻塞项（BLK）人工动作清单，不访问外网。
+
+默认以退出码 2 标记为 BLOCKED，避免把“列出了人工事项”误认为“已经验收通过”。
+操作员逐项完成并核验所有事项后，可显式传入 --acknowledge 确认；该参数不代替外部证据。
+"""
 from __future__ import annotations
+
+import argparse
 
 CHECKS = [
     ("BLK-001", "微信/支付宝/美团/饿了么真实沙箱联调", "用官方凭证跑通支付下单/回调/退款/外卖推单"),
@@ -13,10 +19,25 @@ CHECKS = [
 
 
 def main() -> int:
-    print("=== 上线前运维检查（代码无法代劳）===")
+    parser = argparse.ArgumentParser(description="列出 SmartNoodleHouse 生产上线前人工阻塞项")
+    parser.add_argument(
+        "--acknowledge",
+        action="store_true",
+        help="操作员确认已逐项完成并核验证据；本参数本身不会执行或验证这些事项",
+    )
+    args = parser.parse_args()
+
+    print("=== 上线前运维检查（本脚本不自动访问生产系统）===")
     for code, title, action in CHECKS:
-        print(f"[{code}] {title}")
+        print(f"[MANUAL] {code} {title}")
         print(f"  → {action}")
+
+    if not args.acknowledge:
+        print("\n[BLOCKED] 人工阻塞项尚未由操作员确认；完成核验后显式传入 --acknowledge。")
+        return 2
+
+    print("\n[ACKNOWLEDGED] 操作员声明以上人工事项已逐项完成并核验。")
+    print("注意：此结果是人工确认，不是系统自动验证或第三方平台验收证明。")
     return 0
 
 
