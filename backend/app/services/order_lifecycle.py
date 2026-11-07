@@ -150,10 +150,9 @@ async def apply_order_status(
                         target,
                     )
     elif target == "READY" and old != "READY":
-        try:
-            await notify_order_ready_subscribe(db, order)
-        except Exception:
-            logger.exception("出餐订阅消息推送失败 order_id=%s", order.id)
+        # Outbox 是 READY 转换的持久化组成部分；入队失败必须回滚本次状态变更，
+        # 不能吞掉数据库错误后提交 READY 却缺失通知任务。
+        await notify_order_ready_subscribe(db, order)
     elif target == "PAID" and old != "PAID":
         if old == "CANCELLED":
             # 关单后渠道迟到成功：取消时已回补库存，复活须重新扣库
