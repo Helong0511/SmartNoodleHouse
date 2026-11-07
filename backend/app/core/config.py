@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     enable_wx_phone_bind: bool = False
     # 小程序「人脸迎宾」入口（默认关闭；经 /miniprogram/config 下发）
     enable_face_welcome: bool = False
+    # 生产环境启用人脸处理前，必须完成法务评估/告知与单独同意流程审核
+    face_recognition_legal_reviewed: bool = False
     # 点餐页展示开关（种子默认关闭；运行时按门店 store_settings，无覆盖再看 system_settings）
     show_menu_search: bool = False
     show_menu_smart_taste: bool = False
