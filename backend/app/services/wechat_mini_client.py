@@ -377,8 +377,6 @@ async def send_order_ready_subscribe(
             return True
         return False
 
-    token = await get_access_token()
-    url = f"https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token={token}"
     table_text = (table_label or "堂食").strip()[:20] or "堂食"
     payload = {
         "touser": openid,
@@ -393,18 +391,44 @@ async def send_order_ready_subscribe(
             "thing3": {"value": table_text},
         },
     }
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload)
-            data = resp.json()
-        if data.get("errcode") == 0:
+
+    # access_token 可能在缓存有效期内被平台提前失效；对明确的凭证错误
+    # 强制刷新后仅重发一次。不能对未知网络结果盲目重发。
+    for token_attempt in range(2):
+        token = await get_access_token(force=token_attempt > 0)
+        url = f"https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token={token}"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json=payload)
+                data = resp.json()
+        except Exception as e:
+            logger.warning(
+                "微信出餐订阅请求异常 order=%s error_type=%s",
+                order_no,
+                type(e).__name__,
+            )
+            _raise_order_ready_transport_error(e)
+
+        try:
+            errcode = int(data.get("errcode", -1))
+        except (TypeError, ValueError):
+            errcode = -1
+        if errcode == 0:
             return True
-        logger.warning("订阅消息发送失败 order=%s err=%s", order_no, data)
-    except Exception as e:
+        if errcode in {40001, 40014, 42001} and token_attempt == 0:
+            logger.info(
+                "微信出餐订阅 access_token 已失效，强制刷新后重试 order=%s errcode=%s",
+                order_no,
+                errcode,
+            )
+            continue
+        if errcode in {-1, 45011}:
+            # 平台明确返回系统繁忙/频率限制，说明本次未成功；交给 Outbox 退避重试。
+            raise RuntimeError(f"WeChat subscribe temporarily unavailable: errcode={errcode}")
         logger.warning(
-            "微信出餐订阅请求异常 order=%s error_type=%s",
+            "微信出餐订阅被平台拒绝 order=%s errcode=%s",
             order_no,
-            type(e).__name__,
+            errcode,
         )
-        _raise_order_ready_transport_error(e)
+        return False
     return False
