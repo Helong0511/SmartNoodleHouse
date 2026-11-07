@@ -409,10 +409,25 @@ async def send_order_ready_subscribe(
             )
             _raise_order_ready_transport_error(e)
 
+        # Only an explicit provider error code is retry-classifiable. A malformed
+        # response (including a JSON list or a missing/non-numeric errcode) does
+        # not prove that the provider rejected the side effect; fail closed to
+        # UNCERTAIN rather than letting the Outbox blindly send a duplicate.
+        if not isinstance(data, dict) or "errcode" not in data:
+            _raise_order_ready_transport_error(
+                ValueError("WeChat subscribe response is not a valid errcode object")
+            )
+        raw_errcode = data.get("errcode")
+        if isinstance(raw_errcode, bool):
+            _raise_order_ready_transport_error(
+                ValueError("WeChat subscribe response contains a boolean errcode")
+            )
         try:
-            errcode = int(data.get("errcode", -1))
+            errcode = int(raw_errcode)
         except (TypeError, ValueError):
-            errcode = -1
+            _raise_order_ready_transport_error(
+                ValueError("WeChat subscribe response contains a non-numeric errcode")
+            )
         if errcode == 0:
             return True
         if errcode in {40001, 40014, 42001} and token_attempt == 0:
