@@ -13,6 +13,7 @@ CHECKS = [
     ("BLK-003", "生产 schema 对比", "alembic upgrade head --sql 与预生产演练在线 DDL 窗口"),
     ("BLK-004", "监控告警", "Prometheus/Grafana 接入 /api 性能与 5xx、队列积压、支付失败率"),
     ("BLK-006", "Redis 生产容量与持久化", "核验 maxmemory 已设置、maxmemory-policy=noeviction、vm.overcommit_memory=1、AOF/RDB 状态与磁盘告警；按实际主机 RAM 调整示例 512mb"),
+    ("BLK-007", "人脸识别生产合规门禁", "如启用人脸处理，须先完成个人信息保护影响评估、显著告知、单独同意与撤回、非人脸替代方式、最短保存期限及存储/传输合规审查；否则保持 enable_face_welcome=false 且 FACE_RECOGNITION_LEGAL_REVIEWED=false"),
     ("BLK-005", "小程序上架", "按 docs/小程序上架检查清单.md 提交审核"),
     ("P1-R2", "备份演练", "python scripts/备份恢复演练.py；隔离库加 --restore-drill"),
 ]
