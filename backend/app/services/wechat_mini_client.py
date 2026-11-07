@@ -43,6 +43,19 @@ def _release_phone_code_local(digest: str) -> None:
     _phone_code_local.pop(digest, None)
 
 
+def _raise_order_ready_transport_error(exc: Exception) -> None:
+    """连接建立前失败可安全重试；请求发出后响应未知时必须人工核实。"""
+    import httpx
+
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        raise exc
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    raise ExternalSideEffectUncertain(
+        f"WECHAT order-ready notification result unknown: {type(exc).__name__}"
+    ) from exc
+
+
 async def get_access_token(*, force: bool = False) -> str:
     settings = get_settings()
     if not settings.wechat_app_id or not settings.wechat_app_secret:
@@ -388,5 +401,10 @@ async def send_order_ready_subscribe(
             return True
         logger.warning("订阅消息发送失败 order=%s err=%s", order_no, data)
     except Exception as e:
-        logger.warning("订阅消息异常 order=%s: %s", order_no, e)
+        logger.warning(
+            "微信出餐订阅请求异常 order=%s error_type=%s",
+            order_no,
+            type(e).__name__,
+        )
+        _raise_order_ready_transport_error(e)
     return False

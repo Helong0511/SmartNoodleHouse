@@ -150,10 +150,9 @@ async def apply_order_status(
                         target,
                     )
     elif target == "READY" and old != "READY":
-        try:
-            await notify_order_ready_subscribe(db, order)
-        except Exception:
-            logger.exception("出餐订阅消息推送失败 order_id=%s", order.id)
+        # Outbox 是 READY 转换的持久化组成部分；入队失败必须回滚本次状态变更，
+        # 不能吞掉数据库错误后提交 READY 却缺失通知任务。
+        await notify_order_ready_subscribe(db, order)
     elif target == "PAID" and old != "PAID":
         if old == "CANCELLED":
             # 关单后渠道迟到成功：取消时已回补库存，复活须重新扣库
@@ -187,60 +186,23 @@ async def apply_order_status(
 
 
 async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
-    """订单进入 READY 时尝试推送订阅消息（失败不阻断主流程）。
+    """订单 READY 时分别持久化微信、支付宝通知任务。
 
-    微信 / 支付宝各自模板与身份；能发则都尝试（用户可能双端都订过）。
-    仅在锁内解析 openid/桌台，HTTP 投递用 create_task，避免拉长 Order 行锁。
+    每个平台独立事件，避免一个平台成功、另一个平台失败后重试造成前者重复通知。
+    HTTP 调用由 Outbox worker 在订单事务提交后执行。
     """
-    if not order.customer_id:
+    if not order or not order.customer_id or not order.id:
         return
-    import asyncio
+    from app.services.outbox_worker import enqueue_outbox
 
-    from app.models import DiningTable
-    from app.services.alipay_mini_client import (
-        send_order_ready_subscribe as send_alipay_order_ready,
-    )
-    from app.services.customer_service import CustomerService
-    from app.services.wechat_mini_client import send_order_ready_subscribe
-
-    table_label = None
-    if order.table_id:
-        t = await db.get(DiningTable, order.table_id)
-        if t:
-            table_label = t.table_name or t.table_no
-
-    order_no = order.order_no
-    order_id = int(order.id)
-
-    openid = await CustomerService.resolve_wechat_openid(db, order.customer_id)
-    alipay_uid = await CustomerService.resolve_alipay_user_id(db, order.customer_id)
-
-    async def _send_wechat() -> None:
-        try:
-            await send_order_ready_subscribe(
-                openid=openid,
-                order_no=order_no,
-                order_id=order_id,
-                table_label=table_label,
-            )
-        except Exception:
-            logger.exception("微信出餐订阅推送失败 order_id=%s", order_id)
-
-    async def _send_alipay() -> None:
-        try:
-            await send_alipay_order_ready(
-                alipay_user_id=alipay_uid,
-                order_no=order_no,
-                order_id=order_id,
-                table_label=table_label,
-            )
-        except Exception:
-            logger.exception("支付宝出餐订阅推送失败 order_id=%s", order_id)
-
-    if openid:
-        asyncio.create_task(_send_wechat())
-    if alipay_uid:
-        asyncio.create_task(_send_alipay())
+    for channel in ("wechat", "alipay"):
+        await enqueue_outbox(
+            db,
+            aggregate_type="order_notification",
+            aggregate_id=int(order.id),
+            event_kind=f"order_ready_{channel}",
+            payload={"order_id": int(order.id), "channel": channel},
+        )
 
 
 def _infer_assert_kind(source: str) -> str:

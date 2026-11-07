@@ -89,10 +89,9 @@ async def test_alipay_balance_low_gateway_fail(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_notify_order_ready_tries_both_channels(db_session, monkeypatch):
+async def test_notify_order_ready_persists_independent_channel_events(db_session, monkeypatch):
     from app.models import Customer, Order
-    from app.services import order_lifecycle
-    from app.services.customer_service import CustomerService
+    from app.services import order_lifecycle, outbox_worker
 
     c = Customer(id=8801, customer_no="CU_SUB_BOTH", nickname="双端", member_status="MEMBER")
     db_session.add(c)
@@ -111,25 +110,14 @@ async def test_notify_order_ready_tries_both_channels(db_session, monkeypatch):
     db_session.add(order)
     await db_session.commit()
 
-    monkeypatch.setattr(
-        CustomerService, "resolve_wechat_openid", AsyncMock(return_value="oxxx")
-    )
-    monkeypatch.setattr(
-        CustomerService, "resolve_alipay_user_id", AsyncMock(return_value="2088yyy")
-    )
-    wx = AsyncMock(return_value=True)
-    ali = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        "app.services.wechat_mini_client.send_order_ready_subscribe", wx
-    )
-    monkeypatch.setattr(
-        "app.services.alipay_mini_client.send_order_ready_subscribe", ali
-    )
+    enqueue = AsyncMock(return_value=(None, True))
+    monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
 
     await order_lifecycle.notify_order_ready_subscribe(db_session, order)
-    # 通知投递有意在后台 task 中执行，避免延长订单行锁；让事件循环调度任务后再断言。
-    import asyncio
-    await asyncio.sleep(0)
-    # 投递通过 create_task 异步调度；让两个任务获得一次执行机会后再断言。
-    assert wx.await_count == 1
-    assert ali.await_count == 1
+
+    assert enqueue.await_count == 2
+    assert [call.kwargs["event_kind"] for call in enqueue.await_args_list] == [
+        "order_ready_wechat",
+        "order_ready_alipay",
+    ]
+    assert all(call.kwargs["aggregate_id"] == order.id for call in enqueue.await_args_list)
