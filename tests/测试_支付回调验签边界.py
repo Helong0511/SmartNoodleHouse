@@ -121,6 +121,20 @@ def test_wechat_transaction_callback_rejects_non_cny():
         )
 
 
+@pytest.mark.parametrize("currency", [None, "", "   "])
+def test_wechat_transaction_callback_rejects_missing_currency(currency):
+    with pytest.raises(ValueError, match="明确提供 CNY"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 100, "currency": currency},
+            }
+        )
+
+
 def test_wechat_transaction_callback_accepts_valid_payload():
     result = _wechat_call(
         {
