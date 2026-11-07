@@ -36,4 +36,4 @@ SQLAlchemy[asyncio]==2.1.8
 uvicorn[standard]==0.34.0
 websockets==13.1
 pywin32==312; platform_system == "Windows"
-zhdate==0.1
+lunar-python==1.4.9
