@@ -118,3 +118,16 @@ async def test_stale_order_ready_notification_is_reclaimed_as_uncertain_not_repl
     assert "order_notification" in values
     assert "UNCERTAIN" in values
     assert "EXTERNAL_RESULT_UNKNOWN" in values
+
+
+@pytest.mark.asyncio
+async def test_order_ready_outbox_enqueue_failure_is_not_silenced(monkeypatch):
+    from app.services import order_lifecycle, outbox_worker
+
+    enqueue = AsyncMock(side_effect=RuntimeError("database unavailable"))
+    monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await order_lifecycle.notify_order_ready_subscribe(
+            object(), SimpleNamespace(id=321, customer_id=77)
+        )
