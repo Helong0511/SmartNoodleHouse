@@ -132,3 +132,6 @@ def test_lunar_birthday_display_uses_chinese_month_and_day():
     assert format_birthday_display(date(1990, 5, 1), CAL_LUNAR) == (
         "农历 四月初七（对应公历 1990-05-01）"
     )
+    assert format_birthday_display(date(2023, 3, 22), CAL_LUNAR) == (
+        "农历 闰二月初一（对应公历 2023-03-22）"
+    )
