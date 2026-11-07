@@ -453,7 +453,7 @@ class AlipayProvider:
 
 
 def _resolve_alipay_refund_status(parsed: dict) -> str:
-    """仅按支付宝明确退款状态或退款时间确认成功；退款金额字段本身不是成功凭据。"""
+    """仅按支付宝明确退款状态确认成功；金额、时间字段都不是单笔退款成功凭据。"""
     status = str(parsed.get("refund_status") or "").strip().upper()
     if status in {"REFUND_SUCCESS", "SUCCESS"}:
         return "SUCCESS"
@@ -461,14 +461,17 @@ def _resolve_alipay_refund_status(parsed: dict) -> str:
         return "CLOSED"
     if status in {"SELLER_REFUSE_BUYER", "FAILED"}:
         return "FAILED"
-    # 等待卖家同意、买家退货、卖家确认收货等状态都不是退款成功。
-    if status:
-        return "PROCESSING"
-    # 部分旧版通知可能只提供退款时间；时间戳可作为已发生退款的证据。
-    if parsed.get("gmt_refund"):
-        return "SUCCESS"
-    # refund_fee 仅表示金额，不足以证明退款状态已成功。
+    # WAIT_*、未知状态、缺失状态均不得推断成功；转入查单补偿。
     return "PROCESSING"
+
+
+_REFUND_POLL_BACKOFF_SECONDS = (300, 600, 1200, 1800)
+
+
+def _refund_poll_backoff_seconds(retry_count: int) -> int:
+    """微信退款仍处理中时按 5/10/20/30 分钟衰减查单，避免频率限制和任务饥饿。"""
+    attempt = max(1, int(retry_count or 0))
+    return _REFUND_POLL_BACKOFF_SECONDS[min(attempt - 1, len(_REFUND_POLL_BACKOFF_SECONDS) - 1)]
 
 
 class PaymentService:
@@ -3413,18 +3416,65 @@ class PaymentService:
         return late_paid
 
     @classmethod
+    async def _defer_refund_poll(
+        cls, refund_id: int, *, reason: str, delay_seconds: int | None = None
+    ) -> None:
+        """记录一次未决查单并设置下次执行时间；只锁退款行，不等待支付/订单行。"""
+        from datetime import timedelta
+
+        from app.core.response import naive_local_now
+
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(PaymentRefund)
+                    .where(PaymentRefund.id == int(refund_id))
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if row is None or row.status not in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
+                await db.commit()
+                return
+            now = naive_local_now()
+            if row.next_retry_at is not None and row.next_retry_at > now:
+                await db.commit()
+                return
+            row.retry_count = int(row.retry_count or 0) + 1
+            delay = (
+                int(delay_seconds)
+                if delay_seconds is not None
+                else _refund_poll_backoff_seconds(row.retry_count)
+            )
+            row.next_retry_at = now + timedelta(seconds=max(30, delay))
+            row.last_error = str(reason or "退款结果仍未确认")[:500]
+            await db.commit()
+
+    @classmethod
     async def poll_pending_refunds(cls, limit: int = 20) -> int:
-        """定时补偿：拉取未决退款；与主动查单共用严格的渠道结果校验。"""
+        """定时补偿：按到期时间公平调度未决退款，避免最早的 20 笔长期占满批次。"""
+        from datetime import timedelta
         from types import SimpleNamespace
 
+        from app.core.response import naive_local_now
+
+        now = naive_local_now()
         async with AsyncSessionLocal() as db:
             ids = list(
                 (
                     await db.execute(
                         select(PaymentRefund.id)
-                        .where(PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")))
-                        .order_by(PaymentRefund.id.asc())
-                        .limit(limit)
+                        .where(
+                            PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
+                            or_(
+                                PaymentRefund.next_retry_at.is_(None),
+                                PaymentRefund.next_retry_at <= now,
+                            ),
+                        )
+                        .order_by(
+                            func.coalesce(PaymentRefund.next_retry_at, PaymentRefund.created_at).asc(),
+                            PaymentRefund.id.asc(),
+                        )
+                        .limit(max(1, min(int(limit), 200)))
                     )
                 )
                 .scalars()
@@ -3480,6 +3530,9 @@ class PaymentService:
                     logger.warning("退款查询失败 refund_no=%s: %s", refund_snapshot.refund_no, e)
                     continue
                 if result is None:
+                    await cls._defer_refund_poll(
+                        int(rid), reason="退款查询渠道未配置或暂不支持", delay_seconds=1800
+                    )
                     continue
 
                 # 定时任务不得绕过主动查单的渠道身份、订单、金额和币种校验。
@@ -3545,6 +3598,15 @@ class PaymentService:
                         callback_raw={"query": result.get("raw")},
                         source="REFUND_QUERY",
                     )
+                    if row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
+                        row.retry_count = int(row.retry_count or 0) + 1
+                        row.next_retry_at = naive_local_now() + timedelta(
+                            seconds=_refund_poll_backoff_seconds(row.retry_count)
+                        )
+                        row.last_error = f"渠道退款状态仍未终结: {query_status}"[:500]
+                    else:
+                        row.next_retry_at = None
+                        row.last_error = None
                     await db.commit()
                     if before != "SUCCESS" and row.status == "SUCCESS":
                         done += 1
@@ -3567,4 +3629,10 @@ class PaymentService:
                             logger.warning("退款成功 WS 通知失败: %s", ws_err)
             except Exception as e:
                 logger.warning("退款查单补偿异常 refund_id=%s: %s", rid, e)
+                try:
+                    await cls._defer_refund_poll(
+                        int(rid), reason=f"退款查单异常: {type(e).__name__}: {e}", delay_seconds=60
+                    )
+                except Exception:
+                    logger.exception("记录退款查单退避失败 refund_id=%s", rid)
         return done
