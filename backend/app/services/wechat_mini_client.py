@@ -422,7 +422,7 @@ async def send_order_ready_subscribe(
             _raise_order_ready_transport_error(
                 ValueError("WeChat subscribe response contains an invalid errcode type")
             )
-        if isinstance(raw_errcode, str) and not re.fullmatch(r"-?\\d+", raw_errcode.strip()):
+        if isinstance(raw_errcode, str) and not re.fullmatch(r"-?\d+", raw_errcode.strip()):
             _raise_order_ready_transport_error(
                 ValueError("WeChat subscribe response contains a non-numeric errcode")
             )
