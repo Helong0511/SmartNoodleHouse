@@ -718,6 +718,19 @@ async def update_product(
         for idx, gid in enumerate(data.option_group_ids):
             db.add(ProductOptionGroup(product_id=product.id, group_id=gid, sort_order=idx))
     await db.flush()
+    if "stock" in payload and product.store_id:
+        # 品牌库存是无门店覆盖时的有效库存；与订单扣减共用同一事务 Outbox，
+        # handler 重读最新有效库存（若有门店覆盖则以覆盖值为准）。
+        from app.services.stock_service import _emit_stock_mirror
+
+        await _emit_stock_mirror(
+            db,
+            store_id=int(product.store_id),
+            product_id=int(product.id),
+            mirror_id=int(product.id),
+            zero=int(product.stock or 0) <= 0,
+            aggregate_type="delivery_stock_base",
+        )
     await AuditService.log_staff(
         db,
         user=user,
