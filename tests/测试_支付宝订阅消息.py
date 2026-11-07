@@ -89,11 +89,19 @@ async def test_alipay_balance_low_gateway_fail(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_notify_order_ready_persists_independent_channel_events(db_session, monkeypatch):
+@pytest.mark.parametrize(
+    ("order_channel", "expected_event"),
+    [("WECHAT", "order_ready_wechat"), ("ALIPAY", "order_ready_alipay")],
+)
+async def test_notify_order_ready_enqueues_only_order_origin_platform(
+    db_session, monkeypatch, order_channel, expected_event
+):
     from app.models import Customer, Order
     from app.services import order_lifecycle, outbox_worker
 
-    c = Customer(id=8801, customer_no="CU_SUB_BOTH", nickname="双端", member_status="MEMBER")
+    c = Customer(
+        id=8801, customer_no="CU_SUB_CHANNEL", nickname="平台用户", member_status="MEMBER"
+    )
     db_session.add(c)
     await db_session.flush()
     order = Order(
@@ -102,7 +110,7 @@ async def test_notify_order_ready_persists_independent_channel_events(db_session
         store_id=1,
         customer_id=c.id,
         status="COOKING",
-        channel="ALIPAY",
+        channel=order_channel,
         dining_type="DINE_IN",
         subtotal=10,
         total_amount=10,
@@ -115,9 +123,41 @@ async def test_notify_order_ready_persists_independent_channel_events(db_session
 
     await order_lifecycle.notify_order_ready_subscribe(db_session, order)
 
-    assert enqueue.await_count == 2
-    assert [call.kwargs["event_kind"] for call in enqueue.await_args_list] == [
-        "order_ready_wechat",
-        "order_ready_alipay",
-    ]
-    assert all(call.kwargs["aggregate_id"] == order.id for call in enqueue.await_args_list)
+    assert enqueue.await_count == 1
+    assert enqueue.await_args.kwargs["event_kind"] == expected_event
+    assert enqueue.await_args.kwargs["aggregate_id"] == order.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order_channel", ["H5", "POS", "MEITUAN", "ELEME", None])
+async def test_notify_order_ready_skips_non_miniprogram_channels(
+    db_session, monkeypatch, order_channel
+):
+    from app.models import Customer, Order
+    from app.services import order_lifecycle, outbox_worker
+
+    c = Customer(
+        id=8802, customer_no="CU_SUB_NON_MINI", nickname="非小程序用户", member_status="MEMBER"
+    )
+    db_session.add(c)
+    await db_session.flush()
+    order = Order(
+        id=88002,
+        order_no="SNHSUB0002",
+        store_id=1,
+        customer_id=c.id,
+        status="COOKING",
+        channel=order_channel,
+        dining_type="DINE_IN",
+        subtotal=10,
+        total_amount=10,
+    )
+    db_session.add(order)
+    await db_session.commit()
+
+    enqueue = AsyncMock(return_value=(None, True))
+    monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
+
+    await order_lifecycle.notify_order_ready_subscribe(db_session, order)
+
+    enqueue.assert_not_awaited()
