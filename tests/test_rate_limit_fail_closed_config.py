@@ -9,6 +9,7 @@ def test_delivery_callbacks_are_required_fail_closed_paths():
     required = set(_REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS)
     assert "/api/delivery/meituan/notify" in required
     assert "/api/delivery/eleme/notify" in required
+    assert "/api/miniprogram/member/phone" in required
 
 
 def test_default_rate_limit_configuration_covers_delivery_callbacks():
@@ -28,6 +29,7 @@ def test_delivery_callback_prefixes_cannot_be_omitted_in_production_config():
     missing = _missing_rate_limit_fail_closed_paths(configured)
     assert "/api/delivery/meituan/notify" in missing
     assert "/api/delivery/eleme/notify" in missing
+    assert "/api/miniprogram/member/phone" in missing
 
 
 def test_redis_outage_logs_are_throttled_to_prevent_log_storms(monkeypatch):
