@@ -43,7 +43,6 @@ async def test_order_ready_handler_skips_notification_if_order_is_no_longer_read
 
 @pytest.mark.asyncio
 async def test_order_ready_handler_sends_to_both_configured_mini_program_identities(monkeypatch):
-    from app.models import Order
     from app.services import alipay_mini_client, wechat_mini_client
     from app.services.customer_service import CustomerService
     from app.services.paid_side_effects import _handle_order_ready_notification
@@ -82,3 +81,21 @@ def test_order_ready_outbox_is_treated_as_external_side_effect():
     assert not _is_external_side_effect_outbox(SimpleNamespace(
         aggregate_type="order_notification", event_kind="other", payload="{}"
     ))
+
+
+@pytest.mark.asyncio
+async def test_stale_order_ready_notification_is_reclaimed_as_uncertain_not_replayed():
+    from app.services.outbox_worker import reclaim_stale_processing
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+
+    await reclaim_stale_processing(db, stale_after=300)
+
+    statement = db.execute.await_args.args[0]
+    compiled = statement.compile()
+    values = [str(value) for value in compiled.params.values()]
+    assert "order_notification" in values
+    assert "UNCERTAIN" in values
+    assert "EXTERNAL_RESULT_UNKNOWN" in values
