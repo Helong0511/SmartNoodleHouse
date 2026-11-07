@@ -510,7 +510,7 @@ async def test_scheduled_refund_poll_rejects_success_with_wrong_amount(monkeypat
 
     refund = SimpleNamespace(
         id=77, payment_id=8, order_id=18, refund_no="RF-77",
-        amount=Decimal("10.00"), status="PROCESSING",
+        amount=Decimal("10.00"), status="PROCESSING", retry_count=0,
     )
     payment = SimpleNamespace(
         id=8, provider="WECHAT", payment_no="PAY-8",
