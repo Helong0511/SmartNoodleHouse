@@ -154,9 +154,9 @@ class WechatPayVerifier:
             total_fen = total_raw
             if total_fen <= 0:
                 raise ValueError("微信支付成功回调金额必须大于零")
-            currency = str(amount.get("currency") or "CNY").upper()
-            if currency != "CNY":
-                raise ValueError("暂不支持非 CNY 微信支付回调")
+            currency_raw = amount.get("currency")
+            if not isinstance(currency_raw, str) or currency_raw.strip().upper() != "CNY":
+                raise ValueError("微信支付成功回调必须明确提供 CNY 币种")
             if str(inner.get("trade_state") or "").upper() != "SUCCESS":
                 raise ValueError("微信 TRANSACTION.SUCCESS 事件的交易状态不是 SUCCESS")
         return {
