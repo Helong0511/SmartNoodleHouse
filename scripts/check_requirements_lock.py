@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Verify every active direct requirement is pinned and installed by requirements.lock.
-
-This prevents CI from silently installing an incomplete curated lock file.
-"""
+"""Verify direct requirements are pinned, marker-aligned, and installed from requirements.lock."""
 from __future__ import annotations
 
 import sys
@@ -38,8 +35,8 @@ def active(req: Requirement, env: dict[str, str]) -> bool:
 
 def main() -> int:
     env = default_environment()
-    direct = [r for r in parse(REQUIREMENTS) if active(r, env)]
-    locked = [r for r in parse(LOCK) if active(r, env)]
+    direct = parse(REQUIREMENTS)
+    locked = parse(LOCK)
     by_name: dict[str, list[Requirement]] = {}
     for req in locked:
         by_name.setdefault(canonicalize_name(req.name), []).append(req)
@@ -51,25 +48,44 @@ def main() -> int:
         if not candidates:
             errors.append(f"{req.name}: declared in requirements.txt but absent from requirements.lock")
             continue
+        if len(candidates) != 1:
+            errors.append(f"{req.name}: lock must contain exactly one entry")
+            continue
+
+        candidate = candidates[0]
+        if req.marker != candidate.marker:
+            errors.append(
+                f"{req.name}: lock platform marker {candidate.marker!s} "
+                f"does not match requirements marker {req.marker!s}"
+            )
+            continue
+
         exact = [
             spec.version
-            for candidate in candidates
             for spec in candidate.specifier
             if spec.operator == "=="
         ]
         if len(exact) != 1:
             errors.append(f"{req.name}: lock must contain exactly one == pin")
             continue
-        missing_extras = set(req.extras) - set().union(*(set(candidate.extras) for candidate in candidates))
+
+        missing_extras = set(req.extras) - set(candidate.extras)
         if missing_extras:
             errors.append(
                 f"{req.name}: lock omits required extras: {', '.join(sorted(missing_extras))}"
             )
             continue
+
         pinned = Version(exact[0])
         if req.specifier and pinned not in req.specifier:
             errors.append(f"{req.name}: locked {pinned} violates {req.specifier}")
             continue
+
+        # Conditional dependencies must remain represented in the universal lock on
+        # every OS, but only the active platform is expected to have them installed.
+        if not active(req, env):
+            continue
+
         try:
             installed = Version(version(req.name))
         except PackageNotFoundError:
@@ -83,7 +99,7 @@ def main() -> int:
         for error in errors:
             print(f" - {error}", file=sys.stderr)
         return 1
-    print(f"requirements.lock OK: {len(direct)} active direct dependencies pinned and installed")
+    print(f"requirements.lock OK: {len(direct)} direct dependencies pinned and marker-aligned")
     return 0
 
 
