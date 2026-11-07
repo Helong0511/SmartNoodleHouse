@@ -332,6 +332,7 @@ async def test_wechat_order_ready_retries_platform_temporary_errors_via_outbox(
         {"errcode": None},
         {"errcode": "not-a-number"},
         {"errcode": True},
+        {"errcode": 0.5},
     ],
 )
 async def test_wechat_order_ready_malformed_response_is_uncertain_not_retried(
