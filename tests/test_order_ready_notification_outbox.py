@@ -117,7 +117,8 @@ async def test_stale_order_ready_notification_is_reclaimed_as_uncertain_not_repl
     values = [str(value) for value in compiled.params.values()]
     assert "order_notification" in values
     assert "UNCERTAIN" in values
-    assert "EXTERNAL_RESULT_UNKNOWN" in values
+    literal_sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "EXTERNAL_RESULT_UNKNOWN" in literal_sql
 
 
 @pytest.mark.asyncio
