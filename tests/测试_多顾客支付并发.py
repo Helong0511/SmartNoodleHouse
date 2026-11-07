@@ -213,9 +213,9 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
     )
 
     claim_db = AsyncMock()
-    claim_db.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
-    )
+    claim_result = MagicMock(rowcount=1)
+    claimed_row_result = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
+    claim_db.execute = AsyncMock(side_effect=[claim_result, claimed_row_result])
     claim_db.get = AsyncMock(return_value=payment)
     claim_db.commit = AsyncMock()
 
