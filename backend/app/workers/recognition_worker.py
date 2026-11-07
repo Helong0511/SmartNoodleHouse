@@ -82,13 +82,20 @@ class RecognitionWorker:
                     feature_checked = True
                     last_feature_check = now_mono
                     try:
-                        async with AsyncSessionLocal() as gate_db:
-                            face_enabled = await SystemSettingsService.effective_bool(
-                                gate_db,
-                                "enable_face_welcome",
-                                bool(getattr(settings, "enable_face_welcome", False)),
-                                store_id=None,
-                            )
+                        # 生产环境必须显式完成合规审核；仅打开后台业务开关不足以启动生物识别。
+                        legal_reviewed = bool(
+                            getattr(settings, "face_recognition_legal_reviewed", False)
+                        )
+                        if bool(getattr(settings, "is_production", False)) and not legal_reviewed:
+                            face_enabled = False
+                        else:
+                            async with AsyncSessionLocal() as gate_db:
+                                face_enabled = await SystemSettingsService.effective_bool(
+                                    gate_db,
+                                    "enable_face_welcome",
+                                    bool(getattr(settings, "enable_face_welcome", False)),
+                                    store_id=None,
+                                )
                     except Exception:
                         face_enabled = False
                         if self._face_enabled_last is not False:
