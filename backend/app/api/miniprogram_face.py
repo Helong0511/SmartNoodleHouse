@@ -43,6 +43,8 @@ async def _require_face_welcome_enabled(db: AsyncSession) -> None:
     from app.services.system_settings_service import SystemSettingsService
 
     settings = get_settings()
+    if settings.is_production and not settings.face_recognition_legal_reviewed:
+        raise AppException(40341, "生产环境人脸识别尚未完成合规审核")
     enabled = await SystemSettingsService.effective_bool(
         db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
     )
