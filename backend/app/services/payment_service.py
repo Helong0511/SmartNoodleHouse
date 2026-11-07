@@ -2793,7 +2793,12 @@ class PaymentService:
         if current_payment is None:
             raise AppException(40401, "支付记录不存在")
         row = (
-            await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
+            await db.execute(
+                select(PaymentRefund)
+                .where(PaymentRefund.id == refund_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not row:
             raise AppException(40405, "退款单不存在")

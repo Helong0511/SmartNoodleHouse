@@ -88,3 +88,14 @@ def test_refund_exception_handlers_lock_parent_aggregate_before_refund_row():
         parent_lock = block.index("_lock_order_then_payment(db, int(payment_id))")
         refund_lock = block.index("PaymentRefund")
         assert parent_lock < refund_lock, f"{name} handler must lock Order→Payment before PaymentRefund"
+
+
+def test_refund_provider_result_refreshes_locked_refund_from_database():
+    source = inspect.getsource(PaymentService.refund)
+    success_path = source[source.index("# Reacquire parent locks before the refund row"):]
+    lock_query = success_path[:success_path.index("if not row:")]
+    assert ".with_for_update()" in lock_query
+    assert ".execution_options(populate_existing=True)" in lock_query, (
+        "after provider HTTP, refresh the locked PaymentRefund from DB so a concurrent "
+        "SUCCESS callback is not hidden by SQLAlchemy's identity map"
+    )
