@@ -658,6 +658,21 @@ class CustomerService:
                 return 0
         deducted = CustomerService.points_from_amount(refund_amount)
         if deducted <= 0:
+            # Even a refund that rounds to zero points must consume its refund_id
+            # idempotency key. Otherwise a delayed retry could deduct points earned
+            # from a later order after this refund was already assessed.
+            if refund_id is not None:
+                db.add(
+                    PointLedger(
+                        customer_id=customer.id,
+                        order_id=order.id,
+                        refund_id=int(refund_id),
+                        delta=0,
+                        balance_after=int(customer.points or 0),
+                        entry_type="REFUND_DEDUCT",
+                    )
+                )
+                await db.flush()
             return 0
         # 本单净已发积分上限，避免跨单扣光余额
         earned = int(
@@ -683,7 +698,7 @@ class CustomerService:
         before = int(customer.points or 0)
         actual = min(before, deducted, remaining)
         customer.points = before - actual
-        if actual > 0:
+        if actual > 0 or refund_id is not None:
             db.add(
                 PointLedger(
                     customer_id=customer.id,
