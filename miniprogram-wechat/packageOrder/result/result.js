@@ -1,6 +1,5 @@
 const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
-const subscribe = require('../../utils/subscribe')
 const prefUtil = require('../../utils/preferences')
 const pickupUtil = require('../../utils/pickup')
 const dineCtx = require('../../utils/context')
@@ -216,9 +215,6 @@ Page({
       // 先拉订单详情出首屏，支付查单放到后台，避免骨架屏一直转
       await this.loadOrder(false)
       this._syncPendingInBackground()
-      try {
-        subscribe.requestOrderReadySubscribe()
-      } catch (_) { }
     } finally {
       this._booting = false
     }
