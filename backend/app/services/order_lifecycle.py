@@ -205,6 +205,7 @@ async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
             payload={"order_id": int(order.id), "channel": channel},
         )
 
+
 def _infer_assert_kind(source: str) -> str:
     s = (source or "").upper()
     if s in ("STAFF", "KITCHEN"):
