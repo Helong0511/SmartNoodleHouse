@@ -72,6 +72,8 @@ async def test_reco_invalidation_outbox_is_durable_and_unique_per_update(db_sess
 async def test_reco_profile_change_and_outbox_roll_back_together(db_session):
     customer = await make_customer(db_session)
     customer_id = customer.id
+    # Keep the pre-existing customer outside the transaction under test.
+    await db_session.commit()
 
     customer.recommend_opt_in = 0
     reco_cache.defer_invalidate_customer(db_session, customer_id)
