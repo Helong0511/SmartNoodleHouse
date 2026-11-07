@@ -3492,6 +3492,10 @@ class PaymentService:
                             .where(
                                 PaymentRefund.id == int(rid),
                                 PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
+                                or_(
+                                    PaymentRefund.next_retry_at.is_(None),
+                                    PaymentRefund.next_retry_at <= naive_local_now(),
+                                ),
                             )
                             .with_for_update(skip_locked=True)
                         )
