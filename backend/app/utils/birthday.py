@@ -9,7 +9,7 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from zhdate import ZhDate
+from lunar_python import Lunar, Solar
 
 CAL_SOLAR = "SOLAR"
 CAL_LUNAR = "LUNAR"
@@ -27,20 +27,22 @@ def today_beijing() -> date:
     return datetime.now(_BEIJING).date()
 
 
-def _solar_to_lunar(d: date) -> ZhDate:
-    return ZhDate.from_datetime(datetime(d.year, d.month, d.day))
+def _solar_to_lunar(d: date) -> Lunar:
+    return Solar.fromYmd(d.year, d.month, d.day).getLunar()
 
 
 def lunar_md(d: date) -> tuple[int, int, bool]:
     """公历日期 → (农历月, 农历日, 是否闰月)。"""
     z = _solar_to_lunar(d)
-    return int(z.lunar_month), int(z.lunar_day), bool(z.leap_month)
+    month = int(z.getMonth())
+    return abs(month), int(z.getDay()), month < 0
 
 
 def solar_to_lunar_ymd(d: date) -> tuple[int, int, int, bool]:
     """公历日期 → (农历年, 农历月, 农历日, 是否闰月)。"""
     z = _solar_to_lunar(d)
-    return int(z.lunar_year), int(z.lunar_month), int(z.lunar_day), bool(z.leap_month)
+    month = int(z.getMonth())
+    return int(z.getYear()), abs(month), int(z.getDay()), month < 0
 
 
 def lunar_ymd_to_solar(
@@ -56,11 +58,12 @@ def lunar_ymd_to_solar(
     ``customers.birthday``（库内始终存公历）。非法农历日抛 ValueError。
     """
     try:
-        z = ZhDate(int(year), int(month), int(day), bool(leap))
-        dt = z.to_datetime()
-    except Exception as exc:  # zhdate 对越界抛 TypeError/ValueError
+        lunar_month = -abs(int(month)) if leap else abs(int(month))
+        z = Lunar.fromYmd(int(year), lunar_month, int(day))
+        dt = z.getSolar()
+    except Exception as exc:  # lunar-python 对越界农历日期抛异常
         raise ValueError(f"invalid lunar date {year}-{month}-{day}") from exc
-    return date(dt.year, dt.month, dt.day)
+    return date(int(dt.getYear()), int(dt.getMonth()), int(dt.getDay()))
 
 
 def resolve_birthday_storage(ymd: date, calendar: str | None) -> date:
@@ -206,14 +209,7 @@ def format_birthday_display(birthday: date | None, calendar: str | None) -> str 
     if cal == CAL_SOLAR:
         return f"公历 {birthday.isoformat()}"
     z = _solar_to_lunar(birthday)
-    # chinese() 形如「一九九〇年四月初七 庚午年 (马年)」；展示取月日段
-    full = str(z.chinese() or "")
-    md = full
-    if "年" in full:
-        md = full.split("年", 1)[1].split()[0]
-    leap = "闰" if bool(z.leap_month) else ""
-    if leap and not md.startswith("闰"):
-        md = f"{leap}{md}"
+    md = f"{z.getMonthInChinese()}{z.getDayInChinese()}"
     return f"农历 {md}（对应公历 {birthday.isoformat()}）"
 
 
