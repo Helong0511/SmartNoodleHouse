@@ -1,17 +1,18 @@
 name: CI
 
 on:
+  # Mainline branches run CI on push. Feature/fix/integration branches are
+  # validated by pull_request only, avoiding duplicate full test suites for
+  # the same commit (push + pull_request).
   push:
-    branches: [main, master, develop, "fix/**", "integration/**"]
+    branches: [main, master, develop]
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-
-# 不取消正在运行的 CI：后端全量测试可能需要数分钟，频繁推送不应中断正在执行的验证。
-# GitHub 默认保留一个 pending run；后续新提交会替换尚未开始的 pending run，
-# 但当前运行会完整结束，随后再验证最新提交。
+  # Do not cancel an active full test run; a newer pending run validates latest SHA.
   cancel-in-progress: false
+
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
@@ -156,13 +157,17 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm to packageManager version
+        run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
+          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major !== 24 || minor < 12) process.exit(1)"
       - name: Install dependencies
         run: npm ci
       - name: Unit tests
         run: npm test --if-present
       - name: Type check and build
         run: npm run build
-
 
   dependency-security-audit:
     name: dependency-security-audit
@@ -185,9 +190,10 @@ jobs:
       - name: Audit npm dependencies
         working-directory: frontend
         run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
           npm ci
           npm audit --audit-level=high
-
 
   miniprogram-static-check:
     name: miniprogram-static-check
