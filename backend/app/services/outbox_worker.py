@@ -139,6 +139,7 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
     # 只对确认/取消/催单动作 fail-closed；print_ticket 由 PrintJob 自己管理，不能混入此规则。
     external_side_effect = or_(
         OutboxEvent.aggregate_type == "delivery_manual",
+        OutboxEvent.aggregate_type == "order_notification",
         and_(
             OutboxEvent.aggregate_type == "webhook_task",
             or_(
@@ -365,7 +366,10 @@ async def _mark_done_after_handler(db: AsyncSession, outbox_id: int, *, wid: str
 
 def _is_external_side_effect_outbox(row: OutboxEvent) -> bool:
     """只对确实会调用外部平台的 Outbox 事件启用防重复副作用保护。"""
-    if str(getattr(row, "aggregate_type", "") or "") not in {"delivery_manual", "webhook_task"}:
+    aggregate_type = str(getattr(row, "aggregate_type", "") or "")
+    if aggregate_type == "order_notification":
+        return str(getattr(row, "event_kind", "") or "") == "order_ready"
+    if aggregate_type not in {"delivery_manual", "webhook_task"}:
         return False
     try:
         payload = json.loads(getattr(row, "payload", None) or "{}")
