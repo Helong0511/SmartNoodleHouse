@@ -1,97 +1,160 @@
 #!/usr/bin/env python3
-"""生成 backend/requirements.lock（基于当前 pip freeze 中与 requirements.txt 相关的包）。
+"""生成 backend/requirements.lock（保留精选传递依赖、PEP 508 extras 与平台标记）。
 
 用法:
   cd backend
   pip install -r requirements.txt
-  python ../scripts/gen_requirements_lock.py
+  python ../scripts/生成依赖锁定文件.py
+
+本脚本不会把当前平台未安装的条件依赖静默删除；若目标平台的旧 pin
+不满足 requirements.txt，必须在该目标平台安装依赖后重新生成。
 """
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
+
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[1]
 REQ = ROOT / "backend" / "requirements.txt"
 LOCK = ROOT / "backend" / "requirements.lock"
 
 
-def parse_req_names(text: str) -> set[str]:
-    names = set()
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+def _parse_lines(text: str, source: str) -> list[Requirement]:
+    result: list[Requirement] = []
+    for line_no, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
             continue
-        name = re.split(r"[<>=!\[]", line, maxsplit=1)[0].strip().lower().replace("_", "-")
-        if name:
-            names.add(name)
-    return names
+        try:
+            result.append(Requirement(line))
+        except Exception as exc:
+            raise ValueError(f"{source}:{line_no}: invalid requirement {line!r}: {exc}") from exc
+    return result
 
 
-def parse_req_constraints(text: str) -> dict[str, str]:
-    """name -> 原始约束行（含 extras）。"""
-    out: dict[str, str] = {}
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        name = re.split(r"[<>=!\[]", line, maxsplit=1)[0].strip().lower().replace("_", "-")
-        if name:
-            out[name] = line
-    return out
+def _exact_pin(req: Requirement) -> Version:
+    pins = [spec.version for spec in req.specifier if spec.operator == "=="]
+    if len(pins) != 1:
+        raise ValueError(f"{req.name}: lock entry must contain exactly one == pin")
+    return Version(pins[0])
 
 
-def _version_in_range(ver: str, constraint_line: str) -> bool:
-    """粗检：用 packaging 若可用，否则跳过。"""
-    try:
-        from packaging.requirements import Requirement
-        from packaging.version import Version
+def _frozen_versions(text: str) -> dict[str, Version]:
+    versions: dict[str, Version] = {}
+    for req in _parse_lines(text, "pip freeze"):
+        name = canonicalize_name(req.name)
+        version = _exact_pin(req)
+        previous = versions.get(name)
+        if previous is not None and previous != version:
+            raise ValueError(f"pip freeze contains conflicting pins for {req.name}")
+        versions[name] = version
+    return versions
 
-        # Requirement 需要合法 PEP 508；约束行已是 name[extra]>=...
-        req = Requirement(constraint_line)
-        return Version(ver) in req.specifier
-    except Exception:
-        return True
+
+def build_lock_text(
+    requirements_text: str,
+    existing_lock_text: str,
+    frozen_text: str,
+    *,
+    environment: dict[str, str] | None = None,
+    python_version: str | None = None,
+) -> str:
+    """Build a curated lock while preserving transitive pins and platform markers."""
+    env = dict(default_environment())
+    if environment:
+        env.update(environment)
+
+    direct = _parse_lines(requirements_text, "requirements.txt")
+    existing = _parse_lines(existing_lock_text, "requirements.lock")
+    frozen = _frozen_versions(frozen_text)
+
+    existing_by_name: dict[str, Requirement] = {}
+    for entry in existing:
+        name = canonicalize_name(entry.name)
+        if name in existing_by_name:
+            raise ValueError(f"requirements.lock contains duplicate package pin: {entry.name}")
+        existing_by_name[name] = entry
+
+    direct_names: set[str] = set()
+    output: dict[str, str] = {}
+    for req in direct:
+        name = canonicalize_name(req.name)
+        if name in direct_names:
+            raise ValueError(f"requirements.txt contains duplicate package: {req.name}")
+        direct_names.add(name)
+
+        is_active = req.marker is None or req.marker.evaluate(env)
+        if is_active:
+            pin = frozen.get(name)
+            if pin is None:
+                raise ValueError(
+                    f"{req.name}: not installed in this environment; install requirements.txt first"
+                )
+        else:
+            old = existing_by_name.get(name)
+            if old is None:
+                raise ValueError(
+                    f"{req.name}: inactive on this platform and has no existing lock pin; "
+                    "generate on the target platform first"
+                )
+            pin = _exact_pin(old)
+
+        if req.specifier and pin not in req.specifier:
+            raise ValueError(
+                f"{req.name}: resolved/retained pin {pin} violates {req.specifier}; "
+                "install the required version on the target platform and regenerate"
+            )
+
+        extras = f"[{','.join(sorted(req.extras))}]" if req.extras else ""
+        marker = f"; {req.marker}" if req.marker else ""
+        output[name] = f"{req.name}{extras}=={pin}{marker}"
+
+    # Keep intentionally curated transitive/runtime pins that are not direct requirements.
+    for name, old in existing_by_name.items():
+        if name not in direct_names:
+            output[name] = str(old)
+
+    header = (
+        "# Curated runtime pins — NOT a complete transitive/hash lock.\n"
+        "# Unlisted transitive dependencies are resolved by pip; CI runs pip-audit.\n"
+        "# Generated by scripts/生成依赖锁定文件.py; extras and PEP 508 markers are preserved.\n"
+        f"# Python: {python_version or sys.version.split()[0]}\n"
+        "# Install: pip install -r backend/requirements.lock\n"
+        "# Keep aligned with backend/requirements.txt.\n"
+    )
+    body = "\n".join(output[name] for name in sorted(output))
+    return header + body + "\n"
 
 
 def main() -> int:
     if not REQ.is_file():
-        print("missing requirements.txt", file=sys.stderr)
+        print(f"missing requirements file: {REQ}", file=sys.stderr)
         return 1
-    wanted = parse_req_names(REQ.read_text(encoding="utf-8"))
-    constraints = parse_req_constraints(REQ.read_text(encoding="utf-8"))
-    out = subprocess.check_output([sys.executable, "-m", "pip", "freeze"], text=True)
-    lines = []
-    frozen = {l.split("==")[0].lower().replace("_", "-"): l for l in out.splitlines() if "==" in l}
-    for w in sorted(wanted):
-        matched = None
-        for k, v in frozen.items():
-            if k == w or k.replace("-", "") == w.replace("-", ""):
-                matched = v.strip()
-                break
-        if not matched:
-            print(f"WARNING: {w} not installed (pip freeze missing)", file=sys.stderr)
-            continue
-        name, ver = matched.split("==", 1)
-        c_line = constraints.get(w) or constraints.get(name.lower().replace("_", "-"))
-        if c_line and not _version_in_range(ver, c_line):
-            print(
-                f"ERROR: {matched} 超出 requirements.txt 约束: {c_line}",
-                file=sys.stderr,
-            )
-            return 2
-        lines.append(matched)
-    lines = sorted(set(lines), key=str.lower)
-    header = (
-        "# Autogenerated by scripts/gen_requirements_lock.py\n"
-        f"# Python: {sys.version.split()[0]}\n"
-        "# Install: pip install -r backend/requirements.lock\n"
-        "# Validated against backend/requirements.txt ranges\n"
+    frozen = subprocess.check_output(
+        [sys.executable, "-m", "pip", "freeze", "--local"],
+        text=True,
     )
-    LOCK.write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Wrote {LOCK} ({len(lines)} packages)")
+    try:
+        generated = build_lock_text(
+            REQ.read_text(encoding="utf-8"),
+            LOCK.read_text(encoding="utf-8") if LOCK.exists() else "",
+            frozen,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if LOCK.exists() and LOCK.read_text(encoding="utf-8") == generated:
+        print(f"requirements.lock already current: {LOCK}")
+        return 0
+    LOCK.write_text(generated, encoding="utf-8")
+    print(f"Wrote {LOCK}")
     return 0
 
 
