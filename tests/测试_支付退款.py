@@ -519,13 +519,15 @@ async def test_scheduled_refund_poll_rejects_success_with_wrong_amount(monkeypat
 
     id_result = MagicMock()
     id_result.scalars.return_value.all.return_value = [77]
+    claim_result = MagicMock()
+    claim_result.rowcount = 1
     row_result = MagicMock()
     row_result.scalar_one_or_none.return_value = refund
 
     first_db = MagicMock()
     first_db.execute = AsyncMock(return_value=id_result)
     second_db = MagicMock()
-    second_db.execute = AsyncMock(return_value=row_result)
+    second_db.execute = AsyncMock(side_effect=[claim_result, row_result])
     second_db.get = AsyncMock(return_value=payment)
     second_db.commit = AsyncMock()
 
@@ -554,6 +556,10 @@ async def test_scheduled_refund_poll_rejects_success_with_wrong_amount(monkeypat
     )
     finalize = AsyncMock()
     monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+    defer = AsyncMock()
+    monkeypatch.setattr(PaymentService, "_defer_refund_poll", defer)
 
     assert await PaymentService.poll_pending_refunds(limit=10) == 0
+    defer.assert_awaited_once()
+    assert defer.await_args.kwargs["claim_version"] == 1
     finalize.assert_not_awaited()
