@@ -137,15 +137,24 @@ async def test_multi_item_stock_deduction_uses_stable_product_lock_order(monkeyp
     assert calls == [(2, 3, 7), (5, 1, 7), (9, 3, 7)]
 
 
+@pytest.mark.parametrize(
+    "items",
+    [
+        [
+            SimpleNamespace(product_id=9, quantity=1),
+            SimpleNamespace(product_id=2, quantity=3),
+            SimpleNamespace(product_id=9, quantity=2),
+        ],
+        [
+            SimpleNamespace(product_id=2, quantity=3),
+            SimpleNamespace(product_id=9, quantity=2),
+            SimpleNamespace(product_id=9, quantity=1),
+        ],
+    ],
+)
 @pytest.mark.asyncio
-async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypatch):
+async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypatch, items):
     from app.services.order_lifecycle import _deduct_order_stock, _restore_order_stock
-
-    items = [
-        SimpleNamespace(product_id=9, quantity=1),
-        SimpleNamespace(product_id=2, quantity=3),
-        SimpleNamespace(product_id=9, quantity=2),
-    ]
     result = MagicMock()
     result.scalars.return_value.all.return_value = items
     db = AsyncMock()
