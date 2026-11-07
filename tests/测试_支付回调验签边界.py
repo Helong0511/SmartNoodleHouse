@@ -94,6 +94,20 @@ def test_wechat_transaction_callback_requires_positive_amount():
         )
 
 
+@pytest.mark.parametrize("total", [True, False, 100.0, 100.5, "100", "100.0", None])
+def test_wechat_transaction_callback_rejects_non_integer_fen_amount(total):
+    with pytest.raises(ValueError, match="整数分"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": total, "currency": "CNY"},
+            }
+        )
+
+
 def test_wechat_transaction_callback_rejects_non_cny():
     with pytest.raises(ValueError, match="CNY"):
         _wechat_call(
