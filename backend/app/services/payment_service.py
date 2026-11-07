@@ -3502,6 +3502,9 @@ class PaymentService:
                     payment = await db.get(Payment, row.payment_id)
                     if not payment:
                         await db.commit()
+                        await cls._defer_refund_poll(
+                            int(rid), reason="退款关联的支付记录不存在", delay_seconds=1800
+                        )
                         continue
                     refund_snapshot = SimpleNamespace(
                         id=int(row.id),
@@ -3528,6 +3531,9 @@ class PaymentService:
                     )
                 except Exception as e:
                     logger.warning("退款查询失败 refund_no=%s: %s", refund_snapshot.refund_no, e)
+                    await cls._defer_refund_poll(
+                        int(rid), reason=f"渠道退款查询异常: {type(e).__name__}: {e}", delay_seconds=60
+                    )
                     continue
                 if result is None:
                     await cls._defer_refund_poll(
