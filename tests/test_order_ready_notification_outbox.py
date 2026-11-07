@@ -126,7 +126,7 @@ async def test_order_ready_outbox_enqueue_failure_is_not_silenced(monkeypatch):
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         await order_lifecycle.notify_order_ready_subscribe(
-            object(), SimpleNamespace(id=321, customer_id=77)
+            object(), SimpleNamespace(id=321, customer_id=77, channel="WECHAT")
         )
 
 
