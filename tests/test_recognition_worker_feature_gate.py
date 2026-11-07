@@ -11,7 +11,6 @@ async def test_disabled_face_welcome_stops_worker_before_model_or_camera_process
     """The global face feature flag must gate all biometric frame processing."""
     from app.core import config as config_module
     from app.core import database as database_module
-    from app.services.face_extractor import ensure_live_face_app, extract_live_face_hit
     from app.services.face_service import face_embedding_cache
     from app.services.system_settings_service import SystemSettingsService
     from app.workers import recognition_worker as worker_module
@@ -46,7 +45,6 @@ async def test_disabled_face_welcome_stops_worker_before_model_or_camera_process
     model_loader = MagicMock(side_effect=AssertionError("must not load face model"))
     frame_extractor = MagicMock(side_effect=AssertionError("must not inspect camera frames"))
     camera_manager = MagicMock(side_effect=AssertionError("must not enumerate cameras"))
-    monkeypatch.setattr(worker_module, "logger", worker_module.logger)
     monkeypatch.setattr(
         "app.services.face_extractor.ensure_live_face_app",
         model_loader,
@@ -80,9 +78,8 @@ def test_unknown_visitor_face_processing_defaults_are_off():
     from app.core.config import Settings
     from app.services.system_settings_service import BUSINESS_SETTING_META
 
-    settings = Settings(_env_file=None)
-    assert settings.enable_face_welcome is False
-    assert settings.unknown_visitor_capture_enabled is False
-    assert settings.unknown_visitor_welcome_enabled is False
+    assert Settings.model_fields["enable_face_welcome"].default is False
+    assert Settings.model_fields["unknown_visitor_capture_enabled"].default is False
+    assert Settings.model_fields["unknown_visitor_welcome_enabled"].default is False
     assert BUSINESS_SETTING_META["unknown_visitor_capture_enabled"]["default"] is False
     assert BUSINESS_SETTING_META["unknown_visitor_welcome_enabled"]["default"] is False
