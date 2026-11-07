@@ -30,7 +30,8 @@ def test_specific_mini_program_auth_limits_precede_generic_prefix():
 def test_redis_fail_closed_prefixes_match_real_auth_endpoints():
     prefixes = _fail_closed_prefixes(
         "/api/auth/login,/api/miniprogram/wechat/login,"
-        "/api/miniprogram/alipay/login,/api/miniprogram/auth/refresh"
+        "/api/miniprogram/alipay/login,/api/miniprogram/auth/refresh,"
+        "/api/miniprogram/member/phone"
     )
     assert path_requires_fail_closed("/api/miniprogram/wechat/login", prefixes)
     assert path_requires_fail_closed("/api/miniprogram/alipay/login", prefixes)
