@@ -698,7 +698,11 @@ class CustomerService:
         before = int(customer.points or 0)
         actual = min(before, deducted, remaining)
         customer.points = before - actual
-        if actual > 0 or refund_id is not None:
+        # A refund may be processed before this order's delayed EARN ledger arrives.
+        # Keep the idempotency key available for award_points_for_paid_order() to
+        # catch up later. If this order has earned points but the current balance
+        # is zero, persist a zero marker so unrelated future earnings are untouched.
+        if actual > 0 or (refund_id is not None and earned > 0):
             db.add(
                 PointLedger(
                     customer_id=customer.id,
