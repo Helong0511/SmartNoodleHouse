@@ -368,7 +368,9 @@ def _is_external_side_effect_outbox(row: OutboxEvent) -> bool:
     """只对确实会调用外部平台的 Outbox 事件启用防重复副作用保护。"""
     aggregate_type = str(getattr(row, "aggregate_type", "") or "")
     if aggregate_type == "order_notification":
-        return str(getattr(row, "event_kind", "") or "") == "order_ready"
+        return str(getattr(row, "event_kind", "") or "") in {
+            "order_ready_wechat", "order_ready_alipay",
+        }
     if aggregate_type not in {"delivery_manual", "webhook_task"}:
         return False
     try:
