@@ -161,3 +161,167 @@ def test_notification_transport_errors_distinguish_safe_connect_retry_from_unkno
     # It must enter UNCERTAIN rather than automatically sending a duplicate.
     with pytest.raises(ExternalSideEffectUncertain, match=provider_name):
         classify(httpx.ReadTimeout("response timed out"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token_error", [40001, 40014, 42001])
+async def test_wechat_order_ready_refreshes_invalid_access_token_once(monkeypatch, token_error):
+    from types import SimpleNamespace
+
+    from app.services import wechat_mini_client
+    from app.services.system_settings_service import SystemSettingsService
+
+    monkeypatch.setattr(
+        wechat_mini_client,
+        "get_settings",
+        lambda: SimpleNamespace(
+            wechat_app_id="wx-app",
+            wechat_app_secret="wx-secret",
+            wechat_subscribe_template_order_ready="WX_READY",
+        ),
+    )
+    monkeypatch.setattr(
+        SystemSettingsService,
+        "resolved_str_sync",
+        staticmethod(lambda key, default="": "WX_READY"),
+    )
+    token = AsyncMock(side_effect=["expired-token", "fresh-token"])
+    monkeypatch.setattr(wechat_mini_client, "get_access_token", token)
+
+    responses = [{"errcode": token_error, "errmsg": "invalid access token"}, {"errcode": 0}]
+    requests = []
+
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def json(self):
+            return self.data
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json):
+            requests.append((url, json))
+            return Response(responses.pop(0))
+
+    monkeypatch.setattr(wechat_mini_client.httpx, "AsyncClient", Client)
+
+    assert await wechat_mini_client.send_order_ready_subscribe(
+        openid="wx-openid", order_no="SNH-1", order_id=1
+    )
+    assert token.await_count == 2
+    assert token.await_args_list[0].kwargs == {"force": False}
+    assert token.await_args_list[1].kwargs == {"force": True}
+    assert len(requests) == 2
+    assert "access_token=expired-token" in requests[0][0]
+    assert "access_token=fresh-token" in requests[1][0]
+
+
+@pytest.mark.asyncio
+async def test_wechat_order_ready_does_not_retry_user_rejected_subscription(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import wechat_mini_client
+    from app.services.system_settings_service import SystemSettingsService
+
+    monkeypatch.setattr(
+        wechat_mini_client,
+        "get_settings",
+        lambda: SimpleNamespace(
+            wechat_app_id="wx-app",
+            wechat_app_secret="wx-secret",
+            wechat_subscribe_template_order_ready="WX_READY",
+        ),
+    )
+    monkeypatch.setattr(
+        SystemSettingsService,
+        "resolved_str_sync",
+        staticmethod(lambda key, default="": "WX_READY"),
+    )
+    token = AsyncMock(return_value="valid-token")
+    monkeypatch.setattr(wechat_mini_client, "get_access_token", token)
+
+    class Response:
+        def json(self):
+            return {"errcode": 43101, "errmsg": "user refuse"}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json):
+            return Response()
+
+    monkeypatch.setattr(wechat_mini_client.httpx, "AsyncClient", Client)
+
+    assert not await wechat_mini_client.send_order_ready_subscribe(
+        openid="wx-openid", order_no="SNH-2", order_id=2
+    )
+    token.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temporary_error", [-1, 45011])
+async def test_wechat_order_ready_retries_platform_temporary_errors_via_outbox(
+    monkeypatch, temporary_error
+):
+    from types import SimpleNamespace
+
+    from app.services import wechat_mini_client
+    from app.services.system_settings_service import SystemSettingsService
+
+    monkeypatch.setattr(
+        wechat_mini_client,
+        "get_settings",
+        lambda: SimpleNamespace(
+            wechat_app_id="wx-app",
+            wechat_app_secret="wx-secret",
+            wechat_subscribe_template_order_ready="WX_READY",
+        ),
+    )
+    monkeypatch.setattr(
+        SystemSettingsService,
+        "resolved_str_sync",
+        staticmethod(lambda key, default="": "WX_READY"),
+    )
+    monkeypatch.setattr(
+        wechat_mini_client, "get_access_token", AsyncMock(return_value="valid-token")
+    )
+
+    class Response:
+        def json(self):
+            return {"errcode": temporary_error, "errmsg": "temporarily unavailable"}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json):
+            return Response()
+
+    monkeypatch.setattr(wechat_mini_client.httpx, "AsyncClient", Client)
+
+    with pytest.raises(RuntimeError, match=f"errcode={temporary_error}"):
+        await wechat_mini_client.send_order_ready_subscribe(
+            openid="wx-openid", order_no="SNH-3", order_id=3
+        )
