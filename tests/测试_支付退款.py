@@ -357,9 +357,23 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
         return {"status": "PROCESSING", "refund_no": "RF901", "payment_no": "PAY12"}
 
     async def execute(statement):
-        observed.append("locked_read" if statement._for_update_arg is not None else "unlocked_read")
-        result = initial_result if observed.count("unlocked_read") == 1 else locked_result
-        return result
+        sql = str(statement).lower()
+        if "payments.order_id" in sql and "for update" not in sql:
+            observed.append("payment_peek")
+            peek = MagicMock()
+            peek.first.return_value = (9, None)
+            return peek
+        if "from orders" in sql:
+            observed.append("order_lock")
+            return MagicMock(scalar_one_or_none=MagicMock(return_value=SimpleNamespace(id=9)))
+        if "from payments" in sql and "for update" in sql:
+            observed.append("payment_lock")
+            return MagicMock(scalar_one_or_none=MagicMock(return_value=payment))
+        if "payment_refunds" in sql:
+            locked = statement._for_update_arg is not None
+            observed.append("refund_lock" if locked else "refund_read")
+            return initial_result if not locked else locked_result
+        raise AssertionError(f"unexpected SQL in refund callback test: {statement}")
 
     db.execute = AsyncMock(side_effect=execute)
 
@@ -389,7 +403,7 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
         )
 
     assert result is row
-    assert observed == ["unlocked_read", "channel_query", "locked_read"]
+    assert observed == ["refund_read", "channel_query", "payment_peek", "order_lock", "payment_lock", "refund_lock"]
     finalize.assert_awaited_once()
 
 

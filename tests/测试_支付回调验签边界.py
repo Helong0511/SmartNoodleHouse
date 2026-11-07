@@ -309,6 +309,9 @@ class _ScalarResult:
     def scalar_one_or_none(self):
         return self.value
 
+    def first(self):
+        return self.value
+
 
 class _RefundCallbackDB:
     def __init__(self, refund, payment):
@@ -317,6 +320,13 @@ class _RefundCallbackDB:
         self.flush = AsyncMock()
 
     async def execute(self, statement):
+        sql = str(statement).lower()
+        if "payments.order_id" in sql and "for update" not in sql:
+            return _ScalarResult((self.payment.order_id, getattr(self.payment, "recharge_order_id", None)))
+        if "from orders" in sql:
+            return _ScalarResult(SimpleNamespace(id=self.payment.order_id))
+        if "from payments" in sql and "for update" in sql:
+            return _ScalarResult(self.payment)
         return _ScalarResult(self.refund)
 
     async def get(self, model, row_id):
