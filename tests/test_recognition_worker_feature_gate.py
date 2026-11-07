@@ -87,3 +87,24 @@ def test_unknown_visitor_face_processing_defaults_are_off():
     assert Settings.model_fields["unknown_visitor_welcome_enabled"].default is False
     assert BUSINESS_SETTING_META["unknown_visitor_capture_enabled"]["default"] is False
     assert BUSINESS_SETTING_META["unknown_visitor_welcome_enabled"]["default"] is False
+
+
+@pytest.mark.asyncio
+async def test_production_face_enrollment_api_requires_legal_review(monkeypatch):
+    from app.api import miniprogram_face
+    from app.core.exceptions import AppException
+    from app.services.system_settings_service import SystemSettingsService
+
+    settings = SimpleNamespace(
+        is_production=True,
+        face_recognition_legal_reviewed=False,
+        enable_face_welcome=True,
+    )
+    monkeypatch.setattr(miniprogram_face, "get_settings", lambda: settings)
+    effective_bool = AsyncMock(return_value=True)
+    monkeypatch.setattr(SystemSettingsService, "effective_bool", effective_bool)
+
+    with pytest.raises(AppException):
+        await miniprogram_face._require_face_welcome_enabled(MagicMock())
+
+    effective_bool.assert_not_awaited()
