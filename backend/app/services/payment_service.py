@@ -3561,6 +3561,9 @@ class PaymentService:
                     )
                     if current_payment is None:
                         await db.rollback()
+                        await cls._defer_refund_poll(
+                            int(rid), reason="退款查单期间原支付记录无法锁定", delay_seconds=1800
+                        )
                         continue
                     row = (
                         await db.execute(
@@ -3580,6 +3583,9 @@ class PaymentService:
                     ):
                         await db.rollback()
                         logger.error("退款查单期间本地退款单发生变化，拒绝应用结果 refund_id=%s", rid)
+                        await cls._defer_refund_poll(
+                            int(rid), reason="退款查单期间本地退款单关联或金额发生变化", delay_seconds=1800
+                        )
                         continue
 
                     if query_status == "SUCCESS":
@@ -3598,6 +3604,9 @@ class PaymentService:
                     ):
                         await db.rollback()
                         logger.error("退款查单期间原支付记录发生变化，拒绝应用结果 refund_id=%s", rid)
+                        await cls._defer_refund_poll(
+                            int(rid), reason="退款查单期间原支付记录关联、渠道或金额发生变化", delay_seconds=1800
+                        )
                         continue
 
                     await cls._finalize_refund(
