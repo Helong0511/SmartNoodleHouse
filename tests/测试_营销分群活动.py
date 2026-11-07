@@ -944,7 +944,7 @@ async def test_welcome_coupon_only_for_new_member_campaign(db_session):
 @pytest.mark.asyncio
 async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     """回归：upsert+commit 后同步 _payload 读 created_at 不得 MissingGreenlet。"""
-    from sqlalchemy.exc import MissingGreenlet
+    from sqlalchemy.exc import MissingGreenlet, StatementError
 
     seed = await _seed(db_session)
     seg = await SegmentService.upsert(
@@ -974,8 +974,14 @@ async def test_campaign_payload_after_commit_reads_timestamps(db_session):
 
     # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）
     db_session.expire(camp, ["created_at", "updated_at"])
-    with pytest.raises(MissingGreenlet):
+    with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
         _ = MarketingService._payload(camp)
+    # SQLAlchemy 2.1 wraps the async MissingGreenlet in StatementError;
+    # SQLAlchemy 2.0 may expose MissingGreenlet directly.
+    if isinstance(exc_info.value, StatementError):
+        assert isinstance(exc_info.value.orig, MissingGreenlet)
+    else:
+        assert isinstance(exc_info.value, MissingGreenlet)
 
     await db_session.refresh(camp)
     again = MarketingService._payload(camp)
