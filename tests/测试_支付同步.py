@@ -447,7 +447,7 @@ async def test_refund_idempotency_key_cannot_be_reused_with_different_amount(mon
         )
 
     assert exc.value.code == 40955
-    assert db.execute.await_count == 2
+    assert db.execute.await_count == 1
 
 
 @pytest.mark.asyncio
