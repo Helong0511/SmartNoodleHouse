@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -106,3 +107,68 @@ async def test_store_stock_cannot_override_master_product_off_shelf_status():
     assert "品牌餐品已停售" in str(exc.value)
     # 只读取并锁定餐品主档；不得继续读取门店库存或执行扣减 UPDATE。
     db.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_multi_item_stock_deduction_uses_stable_product_lock_order(monkeypatch):
+    from app.services.stock_service import deduct_for_order_items
+
+    calls = []
+
+    async def fake_deduct(_db, product_id, qty, *, store_id=None):
+        calls.append((product_id, qty, store_id))
+
+    monkeypatch.setattr("app.services.stock_service.deduct_stock", fake_deduct)
+    monkeypatch.setattr(
+        "app.services.menu_cache_service.enqueue_menu_cache_invalidation", AsyncMock()
+    )
+
+    await deduct_for_order_items(
+        AsyncMock(),
+        [
+            {"product_id": 9, "quantity": 1},
+            {"product_id": 2, "quantity": 3},
+            {"product_id": 9, "quantity": 2},
+            {"product_id": 5, "quantity": 1},
+        ],
+        store_id=7,
+    )
+
+    assert calls == [(2, 3, 7), (5, 1, 7), (9, 3, 7)]
+
+
+@pytest.mark.asyncio
+async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypatch):
+    from app.services.order_lifecycle import _deduct_order_stock, _restore_order_stock
+
+    items = [
+        SimpleNamespace(product_id=9, quantity=1),
+        SimpleNamespace(product_id=2, quantity=3),
+        SimpleNamespace(product_id=9, quantity=2),
+    ]
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = items
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    restore_calls = []
+    deduct_calls = []
+
+    async def fake_restore(_db, product_id, qty, *, store_id=None):
+        restore_calls.append((product_id, qty, store_id))
+
+    async def fake_deduct(_db, product_id, qty, *, store_id=None):
+        deduct_calls.append((product_id, qty, store_id))
+
+    monkeypatch.setattr("app.services.stock_service.restore_stock", fake_restore)
+    monkeypatch.setattr("app.services.stock_service.deduct_stock", fake_deduct)
+    monkeypatch.setattr(
+        "app.services.menu_cache_service.enqueue_menu_cache_invalidation", AsyncMock()
+    )
+    order = SimpleNamespace(id=88, store_id=7)
+
+    await _restore_order_stock(db, order)
+    await _deduct_order_stock(db, order)
+
+    expected = [(2, 3, 7), (9, 3, 7)]
+    assert restore_calls == expected
+    assert deduct_calls == expected
