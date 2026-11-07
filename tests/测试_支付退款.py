@@ -86,9 +86,18 @@ def test_alipay_refund_status_is_fail_closed():
     assert _resolve_alipay_refund_status({"refund_status": "REFUND_CLOSED"}) == "CLOSED"
     assert _resolve_alipay_refund_status({"refund_status": "SELLER_REFUSE_BUYER"}) == "FAILED"
     assert _resolve_alipay_refund_status({"refund_status": "WAIT_SELLER_AGREE"}) == "PROCESSING"
-    # 只有金额不代表成功；旧版通知有明确退款时间时才允许按时间戳确认。
+    # 累计金额、退款时间均不能证明某个 out_request_no 对应的退款已成功。
     assert _resolve_alipay_refund_status({"refund_fee": "10.00"}) == "PROCESSING"
-    assert _resolve_alipay_refund_status({"gmt_refund": "2026-08-27 16:00:00"}) == "SUCCESS"
+    assert _resolve_alipay_refund_status({"gmt_refund": "2026-08-27 16:00:00"}) == "PROCESSING"
+    assert _resolve_alipay_refund_status({}) == "PROCESSING"
+
+
+def test_refund_poll_backoff_grows_and_caps():
+    from app.services.payment_service import _refund_poll_backoff_seconds
+
+    assert [_refund_poll_backoff_seconds(n) for n in (1, 2, 3, 4, 5, 100)] == [
+        300, 600, 1200, 1800, 1800, 1800
+    ]
 
 
 @pytest.mark.asyncio
