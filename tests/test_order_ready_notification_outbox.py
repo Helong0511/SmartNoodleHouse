@@ -321,3 +321,70 @@ async def test_wechat_order_ready_retries_platform_temporary_errors_via_outbox(
         await wechat_mini_client.send_order_ready_subscribe(
             openid="wx-openid", order_no="SNH-3", order_id=3
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed_response",
+    [
+        [],
+        {},
+        {"errcode": None},
+        {"errcode": "not-a-number"},
+        {"errcode": True},
+    ],
+)
+async def test_wechat_order_ready_malformed_response_is_uncertain_not_retried(
+    monkeypatch, malformed_response
+):
+    from types import SimpleNamespace
+
+    from app.services import wechat_mini_client
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+    from app.services.system_settings_service import SystemSettingsService
+
+    monkeypatch.setattr(
+        wechat_mini_client,
+        "get_settings",
+        lambda: SimpleNamespace(
+            wechat_app_id="wx-app",
+            wechat_app_secret="wx-secret",
+            wechat_subscribe_template_order_ready="WX_READY",
+        ),
+    )
+    monkeypatch.setattr(
+        SystemSettingsService,
+        "resolved_str_sync",
+        staticmethod(lambda key, default="": "WX_READY"),
+    )
+    token = AsyncMock(return_value="valid-token")
+    monkeypatch.setattr(wechat_mini_client, "get_access_token", token)
+    requests = []
+
+    class Response:
+        def json(self):
+            return malformed_response
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json):
+            requests.append((url, json))
+            return Response()
+
+    monkeypatch.setattr(wechat_mini_client.httpx, "AsyncClient", Client)
+
+    with pytest.raises(ExternalSideEffectUncertain, match="WECHAT"):
+        await wechat_mini_client.send_order_ready_subscribe(
+            openid="wx-openid", order_no="SNH-MALFORMED", order_id=99
+        )
+
+    token.assert_awaited_once()
+    assert len(requests) == 1
