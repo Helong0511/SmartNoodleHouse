@@ -2733,8 +2733,18 @@ class PaymentService:
             # 只有本地配置/签名材料缺失（请求尚未发出）才可判定为确定失败。
             # 渠道返回的 4xx/5xx 业务错误也可能发生在受理之后，保守置 UNKNOWN 并查单，
             # 绝不能因一个 AppException 就把可重试退款单标 FAILED 后再次发起退款。
+            # Even a deterministic provider/configuration error must follow the
+            # same aggregate lock order before mutating the persisted refund row.
+            current_payment = await cls._lock_order_then_payment(db, int(payment_id))
+            if current_payment is None:
+                raise AppException(40401, "支付记录不存在")
             row = (
-                await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
+                await db.execute(
+                    select(PaymentRefund)
+                    .where(PaymentRefund.id == refund_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
             ).scalar_one_or_none()
             if e.code in (50010, 50011, 50020):
                 if row and row.status in ("PENDING", "PROCESSING", "UNKNOWN"):
@@ -2754,8 +2764,16 @@ class PaymentService:
         except Exception as e:
             # 网络超时/结果未知：渠道侧可能已实际退款，置 UNKNOWN 并交由
             # poll_pending_refunds 定时查单补偿，防止双重退款
+            current_payment = await cls._lock_order_then_payment(db, int(payment_id))
+            if current_payment is None:
+                raise AppException(40401, "支付记录不存在")
             row = (
-                await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
+                await db.execute(
+                    select(PaymentRefund)
+                    .where(PaymentRefund.id == refund_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
             ).scalar_one_or_none()
             if row and row.status in ("PENDING", "PROCESSING"):
                 row.status = "UNKNOWN"

@@ -75,3 +75,16 @@ def test_refund_poller_locks_parent_aggregate_before_refund_row():
     assert parent_lock < refund_row_lock, (
         "refund poller must acquire Order→Payment before PaymentRefund"
     )
+
+
+def test_refund_exception_handlers_lock_parent_aggregate_before_refund_row():
+    source = inspect.getsource(PaymentService.refund)
+    exception_start = source.index("except AppException as e:")
+    generic_exception_start = source.index("except Exception as e:", exception_start)
+    success_path_start = source.index("# Reacquire parent locks before the refund row", generic_exception_start)
+    app_exception = source[exception_start:generic_exception_start]
+    generic_exception = source[generic_exception_start:success_path_start]
+    for name, block in (("AppException", app_exception), ("Exception", generic_exception)):
+        parent_lock = block.index("_lock_order_then_payment(db, int(payment_id))")
+        refund_lock = block.index("PaymentRefund")
+        assert parent_lock < refund_lock, f"{name} handler must lock Order→Payment before PaymentRefund"
