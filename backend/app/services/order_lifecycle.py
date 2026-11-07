@@ -261,8 +261,10 @@ async def _restore_order_stock(db: AsyncSession, order: Order) -> None:
     for it in items:
         pid = int(it.product_id)
         aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
-    for product_id, qty in aggregated.items():
-        await restore_stock(db, product_id, qty, store_id=order.store_id)
+    # Stable product lock order prevents two multi-item order transitions from
+    # deadlocking when their OrderItem rows are returned in different orders.
+    for product_id in sorted(aggregated):
+        await restore_stock(db, product_id, aggregated[product_id], store_id=order.store_id)
     if aggregated:
         from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 
@@ -278,8 +280,10 @@ async def _deduct_order_stock(db: AsyncSession, order: Order) -> None:
     for it in items:
         pid = int(it.product_id)
         aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
-    for product_id, qty in aggregated.items():
-        await deduct_stock(db, product_id, qty, store_id=order.store_id)
+    # Match restore/create ordering so all order lifecycle paths lock products
+    # by ascending primary key, independent of cart or database row order.
+    for product_id in sorted(aggregated):
+        await deduct_stock(db, product_id, aggregated[product_id], store_id=order.store_id)
     if aggregated:
         from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 

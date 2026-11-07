@@ -289,8 +289,10 @@ async def deduct_for_order_items(
     for it in items:
         pid = int(it["product_id"])
         merged[pid] = merged.get(pid, 0) + int(it["quantity"])
-    for pid, qty in merged.items():
-        await deduct_stock(db, pid, qty, store_id=store_id)
+    # All multi-item orders must acquire Product / StoreProductStock rows in a
+    # deterministic order; client cart order and SELECT row order are not stable.
+    for pid in sorted(merged):
+        await deduct_stock(db, pid, merged[pid], store_id=store_id)
     if merged:
         from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 
