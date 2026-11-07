@@ -119,7 +119,7 @@ def test_points_from_amount_rounds_half_up():
     assert CustomerService.points_from_amount(Decimal("10.49")) == 10
 
 @pytest.mark.asyncio
-async def test_refund_with_zero_available_points_still_persists_idempotency_marker():
+async def test_refund_with_zero_available_points_still_persists_idempotency_marker(monkeypatch):
     """首次退款评估扣分为 0 后，迟到重试不能扣除后来获得的新积分。"""
     from app.models import PointLedger
 
@@ -137,7 +137,7 @@ async def test_refund_with_zero_available_points_still_persists_idempotency_mark
     db.scalar = AsyncMock(side_effect=[100, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
-    CustomerService.recalculate_member_level = AsyncMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(CustomerService, "recalculate_member_level", AsyncMock())
 
     deducted = await CustomerService.deduct_points_for_refund(
         db, order, Decimal("50.00"), refund_id=777
