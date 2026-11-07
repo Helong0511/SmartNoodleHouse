@@ -146,10 +146,12 @@ class WechatPayVerifier:
             amount = inner.get("amount")
             if not isinstance(amount, dict):
                 raise ValueError("微信支付成功回调缺少金额对象")
-            try:
-                total_fen = int(amount.get("total"))
-            except (TypeError, ValueError) as exc:
-                raise ValueError("微信支付成功回调金额非法") from exc
+            total_raw = amount.get("total")
+            # 微信 APIv3 的 total 单位为分且 JSON 类型为整数；拒绝 bool、浮点数
+            # 和字符串，避免 int() 静默截断或把 True 转成 1 分。
+            if isinstance(total_raw, bool) or not isinstance(total_raw, int):
+                raise ValueError("微信支付成功回调金额必须为整数分")
+            total_fen = total_raw
             if total_fen <= 0:
                 raise ValueError("微信支付成功回调金额必须大于零")
             currency = str(amount.get("currency") or "CNY").upper()
