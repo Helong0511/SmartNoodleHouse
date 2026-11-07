@@ -248,10 +248,10 @@ class Settings(BaseSettings):
     # P1: 活体检测模式 — none=多帧确认（被动）；challenge=随机动作挑战（主动）
     face_liveness_mode: str = "challenge"
     face_liveness_challenge_timeout: int = 30  # 挑战有效期（秒）
-    # 店内摄像头未知访客抓拍：默认开启；图片按日期目录保存，随 visitor_data_retention_days 清理
-    unknown_visitor_capture_enabled: bool = True
-    # 陌生访客语音迎宾（可按门店覆盖；与会员人脸迎宾独立）
-    unknown_visitor_welcome_enabled: bool = True
+    # 未经充分告知与单独同意，不保存未知访客人脸；默认关闭
+    unknown_visitor_capture_enabled: bool = False
+    # 陌生访客语音迎宾依赖人脸检测；未经单独同意默认关闭
+    unknown_visitor_welcome_enabled: bool = False
     unknown_visitor_welcome_text: str = "欢迎光临"
     unknown_visitor_welcome_cooldown_seconds: int = 60
     # 摄像头对讲软件音量 0-100（推流前增益，非机内硬件旋钮）
