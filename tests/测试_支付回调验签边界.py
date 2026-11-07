@@ -57,6 +57,9 @@ def _wechat_call(inner, serial="ABCD", event_type="TRANSACTION.SUCCESS"):
 
 
 def _wechat_refund_call(*, event_type="REFUND.SUCCESS", refund_status="SUCCESS", total=1000, refund=300, currency="CNY"):
+    amount = {"total": total, "refund": refund}
+    if currency is not None:
+        amount["currency"] = currency
     return _wechat_call(
         {
             "mchid": "1900000001",
@@ -65,7 +68,7 @@ def _wechat_refund_call(*, event_type="REFUND.SUCCESS", refund_status="SUCCESS",
             "out_refund_no": "R1",
             "refund_id": "WX-R1",
             "refund_status": refund_status,
-            "amount": {"total": total, "refund": refund, "currency": currency},
+            "amount": amount,
         },
         event_type=event_type,
     )
@@ -96,8 +99,13 @@ def test_wechat_refund_callback_rejects_non_integer_fen(field, value):
         )
 
 
-@pytest.mark.parametrize("currency", [None, "", "   ", "USD"])
-def test_wechat_refund_callback_rejects_missing_or_non_cny_currency(currency):
+def test_wechat_refund_callback_accepts_official_payload_without_currency_field():
+    result = _wechat_refund_call(currency=None)
+    assert result["amount"]["refund"] == 300
+
+
+@pytest.mark.parametrize("currency", ["", "   ", "USD", "HKD"])
+def test_wechat_refund_callback_rejects_invalid_provided_currency(currency):
     with pytest.raises(ValueError, match="CNY"):
         _wechat_refund_call(currency=currency)
 
@@ -110,6 +118,11 @@ def test_wechat_refund_callback_rejects_refund_greater_than_total():
 def test_wechat_refund_callback_rejects_event_status_mismatch():
     with pytest.raises(ValueError, match="事件类型与退款状态不匹配"):
         _wechat_refund_call(event_type="REFUND.SUCCESS", refund_status="PROCESSING")
+
+
+def test_wechat_refund_callback_accepts_closed_terminal_notification():
+    result = _wechat_refund_call(event_type="REFUND.CLOSED", refund_status="CLOSED")
+    assert result["refund_status"] == "CLOSED"
 
 
 def test_wechat_abnormal_refund_callback_requires_abnormal_status():
