@@ -117,3 +117,50 @@ def test_points_from_amount_rounds_half_up():
     assert CustomerService.points_from_amount(Decimal("10.4")) == 10
     assert CustomerService.points_from_amount(Decimal("10.5")) == 11
     assert CustomerService.points_from_amount(Decimal("10.49")) == 10
+
+@pytest.mark.asyncio
+async def test_refund_with_zero_available_points_still_persists_idempotency_marker():
+    """首次退款评估扣分为 0 后，迟到重试不能扣除后来获得的新积分。"""
+    from app.models import PointLedger
+
+    customer = SimpleNamespace(id=31, points=0, member_level_id=1)
+    order = SimpleNamespace(customer_id=31, id=901)
+    customer_lock = MagicMock()
+    customer_lock.scalar_one_or_none.return_value = customer
+    no_marker = MagicMock()
+    no_marker.scalar_one_or_none.return_value = None
+    existing_marker = MagicMock()
+    existing_marker.scalar_one_or_none.return_value = 777
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[customer_lock, no_marker])
+    db.scalar = AsyncMock(side_effect=[100, 0])
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    CustomerService.recalculate_member_level = AsyncMock()  # type: ignore[method-assign]
+
+    deducted = await CustomerService.deduct_points_for_refund(
+        db, order, Decimal("50.00"), refund_id=777
+    )
+
+    assert deducted == 0
+    db.add.assert_called_once()
+    marker = db.add.call_args.args[0]
+    assert isinstance(marker, PointLedger)
+    assert marker.refund_id == 777
+    assert marker.entry_type == "REFUND_DEDUCT"
+    assert marker.delta == 0
+    assert marker.balance_after == 0
+
+    # 模拟后续已获得新积分；重复处理同一 refund_id 必须直接命中标记并 no-op。
+    customer.points = 250
+    db.execute = AsyncMock(side_effect=[customer_lock, existing_marker])
+    db.scalar.reset_mock()
+    db.add.reset_mock()
+    retried = await CustomerService.deduct_points_for_refund(
+        db, order, Decimal("50.00"), refund_id=777
+    )
+    assert retried == 0
+    db.add.assert_not_called()
+    assert customer.points == 250
+
