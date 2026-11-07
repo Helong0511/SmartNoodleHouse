@@ -2268,6 +2268,11 @@ class PaymentService:
 
         # 渠道查询已在无行锁状态下完成。现在重新获取当前退款行并加锁，
         # 防止查询期间其他回调/查单已完成状态迁移；populate_existing 确保刷新旧快照。
+        # Acquire parent rows first, matching refund creation/finalization. This
+        # must happen after any provider HTTP query and before PaymentRefund FOR UPDATE.
+        locked_payment = await cls._lock_order_then_payment(db, int(row.payment_id))
+        if locked_payment is None:
+            raise AppException(40401, "支付记录不存在")
         row = (
             await db.execute(
                 select(PaymentRefund)
@@ -2572,9 +2577,10 @@ class PaymentService:
         pos_refund_request_id: int | None = None,
         idempotency_key: str | None = None,
     ) -> PaymentRefund:
-        locked = (
-            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
-        ).scalar_one_or_none()
+        # Keep refund-row locks behind the shared Order/RechargeOrder → Payment
+        # lock order. Callback and compensation paths use the same order before
+        # locking PaymentRefund, preventing a refund-row/payment-row deadlock.
+        locked = await cls._lock_order_then_payment(db, int(payment.id))
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
@@ -2763,6 +2769,11 @@ class PaymentService:
                 return row
             raise AppException(40055, "退款结果未知，系统将自动查询退款结果，请稍后查看退款状态")
 
+        # Reacquire parent locks before the refund row after the provider call.
+        # The network request above is intentionally outside every DB row lock.
+        current_payment = await cls._lock_order_then_payment(db, int(payment_id))
+        if current_payment is None:
+            raise AppException(40401, "支付记录不存在")
         row = (
             await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
         ).scalar_one_or_none()
@@ -2924,6 +2935,11 @@ class PaymentService:
         # HTTP 查单期间可能有异步回调/另一个补偿 Worker 已完成退款。
         # 必须在网络请求结束后重新当前读并锁定退款行，不能用请求前的 ORM 快照
         # 覆盖并发事务写入的 SUCCESS/FAILED 等状态，也不能重复执行财务分录。
+        # Match callback and refund creation lock order: parent payment aggregate
+        # first, then the individual refund row. Provider HTTP above holds no locks.
+        locked_payment = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_payment is None:
+            raise AppException(40401, "支付记录不存在")
         current_row = (
             await db.execute(
                 select(PaymentRefund)
@@ -3421,6 +3437,14 @@ class PaymentService:
                 )
 
                 async with AsyncSessionLocal() as db:
+                    # All writers acquire Order→Payment→PaymentRefund. Do not
+                    # lock the refund row first and then wait for its payment.
+                    current_payment = await cls._lock_order_then_payment(
+                        db, int(refund_snapshot.payment_id)
+                    )
+                    if current_payment is None:
+                        await db.rollback()
+                        continue
                     row = (
                         await db.execute(
                             select(PaymentRefund)
