@@ -13,6 +13,8 @@ from app.utils.birthday import (
     is_birthday_today,
     is_member_anniversary_today,
     anniversary_md_matches,
+    solar_to_lunar_ymd,
+    format_birthday_display,
     lunar_ymd_to_solar,
     normalize_calendar,
     resolve_birthday_input,
@@ -117,3 +119,16 @@ def test_anniversary_feb29_non_leap():
     assert anniversary_md_matches(date(2020, 2, 29), date(2026, 2, 28))
     assert not anniversary_md_matches(date(2020, 2, 29), date(2026, 2, 27))
     assert anniversary_md_matches(date(2020, 2, 29), date(2024, 2, 29))
+
+
+def test_lunar_python_adapter_preserves_leap_month_round_trip():
+    # 2023 年闰二月初一对应公历 2023-03-22。
+    solar = lunar_ymd_to_solar(2023, 2, 1, leap=True)
+    assert solar == date(2023, 3, 22)
+    assert solar_to_lunar_ymd(solar) == (2023, 2, 1, True)
+
+
+def test_lunar_birthday_display_uses_chinese_month_and_day():
+    assert format_birthday_display(date(1990, 5, 1), CAL_LUNAR) == (
+        "农历 四月初七（对应公历 1990-05-01）"
+    )
