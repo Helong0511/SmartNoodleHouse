@@ -54,6 +54,52 @@ async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
 # ---------- outbox handlers：由 outbox_worker.process_pending_outbox 调用 ----------
 
 
+@register_outbox_handler("order_notification", "order_ready")
+async def _handle_order_ready_notification(db: AsyncSession, row) -> None:
+    """订单 READY 通知：仅在订单事务提交后投递；失败由 Outbox 追踪/重试。"""
+    from app.models import DiningTable, Order
+    from app.services.customer_service import CustomerService
+
+    order = await db.get(Order, int(row.aggregate_id))
+    if not order or not order.customer_id or str(order.status or "").upper() != "READY":
+        return
+
+    table_label = None
+    if order.table_id:
+        table = await db.get(DiningTable, int(order.table_id))
+        if table:
+            table_label = table.table_name or table.table_no
+
+    openid = await CustomerService.resolve_wechat_openid(db, int(order.customer_id))
+    alipay_uid = await CustomerService.resolve_alipay_user_id(db, int(order.customer_id))
+
+    if openid:
+        from app.services.wechat_mini_client import send_order_ready_subscribe
+
+        sent = await send_order_ready_subscribe(
+            openid=openid,
+            order_no=order.order_no,
+            order_id=int(order.id),
+            table_label=table_label,
+        )
+        if not sent:
+            logger.warning("微信出餐订阅消息未发送或被平台拒绝 order_id=%s", order.id)
+
+    if alipay_uid:
+        from app.services.alipay_mini_client import (
+            send_order_ready_subscribe as send_alipay_order_ready,
+        )
+
+        sent = await send_alipay_order_ready(
+            alipay_user_id=alipay_uid,
+            order_no=order.order_no,
+            order_id=int(order.id),
+            table_label=table_label,
+        )
+        if not sent:
+            logger.warning("支付宝出餐订阅消息未发送或被平台拒绝 order_id=%s", order.id)
+
+
 @register_outbox_handler("paid_side_effect", "points_award")
 async def _handle_points_award(db: AsyncSession, row) -> None:
     """发放积分。幂等：point_ledger 已有 EARN 则跳过；全额退/取消不再发。"""
