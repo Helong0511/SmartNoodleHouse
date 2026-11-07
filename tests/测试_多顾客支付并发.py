@@ -214,6 +214,7 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
 
     claim_db = AsyncMock()
     claim_result = MagicMock(rowcount=1)
+    refund.retry_count = 1  # atomic claim increments the fencing version
     claimed_row_result = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
     claim_db.execute = AsyncMock(side_effect=[claim_result, claimed_row_result])
     claim_db.get = AsyncMock(return_value=payment)
@@ -226,6 +227,7 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         order_id=9,
         amount=Decimal("10.00"),
         status="PROCESSING",
+        retry_count=1,
     )
     settle_order = SimpleNamespace(id=9)
     settle_payment = SimpleNamespace(
