@@ -29,7 +29,8 @@ cryptography>=50.0.2,<51
 Pillow>=13.0.0,<14.0
 pypinyin>=0.55.0,<1.0
 # 农历生日权益日判定：固定在跨平台通用发行线；1.0 的 PyPI 发布文件为 macOS ARM64 专用
-zhdate>=0.1,<0.2
+# MIT-licensed, cross-platform Chinese lunar calendar; replaces GPLv3+ zhdate
+lunar-python>=1.4.9,<2.0
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
 onnxruntime>=1.16.0,<2.0
