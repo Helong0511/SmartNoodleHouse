@@ -6,25 +6,21 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_order_ready_notifications_are_enqueued_per_channel_in_calling_transaction(monkeypatch):
+async def test_order_ready_notification_is_enqueued_for_originating_channel_in_calling_transaction(monkeypatch):
     from app.services import order_lifecycle, outbox_worker
 
     enqueue = AsyncMock(return_value=(MagicMock(), True))
     monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
     db = object()
-    order = SimpleNamespace(id=321, customer_id=77)
+    order = SimpleNamespace(id=321, customer_id=77, channel="WECHAT")
 
     await order_lifecycle.notify_order_ready_subscribe(db, order)
 
-    assert enqueue.await_count == 2
-    assert [call.kwargs["event_kind"] for call in enqueue.await_args_list] == [
-        "order_ready_wechat", "order_ready_alipay"
-    ]
-    assert all(call.kwargs["aggregate_type"] == "order_notification" for call in enqueue.await_args_list)
-    assert all(call.args[0] is db for call in enqueue.await_args_list)
-    assert [call.kwargs["payload"]["channel"] for call in enqueue.await_args_list] == [
-        "wechat", "alipay"
-    ]
+    assert enqueue.await_count == 1
+    assert enqueue.await_args.kwargs["event_kind"] == "order_ready_wechat"
+    assert enqueue.await_args.kwargs["aggregate_type"] == "order_notification"
+    assert enqueue.await_args.args[0] is db
+    assert enqueue.await_args.kwargs["payload"]["channel"] == "wechat"
 
 
 @pytest.mark.asyncio
