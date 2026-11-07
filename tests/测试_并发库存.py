@@ -269,3 +269,57 @@ async def test_store_stock_delete_locks_product_before_store_override(monkeypatc
     assert "from products" in db.statements[0] and "for update" in db.statements[0]
     assert "store_product_stocks" in db.statements[1] and "for update" in db.statements[1]
 
+@pytest.mark.asyncio
+async def test_product_base_stock_update_locks_product_and_enqueues_delivery_mirror(monkeypatch):
+    """品牌库存编辑必须与订单扣减共用 Product 行锁，并在同事务排队外卖库存镜像。"""
+    from types import SimpleNamespace
+    from app.api import products
+    from app.schemas.product import ProductUpdate
+
+    product = SimpleNamespace(
+        id=101, store_id=7, main_image=None, stock=3, product_no="P-101"
+    )
+
+    class Result:
+        def scalar_one_or_none(self):
+            return product
+
+    class FakeDB:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(str(statement).lower())
+            return Result()
+
+        async def flush(self):
+            return None
+
+    db = FakeDB()
+    mirror = AsyncMock()
+    monkeypatch.setattr(products, "assert_store_access", lambda user, sid: None)
+    monkeypatch.setattr(products, "success", lambda data, request: data)
+    monkeypatch.setattr(products.AuditService, "log_staff", AsyncMock())
+    monkeypatch.setattr(products, "recompute_product", AsyncMock())
+    monkeypatch.setattr(products, "enqueue_menu_cache_invalidation", AsyncMock())
+    monkeypatch.setattr("app.services.stock_service._emit_stock_mirror", mirror)
+
+    result = await products.update_product(
+        101,
+        ProductUpdate(stock=9),
+        request=None,
+        db=db,
+        user=SimpleNamespace(),
+    )
+
+    assert result == {"id": 101, "store_id": 7}
+    assert len(db.statements) == 1
+    assert "from products" in db.statements[0] and "for update" in db.statements[0]
+    mirror.assert_awaited_once_with(
+        db,
+        store_id=7,
+        product_id=101,
+        mirror_id=101,
+        zero=False,
+        aggregate_type="delivery_stock_base",
+    )
