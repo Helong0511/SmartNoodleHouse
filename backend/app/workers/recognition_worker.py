@@ -31,6 +31,7 @@ class RecognitionWorker:
         self._suppress_unknown_until: dict[int, float] = {}
         # 每路摄像头短时择优窗口：走近过程中不用远景小人脸抢先定稿
         self._best_face_windows: dict[int, object] = {}
+        self._face_enabled_last: bool | None = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -56,27 +57,77 @@ class RecognitionWorker:
             face_embedding_cache,
         )
         from app.services.face_liveness import global_tracker
+        from app.services.system_settings_service import SystemSettingsService
         from camera.camera_manager import CameraManager
         from sqlalchemy import select
 
         settings = get_settings()
         logger.info(
-            "RecognitionWorker started (unknown_visitor_capture=%s best_face_window=2.8s)",
-            bool(getattr(settings, "unknown_visitor_capture_enabled", True)),
+            "RecognitionWorker started (enable_face_welcome_default=%s "
+            "unknown_visitor_capture_default=%s best_face_window=2.8s)",
+            bool(getattr(settings, "enable_face_welcome", False)),
+            bool(getattr(settings, "unknown_visitor_capture_enabled", False)),
         )
-        # 等 live 模型就绪再检脸，避免启动期空跑漏检被当成「识别后很久才播」
-        try:
-            await asyncio.to_thread(ensure_live_face_app)
-            logger.info("RecognitionWorker live 人脸模型就绪")
-        except Exception:
-            logger.exception("RecognitionWorker 等待 live 人脸模型失败，将边跑边加载")
+        face_enabled = False
+        feature_checked = False
+        last_feature_check = 0.0
+        model_ready = False
+        last_model_warmup_attempt = 0.0
         while not self._stop.is_set():
             try:
+                # 人脸识别必须服从全局功能开关。关闭或无法确认配置时 fail closed：
+                # 不加载模型、不读取帧、不匹配会员，也不抓拍未知访客。
+                now_mono = time.monotonic()
+                if not feature_checked or now_mono - last_feature_check >= 1.0:
+                    feature_checked = True
+                    last_feature_check = now_mono
+                    try:
+                        # 生产环境必须显式完成合规审核；仅打开后台业务开关不足以启动生物识别。
+                        legal_reviewed = bool(
+                            getattr(settings, "face_recognition_legal_reviewed", False)
+                        )
+                        if bool(getattr(settings, "is_production", False)) and not legal_reviewed:
+                            face_enabled = False
+                        else:
+                            async with AsyncSessionLocal() as gate_db:
+                                face_enabled = await SystemSettingsService.effective_bool(
+                                    gate_db,
+                                    "enable_face_welcome",
+                                    bool(getattr(settings, "enable_face_welcome", False)),
+                                    store_id=None,
+                                )
+                    except Exception:
+                        face_enabled = False
+                        if self._face_enabled_last is not False:
+                            face_embedding_cache.invalidate()
+                        self._face_enabled_last = False
+                        raise
+
+                if not face_enabled:
+                    if self._face_enabled_last is not False:
+                        face_embedding_cache.invalidate()
+                    self._face_enabled_last = False
+                    await asyncio.sleep(1.0)
+                    continue
+                self._face_enabled_last = True
+
                 mgr = CameraManager()
                 camera_ids = mgr.list_camera_ids()
                 if not camera_ids:
                     await asyncio.sleep(1)
                     continue
+
+                # 仅在管理员明确开启功能且存在摄像头时加载模型。
+                if not model_ready and now_mono - last_model_warmup_attempt >= 30.0:
+                    last_model_warmup_attempt = now_mono
+                    try:
+                        await asyncio.to_thread(ensure_live_face_app)
+                        model_ready = True
+                        logger.info("RecognitionWorker live 人脸模型就绪")
+                    except Exception:
+                        logger.exception("RecognitionWorker live 人脸模型加载失败，30 秒后重试")
+                        await asyncio.sleep(1.0)
+                        continue
 
                 async with AsyncSessionLocal() as db:
                     # 热集增量刷新一次/循环；单帧匹配走 best_match（含有界冷库）
