@@ -184,6 +184,7 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         order_id=9,
         amount=Decimal("10.00"),
         status="PROCESSING",
+        retry_count=0,
     )
     payment = SimpleNamespace(
         id=3,
