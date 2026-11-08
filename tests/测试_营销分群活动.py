@@ -1,11 +1,9 @@
 """WP-B2：分群估人、活动发布发券、DRAFT 不发、幂等、暂停停发、频控。"""
 from datetime import timedelta
-import gc
-import warnings
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 
 from app.core.exceptions import AppException
 from app.core.response import naive_local_now
@@ -974,28 +972,17 @@ async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     assert payload["updated_at"]
     assert payload["budget_cap"] == "100.00"
 
-    # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）
+    # 同步序列化前必须确认异步 ORM 字段已加载；不要故意触发 MissingGreenlet，
+    # 因为驱动会为失败的同步懒加载创建无法 await 的 cursor 协程。
     db_session.expire(camp, ["created_at", "updated_at"])
-    # 该断言故意触发异步懒加载失败；只屏蔽驱动为此失败路径创建的未 await cursor 协程告警。
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"coroutine 'Connection.cursor' was never awaited",
-            category=RuntimeWarning,
-        )
-        with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
-            _ = MarketingService._payload(camp)
-        gc.collect()
-    # SQLAlchemy 2.1 wraps the async MissingGreenlet in StatementError;
-    # SQLAlchemy 2.0 may expose MissingGreenlet directly.
-    if isinstance(exc_info.value, StatementError):
-        assert isinstance(exc_info.value.orig, MissingGreenlet)
-    else:
-        assert isinstance(exc_info.value, MissingGreenlet)
+    assert {"created_at", "updated_at"}.issubset(inspect(camp).expired_attributes)
 
-    await db_session.refresh(camp)
+    # 正确做法是在异步上下文中显式 refresh，再交给同步序列化函数。
+    await db_session.refresh(camp, attribute_names=["created_at", "updated_at"])
+    assert not ({"created_at", "updated_at"} & inspect(camp).expired_attributes)
     again = MarketingService._payload(camp)
     assert again["created_at"]
+    assert again["updated_at"]
 
 
 @pytest.mark.asyncio
