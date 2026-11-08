@@ -27,7 +27,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Regenerate npm lockfile from the official registry
         working-directory: frontend
-        run: npm update --package-lock-only --ignore-scripts --no-audit --no-fund
+        run: |
+          npm update --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ls vue element-plus vite axios --depth=0
+          npm outdated --json || true
       - uses: dtolnay/rust-toolchain@stable
       - name: Regenerate Cargo.lock from current stable constraints
         working-directory: tests/广告追踪/ad_tracking_dll
@@ -53,4 +56,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add frontend/package-lock.json tests/广告追踪/ad_tracking_dll/Cargo.lock
           git commit -m "chore(deps): refresh npm and cargo lockfiles"
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
