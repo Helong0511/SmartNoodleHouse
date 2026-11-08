@@ -7,6 +7,9 @@ from __future__ import annotations
 import json
 import logging
 
+from sqlalchemy import select
+
+from app.models import Store
 from app.services.outbox_worker import register_outbox_handler
 
 logger = logging.getLogger(__name__)
@@ -19,7 +22,18 @@ async def menu_cache_invalidate_handler(db, row) -> None:
     if not store_id:
         raise ValueError(f"菜单缓存失效事件缺少 store_id: outbox_id={row.id}")
 
+    generation = payload.get("generation")
+    if generation is None:
+        # Old pending events created before migration are reconciled against current DB state.
+        generation = await db.scalar(
+            select(Store.menu_generation).where(Store.id == int(store_id))
+        )
+    if generation is None:
+        raise ValueError(f"门店菜单代际不存在: store_id={store_id}")
+
     from app.services.recommendation_service import invalidate_store_caches
 
-    if not await invalidate_store_caches(int(store_id)):
-        raise RuntimeError(f"菜单缓存失效失败，等待 outbox 重试: store_id={store_id}")
+    if not await invalidate_store_caches(int(store_id), generation=int(generation)):
+        raise RuntimeError(
+            f"菜单缓存代际同步失败，等待 outbox 重试: store_id={store_id} generation={generation}"
+        )
