@@ -58,6 +58,9 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall backend/app -q
+      - name: Audit dependency declarations and import references
+        run: |
+          python scripts/audit_dependency_references.py
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
