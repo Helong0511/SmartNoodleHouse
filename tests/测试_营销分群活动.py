@@ -972,10 +972,23 @@ async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     assert payload["updated_at"]
     assert payload["budget_cap"] == "100.00"
 
-    # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）
+    # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）。
+    # 该非法访问路径在部分 SQLAlchemy/aiosqlite 组合中会额外产生未 await 的 cursor 协程；
+    # 仅在此回归测试局部捕获该已知副作用，正常序列化另有 RuntimeWarning=error 检查。
+    import gc
+    import warnings
     db_session.expire(camp, ["created_at", "updated_at"])
-    with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
-        _ = MarketingService._payload(camp)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", RuntimeWarning)
+        with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
+            _ = MarketingService._payload(camp)
+        del exc_info
+        gc.collect()
+    assert all(
+        "Connection.cursor" in str(item.message)
+        for item in caught
+        if issubclass(item.category, RuntimeWarning)
+    )
     # SQLAlchemy 2.1 wraps the async MissingGreenlet in StatementError;
     # SQLAlchemy 2.0 may expose MissingGreenlet directly.
     if isinstance(exc_info.value, StatementError):
