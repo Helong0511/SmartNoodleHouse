@@ -717,7 +717,7 @@ def register_tasks(scheduler) -> None:
         """DB outbox worker：消费支付、退款补偿与推荐缓存失效等事务型事件。"""
         n = await process_pending_outbox(limit=30)
         if n:
-            logger.info("Outbox events processed: %s", n)
+            logger.info("Outbox events claimed: %s", n)
 
     @scheduler.scheduled_job(
         "interval", minutes=5, id="reclaim_stale_outbox", name="回收卡住的 Outbox"

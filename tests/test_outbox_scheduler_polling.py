@@ -81,3 +81,26 @@ def test_outbox_polling_keeps_bounded_batch_size() -> None:
     limit = next(keyword.value for keyword in call.keywords if keyword.arg == "limit")
     assert isinstance(limit, ast.Constant)
     assert limit.value == 30
+
+
+def test_outbox_scheduler_log_reports_claims_not_successful_processing() -> None:
+    tree = ast.parse(SCHEDULER_PATH.read_text(encoding="utf-8"))
+    register_tasks = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "register_tasks"
+    )
+    drain_job = next(
+        node for node in ast.walk(register_tasks)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "drain_outbox_events"
+    )
+    log_call = next(
+        node for node in ast.walk(drain_job)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "info"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and "Outbox events" in node.args[0].value
+    )
+    assert log_call.args[0].value == "Outbox events claimed: %s"
