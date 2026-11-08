@@ -110,6 +110,9 @@ jobs:
 
 
   dependency-lock-consistency:
+    concurrency:
+      group: dependency-lock-refresh-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     name: dependency-lock-consistency
     if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'chore/dependency-audit-unused-imports-cn-comments-2026-11-08' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -146,7 +149,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/requirements.lock
           git commit -m "chore(deps): lock full resolved Python runtime closure"
-          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push origin "HEAD:${GITHUB_HEAD_REF}"
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$AUTH_HEADER" fetch origin "$GITHUB_HEAD_REF"
+          git rebase FETCH_HEAD
+          git -c http.extraheader="$AUTH_HEADER" push origin "HEAD:${GITHUB_HEAD_REF}"
 
   backend-mysql:
     runs-on: ubuntu-latest
@@ -269,6 +275,9 @@ jobs:
 
 
   frontend-lockfile-consistency:
+    concurrency:
+      group: dependency-lock-refresh-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     name: frontend-lockfile-consistency
     if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'chore/dependency-audit-unused-imports-cn-comments-2026-11-08' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -321,7 +330,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package-lock.json
           git commit -m "chore(deps): refresh compatible frontend lockfile"
-          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push origin "HEAD:${GITHUB_HEAD_REF}"
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$AUTH_HEADER" fetch origin "$GITHUB_HEAD_REF"
+          git rebase FETCH_HEAD
+          git -c http.extraheader="$AUTH_HEADER" push origin "HEAD:${GITHUB_HEAD_REF}"
 
   dependency-security-audit:
     name: dependency-security-audit
