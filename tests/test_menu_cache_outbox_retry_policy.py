@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from sqlalchemy import select
 
@@ -29,7 +31,10 @@ async def test_menu_cache_invalidation_outbox_does_not_dead_letter_on_transient_
             )
         ).scalars().all()
     )
-    row = next(item for item in rows if item.payload and f'"store_id":{store_id}' in item.payload)
+    row = next(
+        item for item in rows
+        if item.payload and json.loads(item.payload).get("store_id") == store_id
+    )
 
     assert row.status == "PENDING"
     assert row.max_attempts == MENU_CACHE_INVALIDATION_MAX_ATTEMPTS
