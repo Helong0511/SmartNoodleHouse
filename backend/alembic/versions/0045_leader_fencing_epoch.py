@@ -44,4 +44,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("leader_fencing_state")
+    """Keep the fencing state table during rollback.
+
+    The canonical schema may create this table before Alembic reaches this
+    revision. Since upgrade does not record whether it created the table,
+    dropping it here could erase a pre-existing production fencing epoch.
+    Retaining the table is safer than a destructive, non-reversible rollback.
+    """
+    return
