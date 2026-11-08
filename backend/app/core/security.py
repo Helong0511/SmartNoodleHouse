@@ -1,18 +1,17 @@
+from asyncio import Semaphore, get_running_loop
 from datetime import datetime, timedelta, timezone
+from threading import local
 from typing import Any
 from uuid import uuid4
 
 import jwt
-from asyncio import Semaphore, get_running_loop
-from threading import local
-
-from starlette.concurrency import run_in_threadpool
 from argon2.exceptions import InvalidHashError as Argon2InvalidHashError
 from jwt import InvalidTokenError as JWTError
 from pwdlib import PasswordHash
 from pwdlib.exceptions import UnknownHashError
 from pwdlib.hashers.argon2 import Argon2Hasher
 from pwdlib.hashers.bcrypt import BcryptHasher
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 
