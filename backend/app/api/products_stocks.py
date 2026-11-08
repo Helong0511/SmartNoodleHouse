@@ -10,7 +10,7 @@ from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import Order, OrderItem, Product, StoreProductStock
 from app.services.audit_service import AuditService
-from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+from app.services.menu_cache_service import invalidate_store_menu_cache
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
@@ -167,7 +167,7 @@ async def upsert_store_stock(
         mirror_id=int(row.id),
         zero=int(row.status) != 1 or int(row.stock) <= 0,
     )
-    await enqueue_menu_cache_invalidation(db, int(sid))
+    await invalidate_store_menu_cache(db, int(sid))
     await AuditService.log_staff(
         db,
         user=user,
@@ -246,7 +246,7 @@ async def delete_store_stock(
             mirror_id=mirror_id,
             zero=False,
         )
-    await enqueue_menu_cache_invalidation(db, int(sid))
+    await invalidate_store_menu_cache(db, int(sid))
     await AuditService.log_staff(
         db,
         user=user,
