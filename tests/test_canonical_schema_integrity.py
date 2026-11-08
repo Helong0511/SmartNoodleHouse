@@ -156,3 +156,30 @@ def test_sqlalchemy_mysql_table_options_compile_utf8mb4_collation():
     assert "ENGINE=InnoDB" in ddl
     assert "CHARSET=utf8mb4" in ddl
     assert "COLLATE=utf8mb4_unicode_ci" in ddl
+
+
+
+def test_converged_baseline_migrations_never_drop_preexisting_objects_on_downgrade():
+    """A baseline-created table must survive downgrade of an idempotent migration."""
+    migration_paths = [
+        ROOT / "backend" / "alembic" / "versions" / "0015_delivery_menu_ops.py",
+        ROOT / "backend" / "alembic" / "versions" / "0045_leader_fencing_epoch.py",
+    ]
+    for path in migration_paths:
+        module = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        downgrade = next(
+            node for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
+        )
+        destructive_calls = [
+            node for node in ast.walk(downgrade)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "op"
+            and node.func.attr in {"drop_table", "drop_column"}
+        ]
+        assert not destructive_calls, (
+            f"{path.name} downgrade must not drop objects whose ownership "
+            "was not recorded during upgrade"
+        )
