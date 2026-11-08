@@ -1,4 +1,4 @@
-"""Exercise migration 0049: only menu-cache invalidations get durable retries."""
+"""Exercise migration 0049: menu/recommendation cache invalidations get durable retries."""
 from __future__ import annotations
 
 import importlib.util
@@ -51,7 +51,8 @@ def test_upgrade_extends_only_menu_cache_invalidation_retry_budget(monkeypatch):
                 VALUES
                     (1, 'menu_cache', 'invalidate', 8, 8, 'FAILED'),
                     (2, 'reco_cache', 'invalidate_abc', 8, 8, 'FAILED'),
-                    (3, 'webhook_task', 'execute', 8, 8, 'FAILED')
+                    (3, 'webhook_task', 'execute', 8, 8, 'FAILED'),
+                    (4, 'reco_cache', 'ordinary_event', 8, 8, 'FAILED')
                 """
             )
 
@@ -65,15 +66,19 @@ def test_upgrade_extends_only_menu_cache_invalidation_retry_budget(monkeypatch):
             ).all()
             assert [tuple(row) for row in rows] == [
                 (1, 2_147_483_647),
-                (2, 8),
+                (2, 2_147_483_647),
                 (3, 8),
+                (4, 8),
             ]
 
             # Downgrade must not re-dead-letter events that already exceeded 8 attempts.
             module.downgrade()
-            retry_budget = conn.exec_driver_sql(
-                "SELECT max_attempts FROM outbox_events WHERE id=1"
-            ).scalar_one()
-            assert retry_budget == 2_147_483_647
+            retry_budgets = conn.exec_driver_sql(
+                "SELECT id, max_attempts FROM outbox_events WHERE id IN (1, 2) ORDER BY id"
+            ).all()
+            assert [tuple(row) for row in retry_budgets] == [
+                (1, 2_147_483_647),
+                (2, 2_147_483_647),
+            ]
     finally:
         engine.dispose()
