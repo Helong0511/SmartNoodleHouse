@@ -56,6 +56,18 @@ impl Drop for SecretKey {
     }
 }
 
+// C ABI 输入的本地密钥文本副本也必须清零，不能只清理解码后的字节数组。
+struct SecretString(String);
+
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        // String 的 UTF-8 字节长度不变，仅将其内容原地覆写后再释放。
+        unsafe {
+            secure_zeroize(self.0.as_mut_vec());
+        }
+    }
+}
+
 pub const OK: i32 = 0;
 pub const ERR_NULL_INPUT: i32 = 1;
 pub const ERR_INVALID_ARGUMENT: i32 = 2;
@@ -195,12 +207,13 @@ fn decode_hex_key(s: &str) -> Result<[u8; 32], i32> {
         set_error("AES-256 key must be exactly 64 hex characters");
         return Err(ERR_KEY_INVALID);
     }
-    let bytes = hex::decode(s).map_err(|_| {
+    let mut bytes = hex::decode(s).map_err(|_| {
         set_error("AES-256 key is not valid hexadecimal");
         ERR_KEY_INVALID
     })?;
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
+    secure_zeroize(&mut bytes);
     Ok(key)
 }
 
@@ -587,14 +600,14 @@ pub extern "C" fn tracking_set_key(kid: c_uchar, key_hex: *const c_char) -> i32 
             set_error("kid=0 is reserved");
             return ERR_INVALID_ARGUMENT;
         }
-        let s = match cstr_string(key_hex, 64, "key") {
+        let s = SecretString(match cstr_string(key_hex, 64, "key") {
             Ok(v) => v,
             Err(e) => return e,
-        };
-        let key = match decode_hex_key(&s) {
+        });
+        let key = SecretKey(match decode_hex_key(&s.0) {
             Ok(v) => v,
             Err(e) => return e,
-        };
+        });
         let mut state = match STATE.write() {
             Ok(v) => v,
             Err(_) => {
@@ -606,7 +619,7 @@ pub extern "C" fn tracking_set_key(kid: c_uchar, key_hex: *const c_char) -> i32 
             set_error("maximum number of keys reached");
             return ERR_INVALID_ARGUMENT;
         }
-        if let Some(mut old_key) = state.keys.insert(kid, key) {
+        if let Some(mut old_key) = state.keys.insert(kid, key.0) {
             secure_zeroize(&mut old_key);
         }
         OK
