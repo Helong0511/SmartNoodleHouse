@@ -34,6 +34,7 @@ DEPENDENCY_MAP = {
     "websockets": {"reason": "由 Uvicorn standard extra 用于 WebSocket 协议处理"},
     "opencv-python-headless": {"modules": {"cv2"}},
     "numpy": {"modules": {"numpy"}},
+    "audioop-lts": {"modules": {"audioop_lts"}, "reason": "Python 3.13 移除 stdlib audioop 后的兼容实现"},
     "cryptography": {"modules": {"cryptography"}},
     "pillow": {"modules": {"PIL"}},
     "pypinyin": {"modules": {"pypinyin"}},
