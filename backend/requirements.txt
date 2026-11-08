@@ -16,7 +16,7 @@ pwdlib[argon2,bcrypt]>=0.3.1,<0.4
 # 限制 bcrypt <5，兼容历史 Passlib bcrypt（包括旧版 72 字节截断语义）；新哈希不再使用 bcrypt。
 bcrypt>=4.1.2,<5.0
 # 暂不升级 redis-py 8.x：先完成 Redis Server 最低版本、协议与重试行为兼容验证，当前固定在 5.x 线
-redis>=5.3.1,<6.0
+redis>=8.1.0,<8.2.0
 httpx>=0.28.1,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
 python-multipart>=0.0.33,<1.0
