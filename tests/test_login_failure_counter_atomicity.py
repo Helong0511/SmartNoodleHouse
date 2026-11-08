@@ -12,7 +12,7 @@ async def test_login_failure_counter_uses_one_atomic_increment_and_expiry(monkey
     class FakeRedis:
         async def eval(self, script, numkeys, key, ttl):
             calls.append((script, numkeys, key, ttl))
-            return 1
+            return 3
 
         async def set(self, key, value, *, ex):
             calls.append(("set", key, value, ex))
