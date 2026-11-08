@@ -40,7 +40,7 @@ function scriptBlocks(source, file) {
 }
 
 for (const rootName of SCAN_ROOTS) {
-  const root = path.join(rootName === "src" ? process.cwd() : REPO_ROOT, rootName === "src" ? "" : rootName);
+  const root = rootName === "src" ? path.join(process.cwd(), "src") : path.join(REPO_ROOT, rootName);
   for (const file of collectFiles(root)) {
     scanned += 1;
     let source;
@@ -50,7 +50,9 @@ for (const rootName of SCAN_ROOTS) {
       continue;
     }
     for (const [blockIndex, block] of scriptBlocks(source, file).entries()) {
-      const sf = ts.createSourceFile(file, block.text, ts.ScriptTarget.Latest, true, block.kind);
+      const extension = path.extname(file);
+      const kind = block.kind || ([ ".js", ".mjs", ".cjs" ].includes(extension) ? ts.ScriptKind.JS : extension === ".jsx" ? ts.ScriptKind.JSX : ts.ScriptKind.TS);
+      const sf = ts.createSourceFile(file, block.text, ts.ScriptTarget.Latest, true, kind);
       const seen = new Map();
       function visit(node) {
         let specifier = null;
