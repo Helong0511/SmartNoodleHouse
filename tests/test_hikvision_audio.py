@@ -168,12 +168,13 @@ def test_audio_transport_increments_digest_nonce_count_across_streams(monkeypatc
         def close(self) -> None:
             self.closed = True
 
-    sockets = [
+    all_sockets = [
         FakeSocket(challenge),
         FakeSocket(ok),
         FakeSocket(ok),
     ]
-    monkeypatch.setattr(audio.socket, "create_connection", lambda *_a, **_k: sockets.pop(0))
+    socket_queue = list(all_sockets)
+    monkeypatch.setattr(audio.socket, "create_connection", lambda *_a, **_k: socket_queue.pop(0))
     monkeypatch.setattr(
         audio,
         "_DIGEST_WWW_CACHE",
@@ -194,14 +195,14 @@ def test_audio_transport_increments_digest_nonce_count_across_streams(monkeypatc
         "g711_data": b"\x7f" * 640,
     }
     audio._stream_audio_data_content_length_zero(**args)
-    first_authorized_header = b"".join(sockets[1].sent[:1]).decode("latin-1")
+    first_authorized_header = b"".join(all_sockets[1].sent[:1]).decode("latin-1")
     audio._stream_audio_data_content_length_zero(**args)
-    second_authorized_header = b"".join(sockets[2].sent[:1]).decode("latin-1")
+    second_authorized_header = b"".join(all_sockets[2].sent[:1]).decode("latin-1")
 
     assert "nc=00000001" in first_authorized_header
     assert "nc=00000002" in second_authorized_header
-    assert b"".join(sockets[1].sent[1:]) == args["g711_data"]
-    assert b"".join(sockets[2].sent[1:]) == args["g711_data"]
+    assert b"".join(all_sockets[1].sent[1:]) == args["g711_data"]
+    assert b"".join(all_sockets[2].sent[1:]) == args["g711_data"]
 
 
 def test_hikvision_audio_constructor_pins_and_validates_base_url(monkeypatch) -> None:
