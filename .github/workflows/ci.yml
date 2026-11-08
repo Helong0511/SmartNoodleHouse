@@ -50,8 +50,9 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install -r tests/requirements.txt
+          python -m pip install packaging
           python scripts/check_requirements_lock.py
+          pip install -r tests/requirements.txt
           python -m pip check
       - name: Smoke-test face recognition binary dependency imports
         run: |
@@ -107,6 +108,28 @@ jobs:
             --cov=app --cov-report=term-missing --cov-report=xml \
             --cov-fail-under=35
 
+
+  dependency-lock-consistency:
+    name: dependency-lock-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install production dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.lock
+          python -m pip install packaging
+      - name: Regenerate full resolved runtime lock and verify it is committed
+        run: |
+          python scripts/生成依赖锁定文件.py
+          python scripts/check_requirements_lock.py
+          git diff -- backend/requirements.lock
+          git diff --exit-code -- backend/requirements.lock
+
   backend-mysql:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -140,8 +163,9 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install -r tests/requirements.txt
+          python -m pip install packaging
           python scripts/check_requirements_lock.py
+          pip install -r tests/requirements.txt
       - name: Prepare database
         env:
           MYSQL_PWD: root
