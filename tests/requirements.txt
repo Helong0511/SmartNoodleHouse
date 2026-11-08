@@ -1,5 +1,6 @@
+# 主测试环境复用统一 pytest 版本，避免不同测试目录重复维护。
+-r requirements-core.txt
 # 测试专用依赖；运行前先安装 backend/requirements.lock 中的运行时依赖。
-pytest==9.2.0
 pytest-asyncio==1.4.1.post1
 httpx==0.28.1
 aiosqlite==0.22.1
