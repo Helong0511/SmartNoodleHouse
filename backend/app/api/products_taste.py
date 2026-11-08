@@ -49,7 +49,8 @@ async def update_product_taste_profile(
         reset_dimensions=data.reset_dimensions,
         reset_tags=data.reset_tags,
     )
-    # 口味画像只影响推荐池/协同过滤缓存，不改变菜单展示内容，不递增菜单代际。\n    invalidate_store_local_caches(int(product.store_id))
+    # 口味画像只影响推荐池/协同过滤缓存，不改变菜单展示内容，不递增菜单代际。
+    invalidate_store_local_caches(int(product.store_id))
     await AuditService.log_staff(
         db,
         user=user,
@@ -91,7 +92,8 @@ async def rebuild_store_taste_profiles(
     if not store:
         raise AppException(40004, "门店不存在")
     rebuilt = await recompute_store(db, store_id)
-    # 口味画像只影响推荐缓存；菜单版本由真正的菜单/库存事务通过 Outbox 推进。\n    invalidate_store_local_caches(store_id)
+    # 口味画像只影响推荐缓存；菜单版本由真正的菜单/库存事务通过 Outbox 推进。
+    invalidate_store_local_caches(store_id)
     await AuditService.log_staff(
         db,
         user=user,
