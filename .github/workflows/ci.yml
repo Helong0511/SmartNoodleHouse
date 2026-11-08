@@ -132,6 +132,14 @@ jobs:
         run: |
           alembic downgrade 0047_payment_refund_idem
           alembic upgrade head
+      - name: Verify database charset, schema and migration head
+        working-directory: .
+        env:
+          PYTHONPATH: backend
+          APP_ENV: development
+          APP_DEBUG: "true"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+        run: python scripts/验证数据库.py
       - name: Run MySQL-marked tests
         env:
           PYTHONPATH: backend
