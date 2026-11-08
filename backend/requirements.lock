@@ -33,7 +33,7 @@ PyJWT[crypto]==2.15.1
 python-multipart==0.0.33
 redis==5.2.1
 SQLAlchemy[asyncio]==2.1.8
-uvicorn[standard]==0.34.0
+uvicorn[standard]==0.54.0
 websockets==13.1
 pywin32==312; platform_system == "Windows"
 lunar-python==1.4.9
