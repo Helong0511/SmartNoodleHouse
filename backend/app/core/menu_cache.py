@@ -151,7 +151,7 @@ if not current or tonumber(current) < desired then
     return desired
 end
 if tonumber(current) > desired then
-    return -1
+    return tonumber(current)
 end
 return tonumber(current)
 """
@@ -172,7 +172,7 @@ async def ensure_menu_generation(store_id: int, generation: int) -> int | None:
             str(desired),
         )
         value = int(result or 0)
-        return value if value == desired else None
+        return value if value >= desired else None
     except Exception:
         logger.warning(
             "恢复菜单 Redis generation 失败 store=%s generation=%s",
