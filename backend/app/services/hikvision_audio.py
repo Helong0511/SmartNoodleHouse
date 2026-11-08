@@ -16,6 +16,7 @@ import re
 import socket
 import struct
 import time
+import warnings
 import wave
 from io import BytesIO
 from urllib.parse import urlparse
@@ -361,14 +362,27 @@ def _lin2xlaw(pcm: bytes, *, law: str) -> bytes:
     """16-bit LE PCM → G.711；优先 stdlib audioop（Py3.11），否则纯 Python 回退。"""
     if not pcm:
         return b""
+    # Python 3.13 已移除标准库 audioop；优先使用官方 PyPI 的兼容移植版。
     try:
-        import audioop  # type: ignore
+        import audioop_lts as audioop  # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            # Python 3.11/3.12 仍有标准库 audioop；仅抑制已知弃用提示。
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message=".*audioop.*deprecated.*", category=DeprecationWarning
+                )
+                import audioop  # type: ignore[import-not-found]
+        except ImportError:
+            audioop = None  # type: ignore[assignment]
 
-        if law == "alaw":
-            return audioop.lin2alaw(pcm, 2)
-        return audioop.lin2ulaw(pcm, 2)
-    except Exception:
-        pass
+    if audioop is not None:
+        try:
+            if law == "alaw":
+                return audioop.lin2alaw(pcm, 2)
+            return audioop.lin2ulaw(pcm, 2)
+        except Exception:
+            logger.debug("audioop 编码失败，回退纯 Python G.711 编码", exc_info=True)
     out = bytearray(len(pcm) // 2)
     for i in range(0, len(pcm) - 1, 2):
         sample = struct.unpack_from("<h", pcm, i)[0]
