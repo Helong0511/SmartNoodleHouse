@@ -52,6 +52,19 @@ jobs:
           fi
           pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
+      - name: Smoke-test face recognition binary dependency imports
+        run: |
+          python - <<'PY'
+          import cv2
+          import numpy
+          import onnxruntime
+          from insightface.app import FaceAnalysis
+
+          assert numpy.__version__ == "2.4.4", numpy.__version__
+          assert onnxruntime.__version__ == "1.31.1", onnxruntime.__version__
+          print("OpenCV", cv2.__version__, "NumPy", numpy.__version__, "ONNX Runtime", onnxruntime.__version__)
+          print("InsightFace FaceAnalysis import: OK")
+          PY
       - name: Verify tracked text encoding and line endings
         run: |
           python scripts/check_text_encoding.py
