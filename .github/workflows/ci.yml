@@ -237,26 +237,39 @@ jobs:
           done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
 
   rust-ad-tracking:
-    name: rust-ad-tracking
+    name: rust-ad-tracking (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.88.0", "stable"]
     defaults:
       run:
         working-directory: tests/广告追踪/ad_tracking_dll
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
-      - name: Verify locked dependency graph
+      - name: Verify declared MSRV and locked dependency graph
         run: |
+          rustc --version
           cargo metadata --locked --format-version 1 > /dev/null
-          cargo tree --locked -d
+      - name: Check Rust formatting
+        if: matrix.toolchain == 'stable'
+        run: cargo fmt --all -- --check
+      - name: Audit Rust dependency graph
+        if: matrix.toolchain == 'stable'
+        run: cargo tree --locked -d
       - name: Audit Rust dependencies against RustSec
+        if: matrix.toolchain == 'stable'
         run: |
           cargo install cargo-audit --locked --version 0.22.2
           cargo audit
       - name: Detect unused Rust dependencies
+        if: matrix.toolchain == 'stable'
         run: |
           cargo install cargo-machete --locked --version 0.9.2
           cargo machete
