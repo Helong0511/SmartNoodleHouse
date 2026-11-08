@@ -38,6 +38,8 @@ async def test_schedule_generation_is_persistent_and_changes_only_on_schedule_tr
             return next_version
 
     fake = FakeRedis()
+    # Simulate Redis bundle TTL expiry while the persistent schedule/version keys remain.
+    fake.store.pop(bundle_key, None)
 
     async def get_redis():
         return fake
