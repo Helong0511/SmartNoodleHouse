@@ -15,7 +15,7 @@
                            │ 127.0.0.1:8000
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
-  gunicorn worker#1  gunicorn worker#2   （可水平扩 worker）
+  Uvicorn worker#1   Uvicorn worker#2    （可水平扩 worker）
   UvicornWorker      UvicornWorker
    FastAPI app        FastAPI app
         │                  │
@@ -108,7 +108,7 @@
 - `User/Group=www-data`，非 root。
 - 绑定 `127.0.0.1:8000`，仅 nginx 反代对外。
 - `PROCESS_ROLE=auto` 在单元层强制覆盖，防止 .env 误写 leader 导致多实例冲突。
-- gunicorn `-w 2`，`uvicorn.workers.UvicornWorker`，timeout 120s，graceful 30s。
+- Uvicorn 原生多进程 `--workers 2`，`--timeout-graceful-shutdown 30`；不依赖 Gunicorn worker 插件。
 - `NoNewPrivileges=true`、`PrivateTmp=true`、`ReadWritePaths` 限定 uploads/logs。
 - `Restart=on-failure`，StartLimitBurst=5/60s 防崩溃循环。
 - 占位符 `REPLACE_DEPLOY_ROOT` 部署前替换。
@@ -159,9 +159,9 @@
 
 ## 7. 连接池与容量
 
-- DB：`pool_size + max_overflow` 显式配置；要求 `gunicorn -w × (pool_size+overflow) ≤ MySQL max_connections`（P1-401，config 注释明示）。
+- DB：`pool_size + max_overflow` 显式配置；要求 `Uvicorn worker 数 × (pool_size+overflow) ≤ MySQL max_connections`（P1-401，config 注释明示）。
 - `pool_pre_ping=True` + `pool_recycle` 剔除失效连接。
-- Redis：每个 API Worker 独立使用 `BlockingConnectionPool`，默认每进程上限 50、池耗尽最多等待 0.75 秒；总连接上限约 `Gunicorn Worker 数 × REDIS_MAX_CONNECTIONS`，另需预留运维/监控/其他服务连接。WebSocket Pub/Sub 从对应 Worker 的连接池借用连接；不得按“全应用单连接”估算。
+- Redis：每个 API Worker 独立使用 `BlockingConnectionPool`，默认每进程上限 50、池耗尽最多等待 0.75 秒；总连接上限约 `Uvicorn Worker 数 × REDIS_MAX_CONNECTIONS`，另需预留运维/监控/其他服务连接。WebSocket Pub/Sub 从对应 Worker 的连接池借用连接；不得按“全应用单连接”估算。
 - 当前 Redis 混合承载缓存、限流、一次性凭证、活体挑战和分布式锁：生产基线使用显式 `maxmemory` + `maxmemory-policy noeviction`，避免淘汰协调/安全键；达到上限时写入会返回 OOM，关键路径必须按各自策略 fail-closed 或安全降级。纯缓存如需 LRU，应拆分独立实例。
 - Redis 主机需设置 `vm.overcommit_memory=1`，关闭 Transparent Huge Pages，并监控 `INFO memory`、`INFO stats`、`INFO persistence`、磁盘空间及 AOF/RDB 状态。`redis.conf.example` 的 512mb 仅为小型单店示例，部署前必须按主机 RAM、MySQL/OS 占用和 fork/COW 峰值重新核算。
 - 摄像头/支付外部调用统一走 [http_client.py](file:///e:/SmartNoodleHouse/backend/app/core/http_client.py) 共享 httpx client，lifespan 关闭，防连接泄漏。
