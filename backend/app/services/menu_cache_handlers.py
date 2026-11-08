@@ -1,6 +1,6 @@
 """菜单缓存失效 Outbox handler。
 
-库存变更与订单事务同提交；只有事务提交后 worker 才递增菜单版本并清缓存。
+库存变更与订单事务同提交；业务事务已递增 MySQL 菜单代际；worker 只将 Redis 镜像对账到最新值。
 """
 from __future__ import annotations
 
