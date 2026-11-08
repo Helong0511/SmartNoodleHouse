@@ -34,7 +34,7 @@
 ### 1. 准备环境
 
 - Python 3.11+
-- Node.js 22.20+ 或 24.12+ LTS（推荐 24 LTS；Node 20 已于 2026-04-30 EOL，不再接收安全修复）
+- Node.js 22.20+、24.12+ 或 26+（推荐 26 Active LTS；24 为 Maintenance LTS；Node 20 已于 2026-04-30 EOL）
 - MySQL 8
 - Redis 7
 - 微信 / 支付宝小程序开发者工具（可选）
