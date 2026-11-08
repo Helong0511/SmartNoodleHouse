@@ -280,26 +280,55 @@ async def test_burst_list_business(mem_db: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_extreme_concurrent_get_int(mem_db: AsyncSession):
-    """200 并发读同一配置，结果一致且合法。"""
-    with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=0)):
-        with patch.object(SystemSettingsService, "_bump_remote_version", new=AsyncMock(return_value=1)):
-            await SystemSettingsService.update_business(mem_db, {"face_match_threshold": 0.82})
-            await mem_db.commit()
-            SystemSettingsService.invalidate_cache_local()
+async def test_extreme_concurrent_get_int(tmp_path):
+    """200 并发读同一配置；独立 Session 使用池化连接，不共享 SQLite DBAPI cursor。"""
+    from sqlalchemy import event
 
-            # AsyncSession 不能被多个 task 共享；每个并发请求使用独立 Session，
-            # 服务层 single-flight 锁仍应保证只有一次 DB 回源。
-            session_factory = async_sessionmaker(
-                bind=mem_db.bind,
-                expire_on_commit=False,
-            )
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'extreme-concurrent-settings.db'}",
+        echo=False,
+        pool_size=5,
+        max_overflow=0,
+    )
+    select_count = 0
 
-            async def one():
-                async with session_factory() as session:
-                    return await SystemSettingsService.get_float(
-                        session, "face_match_threshold", 0.75
+    def count_settings_select(_conn, _cursor, statement, _parameters, _context, _many):
+        nonlocal select_count
+        normalized = statement.lstrip().lower()
+        if normalized.startswith("select") and "system_settings" in normalized:
+            select_count += 1
+
+    event.listen(engine.sync_engine, "before_cursor_execute", count_settings_select)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_factory = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=0)):
+            with patch.object(SystemSettingsService, "_bump_remote_version", new=AsyncMock(return_value=1)):
+                async with session_factory() as setup_session:
+                    await SystemSettingsService.update_business(
+                        setup_session, {"face_match_threshold": 0.82}
                     )
+                    await setup_session.commit()
 
-            vals = await asyncio.gather(*[one() for _ in range(200)])
-            assert all(abs(v - 0.82) < 1e-6 for v in vals)
+                SystemSettingsService.invalidate_cache_local()
+                select_count = 0
+
+                async def one():
+                    async with session_factory() as session:
+                        return await SystemSettingsService.get_float(
+                            session, "face_match_threshold", 0.75
+                        )
+
+                vals = await asyncio.gather(*[one() for _ in range(200)])
+                assert all(abs(value - 0.82) < 1e-6 for value in vals)
+                # 缓存失效时 200 个并发请求只能触发一次 DB 回源。
+                assert select_count == 1
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count_settings_select)
+        await engine.dispose()
