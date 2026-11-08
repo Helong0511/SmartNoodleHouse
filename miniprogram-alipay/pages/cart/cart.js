@@ -1,4 +1,4 @@
-﻿﻿Page({
+Page({
   onLoad() {
     try {
       const app = getApp()

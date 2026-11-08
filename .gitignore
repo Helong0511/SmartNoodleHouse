@@ -58,6 +58,8 @@ logs/**
 # 数据库备份产物
 backups/
 tests/_db_audit_report.json
+tests/_e2e_last_run.txt
+tests/_index_diffs.txt
 tests/_out/
 
 # 编译产物
