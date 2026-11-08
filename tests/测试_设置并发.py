@@ -308,7 +308,7 @@ async def test_extreme_concurrent_get_int(tmp_path):
             expire_on_commit=False,
         )
 
-        with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=0)):
+        with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=1)):
             with patch.object(SystemSettingsService, "_bump_remote_version", new=AsyncMock(return_value=1)):
                 async with session_factory() as setup_session:
                     await SystemSettingsService.update_business(
