@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.api.miniprogram import get_menu_bundle_api
 from app.core import menu_cache, perf_metrics
