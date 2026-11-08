@@ -73,6 +73,8 @@ async def test_menu_bundle_does_not_serve_local_or_waited_cache_without_version(
     monkeypatch.setattr(
         menu_service, "wait_for_rebuild", AsyncMock(return_value=stale)
     )
+    build = AsyncMock()
+    monkeypatch.setattr(menu_service, "build_menu_bundle", build)
 
     with pytest.raises(AppException) as exc_info:
         await menu_service.get_or_build_menu_bundle(object(), sid)
@@ -81,8 +83,7 @@ async def test_menu_bundle_does_not_serve_local_or_waited_cache_without_version(
     # must not serve the process-local stale bundle or independently stampede MySQL.
     assert exc_info.value.status_code == 503
     menu_service.wait_for_rebuild.assert_awaited_once()
-    menu_service.build_menu_bundle = AsyncMock()
-    menu_service.build_menu_bundle.assert_not_awaited()
+    build.assert_not_awaited()
     assert menu_service._BUILD_CACHE.get(sid) is None
 
 
