@@ -1,4 +1,4 @@
-﻿const { redirectToPackage } = require('../../utils/page-redirect')
+const { redirectToPackage } = require('../../utils/page-redirect')
 
 Page({
   onLoad(query) {
