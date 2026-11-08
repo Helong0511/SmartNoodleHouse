@@ -295,7 +295,7 @@ async def sync_channel_osd_name(
             or parsed_base.fragment
         ):
             return {"ok": False, "reason": "invalid_base"}
-        pinned = pin_camera_url_for_connect(base)
+        pinned = await asyncio.to_thread(pin_camera_url_for_connect, base)
         pinned_parts = urlsplit(pinned)
         if pinned_parts.scheme.lower() != "http" or not pinned_parts.hostname:
             return {"ok": False, "reason": "invalid_base"}
@@ -362,7 +362,7 @@ async def try_sync_camera_osd_name(
 ) -> dict:
     """最佳努力：USB/无 ISAPI 基址时跳过；失败只记日志不抛给前端。"""
     try:
-        base = resolve_isapi_base(source_url)
+        base = await asyncio.to_thread(resolve_isapi_base, source_url)
     except Exception as exc:
         logger.warning("跳过不安全的海康 OSD 目标 err=%s", str(exc)[:120])
         return {"ok": False, "reason": "unsafe_source"}
