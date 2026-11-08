@@ -24,7 +24,7 @@ def _load_migration():
     return module
 
 
-def test_upgrade_extends_only_menu_cache_invalidation_retry_budget(monkeypatch):
+def test_upgrade_extends_only_menu_and_recommendation_cache_invalidation_retry_budget(monkeypatch):
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
