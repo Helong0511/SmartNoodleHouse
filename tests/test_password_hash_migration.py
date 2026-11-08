@@ -2,11 +2,27 @@ from __future__ import annotations
 
 import bcrypt
 
+import pytest
+
 from app.core.security import (
     hash_password,
     verify_password,
     verify_password_and_update,
+    hash_password_async,
+    verify_password_and_update_async,
 )
+
+
+@pytest.mark.asyncio
+async def test_async_password_hashing_wrappers_roundtrip_without_blocking_api_loop():
+    encoded = await hash_password_async("Async-Staff-Password!")
+    valid, upgraded = await verify_password_and_update_async(
+        "Async-Staff-Password!", encoded
+    )
+
+    assert encoded.startswith("$argon2id$")
+    assert valid is True
+    assert upgraded is None
 
 
 def test_new_password_hashes_use_argon2id():
