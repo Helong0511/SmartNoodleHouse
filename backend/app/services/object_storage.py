@@ -91,7 +91,16 @@ class S3ObjectStorage(ObjectStorage):
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
             region_name=settings.s3_region or "us-east-1",
-            config=Config(signature_version="s3v4"),
+            # 对象存储调用位于异步 API 中：通过 asyncio.to_thread 隔离同步 SDK，
+            # 同时显式限制连接/读取超时、连接池和重试，避免网络异常拖垮工作进程。
+            config=Config(
+                signature_version="s3v4",
+                connect_timeout=5,
+                read_timeout=30,
+                max_pool_connections=50,
+                retries={"mode": "standard", "max_attempts": 3},
+                tcp_keepalive=True,
+            ),
         )
 
     def _put_sync(self, key: str, data: bytes, content_type: str) -> None:
@@ -151,9 +160,12 @@ def get_storage() -> ObjectStorage:
     if backend == "s3":
         _storage = S3ObjectStorage()
         logger.info("Object storage: S3/MinIO bucket=%s", settings.s3_bucket)
-    else:
+    elif backend == "local":
         _storage = LocalObjectStorage()
         logger.info("Object storage: local dir=%s", settings.upload_dir)
+    else:
+        # 配置拼写错误不能静默切换本地磁盘，避免文件落在错误介质。
+        raise RuntimeError(f"不支持的 STORAGE_BACKEND：{backend!r}（仅支持 local / s3）")
     return _storage
 
 
