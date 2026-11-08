@@ -22,13 +22,19 @@ async def menu_cache_invalidate_handler(db, row) -> None:
     if not store_id:
         raise ValueError(f"菜单缓存失效事件缺少 store_id: outbox_id={row.id}")
 
-    generation = payload.get("generation")
-    if generation is None:
-        # Old pending events created before migration are reconciled against current DB state.
-        generation = await db.scalar(
-            select(Store.menu_generation).where(Store.id == int(store_id))
-        )
-    if generation is None:
+    # Always reconcile with the latest DB generation, not merely this event's
+    # possibly stale payload. This also repairs Redis after total data loss.
+    current_generation = await db.scalar(
+        select(Store.menu_generation)
+        .where(Store.id == int(store_id))
+        .with_for_update()
+    )
+    event_generation = payload.get("generation")
+    generation = max(
+        int(current_generation or 0),
+        int(event_generation or 0),
+    )
+    if generation <= 0:
         raise ValueError(f"门店菜单代际不存在: store_id={store_id}")
 
     from app.services.recommendation_service import invalidate_store_caches
