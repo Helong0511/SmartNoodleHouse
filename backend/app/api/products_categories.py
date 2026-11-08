@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.api.deps import (
     CurrentUser,
@@ -13,7 +13,7 @@ from app.api.deps import (
 from app.api.products_common import store_code_prefix
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import ProductCategory, Store
+from app.models import CategorySortScheduleItem, Product, ProductCategory, Store
 from app.schemas.product import CategoryCreate, CategoryUpdate
 from app.services.audit_service import AuditService
 from app.services.category_require import normalize_require_category_ids
@@ -22,6 +22,49 @@ from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
+
+
+async def _invalidate_category_menu(db: DbSession, *store_ids: int | None) -> None:
+    """分类变更同时清理本地推荐/菜单缓存，并在业务事务内持久化代际与 Outbox。"""
+    from app.services.recommendation_service import invalidate_store_local_caches
+
+    for sid in sorted({int(value) for value in store_ids if value is not None}):
+        invalidate_store_local_caches(sid)
+        await enqueue_menu_cache_invalidation(db, sid)
+
+
+async def _prepare_category_store_move(
+    db: DbSession, category: ProductCategory, target_store_id: int
+) -> None:
+    """迁移分类前阻止餐品跨门店悬挂，并清理旧门店的时段排序引用。"""
+    target_sid = int(target_store_id)
+    if int(category.store_id) == target_sid:
+        return
+
+    linked_product_id = await db.scalar(
+        select(Product.id)
+        .where(Product.category_id == int(category.id))
+        .limit(1)
+    )
+    if linked_product_id is not None:
+        raise AppException(
+            40041,
+            "该分类仍关联餐品，不能直接迁移到其他门店；请先在原门店重新分配或下架餐品",
+        )
+
+    # 分类依赖必须在目标门店仍然有效，否则迁移后会留下跨门店依赖。
+    required_ids = normalize_require_category_ids(category.require_category_ids)
+    if required_ids:
+        await validate_require_category_ids(
+            db, target_sid, required_ids, self_id=int(category.id)
+        )
+
+    # 分时段排序方案属于门店资源，迁移分类时删除旧门店的关联项。
+    await db.execute(
+        delete(CategorySortScheduleItem).where(
+            CategorySortScheduleItem.category_id == int(category.id)
+        )
+    )
 
 
 def category_payload(
@@ -179,6 +222,7 @@ async def create_category(data: CategoryCreate, request: Request, db: DbSession,
     )
     db.add(cat)
     await db.flush()
+    await _invalidate_category_menu(db, int(sid))
     await AuditService.log_staff(
         db,
         user=user,
@@ -201,11 +245,13 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
     if not cat:
         return success(None, message="分类不存在", request=request)
     assert_store_access(user, cat.store_id)
+    original_store_id = int(cat.store_id)
     payload = data.model_dump(exclude_unset=True)
     if "store_id" in payload and payload["store_id"] is not None:
         if user.role.code != "SUPER_ADMIN":
             raise AppException(40301, "仅超管可迁移分类所属门店")
         assert_store_access(user, int(payload["store_id"]))
+        await _prepare_category_store_move(db, cat, int(payload["store_id"]))
         cat.store_id = int(payload["store_id"])
         del payload["store_id"]
         # 迁店时同步编号前缀
@@ -241,7 +287,7 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
     for k, v in payload.items():
         setattr(cat, k, v)
     await db.flush()
-    await enqueue_menu_cache_invalidation(db, int(cat.store_id))
+    await _invalidate_category_menu(db, original_store_id, int(cat.store_id))
     await AuditService.log_staff(
         db,
         user=user,
