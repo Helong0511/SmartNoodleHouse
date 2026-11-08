@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 30
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine
         ports:
           - 6379:6379
         options: >-
@@ -72,6 +72,12 @@ jobs:
           print("websockets", websockets.__version__, "Uvicorn SansIO: OK")
           print("InsightFace FaceAnalysis import: OK")
           PY
+      - name: Verify real Redis 7.4 Lua, lock and cache behavior
+        env:
+          REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+          PYTHONPATH: backend
+          APP_ENV: development
+        run: python -m pytest -q tests/测试_Redis真实服务集成.py
       - name: Verify tracked text encoding and line endings
         run: |
           python scripts/check_text_encoding.py
