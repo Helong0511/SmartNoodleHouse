@@ -3,6 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 import jwt
+from argon2.exceptions import InvalidHashError as Argon2InvalidHashError
 from jwt import InvalidTokenError as JWTError
 from pwdlib import PasswordHash
 from pwdlib.exceptions import UnknownHashError
@@ -25,7 +26,7 @@ def verify_password_and_update(plain: str, hashed: str) -> tuple[bool, str | Non
     """校验历史哈希；算法过旧时返回新哈希，由调用方在当前事务内保存。"""
     try:
         return password_hash.verify_and_update(plain, hashed)
-    except (UnknownHashError, ValueError, TypeError):
+    except (UnknownHashError, Argon2InvalidHashError, ValueError, TypeError):
         # 数据库哈希格式异常时必须拒绝登录，不能因异常哈希导致 500。
         return False, None
 
