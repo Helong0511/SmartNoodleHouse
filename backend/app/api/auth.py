@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.response import error, now_local, success
-from app.core.security import create_access_token, verify_password_and_update
+from app.core.security import create_access_token, verify_password_and_update_async
 from app.models import User
 from app.schemas.common import LoginRequest
 from pydantic import BaseModel, Field
@@ -106,7 +106,7 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
     )
     user = result.scalar_one_or_none()
     password_valid, upgraded_hash = (
-        verify_password_and_update(data.password, user.password_hash)
+        await verify_password_and_update_async(data.password, user.password_hash)
         if user
         else (False, None)
     )
@@ -200,7 +200,7 @@ async def verify_password_api(data: VerifyPasswordRequest, request: Request, db:
         )
     row = await db.get(User, user.id)
     password_valid, upgraded_hash = (
-        verify_password_and_update(data.password, row.password_hash)
+        await verify_password_and_update_async(data.password, row.password_hash)
         if row
         else (False, None)
     )
