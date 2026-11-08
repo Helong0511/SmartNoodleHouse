@@ -4,19 +4,35 @@ from uuid import uuid4
 
 import jwt
 from jwt import InvalidTokenError as JWTError
-from passlib.context import CryptContext
+from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
+from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.hashers.bcrypt import BcryptHasher
 
 from app.core.config import get_settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 新密码使用 Argon2id；BcryptHasher 只负责兼容历史 Passlib/bcrypt 哈希。
+# 登录成功后通过 verify_and_update 渐进升级，避免强制全体员工重置密码。
+password_hash = PasswordHash((Argon2Hasher(), BcryptHasher(rounds=12)))
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    """新密码统一使用 Argon2id，不再生成新的 bcrypt 哈希。"""
+    return password_hash.hash(password)
+
+
+def verify_password_and_update(plain: str, hashed: str) -> tuple[bool, str | None]:
+    """校验历史哈希；算法过旧时返回新哈希，由调用方在当前事务内保存。"""
+    try:
+        return password_hash.verify_and_update(plain, hashed)
+    except (UnknownHashError, ValueError, TypeError):
+        # 数据库哈希格式异常时必须拒绝登录，不能因异常哈希导致 500。
+        return False, None
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    verified, _ = verify_password_and_update(plain, hashed)
+    return verified
 
 
 # JWT 标准/内部声明：extra 不得覆盖，防止提权或伪造 typ/sub/exp
