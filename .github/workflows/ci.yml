@@ -164,6 +164,10 @@ jobs:
 
   frontend-build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["24", "26"]
     timeout-minutes: 15
     defaults:
       run:
@@ -172,14 +176,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Pin npm to packageManager version
         run: |
           npm install --global npm@11.19.1
           test "$(npm --version)" = "11.19.1"
-          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major !== 24 || minor < 12) process.exit(1)"
+          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (![24, 26].includes(major) || (major === 24 && minor < 12)) process.exit(1)"
       - name: Install dependencies
         run: npm ci
       - name: Check duplicate frontend and mini-program imports
