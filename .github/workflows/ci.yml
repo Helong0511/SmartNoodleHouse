@@ -8,6 +8,9 @@ on:
     branches: [main, master, develop]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   # Do not cancel an active full test run; a newer pending run validates latest SHA.
