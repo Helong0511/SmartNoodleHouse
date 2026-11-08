@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from sqlalchemy import text
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 
 REQUIRED_TABLES = [
     "roles",
@@ -441,10 +441,17 @@ async def main() -> None:
         print("\n校验失败:")
         for f in failures:
             print(f"  - {f}")
-        sys.exit(1)
+        return 1
     print("\n校验通过")
-    sys.exit(0)
+    return 0
+
+
+async def _run_and_dispose() -> int:
+    try:
+        return await main()
+    finally:
+        await engine.dispose()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(_run_and_dispose()))
