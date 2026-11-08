@@ -530,3 +530,47 @@ async def test_late_award_then_catchup_refund_deduct(db_session):
     assert earned == 30
     await db_session.refresh(cust)
     assert int(cust.points or 0) == 20
+
+
+async def test_zero_point_refund_before_late_award_keeps_catchup_idempotency(db_session):
+    """小额退款先到、积分后发：零分退款不能提前占用 refund_id。"""
+    from sqlalchemy import select
+
+    from app.models import PaymentRefund, PointLedger
+
+    cust = await _seed_customer(db_session, birthday=None)
+    store = await _seed_store(db_session)
+    order = await _seed_order(
+        db_session, store, cust, status="PARTIAL_REFUND", payment_status="PARTIAL_REFUND"
+    )
+    pay = await _seed_payment(db_session, order, cust)
+    rf = PaymentRefund(
+        id=next(_seq) + 9000,
+        refund_no=f"R{next(_seq)}",
+        payment_id=pay.id,
+        order_id=order.id,
+        amount=Decimal("0.10"),
+        status="SUCCESS",
+    )
+    db_session.add(rf)
+    await db_session.commit()
+
+    deducted0 = await CustomerService.deduct_points_for_refund(
+        db_session, order, Decimal("0.10"), refund_id=int(rf.id)
+    )
+    assert deducted0 == 0
+    assert await db_session.scalar(
+        select(PointLedger.id).where(PointLedger.refund_id == int(rf.id))
+    ) is None
+
+    earned = await CustomerService.award_points_for_paid_order(db_session, order)
+    assert earned == 30
+    await db_session.refresh(cust)
+    assert int(cust.points or 0) == 30
+
+    marker = await db_session.scalar(
+        select(PointLedger).where(PointLedger.refund_id == int(rf.id))
+    )
+    assert marker is not None
+    assert marker.entry_type == "REFUND_DEDUCT"
+    assert marker.delta == 0

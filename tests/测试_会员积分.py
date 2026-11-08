@@ -118,6 +118,45 @@ def test_points_from_amount_rounds_half_up():
     assert CustomerService.points_from_amount(Decimal("10.5")) == 11
     assert CustomerService.points_from_amount(Decimal("10.49")) == 10
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("earned_points", "expect_marker"), [(0, False), (100, True)])
+async def test_zero_point_refund_marker_depends_on_original_order_earn(
+    monkeypatch, earned_points, expect_marker
+):
+    """折算为 0 分的退款：EARN 未到达时保留幂等键，已发分时写零标记。"""
+    from app.models import PointLedger
+
+    customer = SimpleNamespace(id=31, points=25, member_level_id=1)
+    order = SimpleNamespace(customer_id=31, id=902)
+    customer_lock = MagicMock()
+    customer_lock.scalar_one_or_none.return_value = customer
+    no_marker = MagicMock()
+    no_marker.scalar_one_or_none.return_value = None
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[customer_lock, no_marker])
+    db.scalar = AsyncMock(return_value=earned_points)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    monkeypatch.setattr(CustomerService, "recalculate_member_level", AsyncMock())
+
+    deducted = await CustomerService.deduct_points_for_refund(
+        db, order, Decimal("0.10"), refund_id=778
+    )
+
+    assert deducted == 0
+    if expect_marker:
+        db.add.assert_called_once()
+        marker = db.add.call_args.args[0]
+        assert isinstance(marker, PointLedger)
+        assert marker.refund_id == 778
+        assert marker.entry_type == "REFUND_DEDUCT"
+        assert marker.delta == 0
+        db.flush.assert_awaited_once()
+    else:
+        db.add.assert_not_called()
+        db.flush.assert_not_awaited()
+
 @pytest.mark.asyncio
 async def test_refund_with_zero_available_points_still_persists_idempotency_marker(monkeypatch):
     """首次退款评估扣分为 0 后，迟到重试不能扣除后来获得的新积分。"""
