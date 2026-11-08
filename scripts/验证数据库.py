@@ -396,7 +396,7 @@ async def main() -> int:
             ("financial_ledger", "idx_fl_store_ch_type_created"),
             ("customer_coupons", "idx_cc_customer_status_exp"),
             ("payment_reconcile_batches", "ix_payment_reconcile_batches_scope_store_id"),
-            ("outbox_events", "ix_oe_next_retry_at_status"),
+            ("outbox_events", "idx_oe_status_retry"),
         ]
         for table, index in RECOMMENDED_INDEXES:
             if not await _table_exists(db, table):
