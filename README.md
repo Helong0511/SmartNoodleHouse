@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x, MySQL 8, Redis 7, APScheduler
+- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x, MySQL 8, Redis 7.2+（官方 Redis APT 源）, APScheduler
 - 后台前端: Vue 3, TypeScript, Vite, Element Plus
 - 微信小程序: `miniprogram-wechat/`
 - 支付宝小程序: `miniprogram-alipay/`
