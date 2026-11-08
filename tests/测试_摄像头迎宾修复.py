@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 
 import app.services.hikvision_audio as ha
 from app.services.face_service import WelcomeService
@@ -14,17 +15,30 @@ from app.services.hikvision_audio import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _clear_hik_caches():
-    ha._SHARED_HTTP.clear()
+@pytest_asyncio.fixture(autouse=True)
+async def _clear_hik_caches():
+    # asyncio.Lock / AsyncClient 按事件循环隔离；在 async fixture 中清理当前 loop 状态。
+    state = ha._get_loop_state()
+    for client in list(state.shared_http.values()):
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+    state.shared_http.clear()
+    state.codec_detect_pending.clear()
     ha._CODEC_CACHE.clear()
-    ha._CODEC_DETECT_PENDING.clear()
     ha._SESSION_NEED_CLOSE.clear()
     ha._DIGEST_WWW_CACHE.clear()
     yield
-    ha._SHARED_HTTP.clear()
+    state = ha._get_loop_state()
+    for client in list(state.shared_http.values()):
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+    state.shared_http.clear()
+    state.codec_detect_pending.clear()
     ha._CODEC_CACHE.clear()
-    ha._CODEC_DETECT_PENDING.clear()
     ha._SESSION_NEED_CLOSE.clear()
     ha._DIGEST_WWW_CACHE.clear()
 
@@ -56,7 +70,7 @@ async def test_shared_client_key_changes_with_password_and_invalidate():
     c1 = await a1._shared_client(timeout)
     c2 = await a2._shared_client(timeout)
     assert c1 is not c2
-    assert len(ha._SHARED_HTTP) == 2
+    assert len(ha._get_loop_state().shared_http) == 2
     await invalidate_hikvision_caches(base_url="http://192.168.1.64", channel=1)
     assert len(ha._SHARED_HTTP) == 0
 
