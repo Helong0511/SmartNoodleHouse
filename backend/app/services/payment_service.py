@@ -1728,6 +1728,29 @@ class PaymentService:
         if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
             raise AppException(40012, f"当前订单状态不可收款: {order.status}")
 
+        # 第三方支付流程已创建但尚未确认时，禁止并行现金收款。
+        # 否则现金结清后，迟到的微信/支付宝成功回调会被当作重复入账拒绝，
+        # 但顾客的渠道扣款已发生，形成未记录的真实资金流。
+        pending_provider_payments = list(
+            (
+                await db.execute(
+                    select(Payment)
+                    .where(
+                        Payment.order_id == order.id,
+                        Payment.status == "PENDING",
+                        Payment.provider.in_(("WECHAT", "ALIPAY")),
+                    )
+                    .order_by(Payment.id.desc())
+                )
+            ).scalars().all()
+        )
+        if pending_provider_payments:
+            raise AppException(
+                40908,
+                "该订单已有微信/支付宝支付流程进行中，请先查单确认或关闭原支付流程，再进行现金收款",
+                status_code=409,
+            )
+
         remaining = await cls.remaining_amount(db, order)
         if remaining <= 0:
             raise AppException(40010, "订单已支付")
