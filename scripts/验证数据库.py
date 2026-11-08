@@ -1,4 +1,4 @@
-"""校验数据库关键表、Alembic 版本与关键 UNIQUE/FK。
+"""校验数据库字符集、关键表、Alembic 版本与关键 UNIQUE/FK。
 
 用法:
   python scripts/verify_database.py
@@ -341,7 +341,7 @@ async def _check_exists(db, table: str, constraint: str) -> bool:
     return int(n or 0) > 0
 
 
-async def main() -> None:
+async def main() -> int:
     failures: list[str] = []
     async with AsyncSessionLocal() as db:
         db_name = (await db.execute(text("SELECT DATABASE()"))).scalar()
