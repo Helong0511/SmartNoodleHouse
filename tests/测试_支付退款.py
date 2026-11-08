@@ -220,8 +220,15 @@ async def test_finalize_refund_deducts_points_for_customer():
     row.provider_refund_no = None
     row.succeeded_at = None
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def nested_transaction():
+        yield
+
     db = AsyncMock()
     db.scalar = AsyncMock(return_value=Decimal("40.00"))
+    db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
 
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
