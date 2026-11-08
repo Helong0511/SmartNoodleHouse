@@ -88,6 +88,7 @@ async def get_redis() -> redis.Redis:
                     retry=Retry(NoBackoff(), 0),
                     # 保留 RESP2 线协议和旧响应结构，避免升级客户端时改变业务解析语义。
                     protocol=2,
+                    legacy_responses=True,
                 )
                 _redis_pool = pool
                 _redis = redis.Redis(connection_pool=pool)
