@@ -951,7 +951,7 @@ async def test_stock_menu_invalidation_outbox_is_enqueued_in_business_transactio
     assert kwargs["aggregate_type"] == "menu_cache"
     assert kwargs["event_kind"] == "invalidate"
     assert 0 < kwargs["aggregate_id"] < (1 << 63)
-    assert kwargs["payload"] == {"store_id": 7}
+    assert kwargs["payload"] == {"store_id": 7, "generation": 1_000_000_007}
 
 
 @pytest.mark.asyncio
