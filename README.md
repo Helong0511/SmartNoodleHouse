@@ -181,14 +181,14 @@ http://127.0.0.1:5173/display?store_id=1          # 本地开发，1 换成实�
 https://你的域名/display?store_id=1               # 生产环境
 ```
 
-生产环境建议在 `.env` 设置访问令牌，并在 URL 带上 `token` 参数：
+生产环境必须设置访问令牌；当前实现使用 query 参数传递，存在浏览器历史/代理日志泄露风险，令牌需定期轮换并限制访问，后续应迁移到更安全的短时票据或 header：
 
 ```bash
 DISPLAY_SCREEN_TOKEN=随机一串
 # 访问：https://你的域名/display?store_id=1&token=随机一串
 ```
 
-留空 `DISPLAY_SCREEN_TOKEN` 时不校验令牌（仅建议开发环境）。
+生产环境不得留空 `DISPLAY_SCREEN_TOKEN`；空值必须拒绝敏感访问。不要将真实 token 写入文档、二维码样例或工单。
 
 **屏上展示**
 
@@ -222,9 +222,9 @@ DISPLAY_SCREEN_TOKEN=随机一串
 | 接口 | 说明 |
 |------|------|
 | `GET /api/orders/kitchen/active` | 厨房 KDS 数据（需厨房权限） |
-| `GET /api/orders/display/active?store_id=` | 叫号屏数据（公开，可选 `token`） |
+| `GET /api/orders/display/active?store_id=` | 叫号屏只读数据；生产必须验证有效屏端令牌及门店绑定 |
 | `WS /api/ws/kitchen` | 厨房推送（需员工 token） |
-| `WS /api/ws/display?store_id=` | 叫号屏推送（公开，可选 `token`） |
+| `WS /api/ws/display?store_id=` | 叫号屏推送；生产必须验证有效屏端令牌及门店绑定 |
 | `GET /api/orders/{id}`、`GET /api/orders/mine` | 含 `pickup_code`、`pickup_label`、`customer_status_label` 等字段 |
 
 ## 外卖接入（美团 / 饿了么）
@@ -695,5 +695,5 @@ mysqldump -u snh -p smart_noodle_house | gzip > /backup/snh_$(date +%F).sql.gz
 - 支付 / 外卖回调验签（开发模式可模拟）
 - 支付金额由服务端从数据库重新计算
 - 桌台二维码使用不可预测 token
-- 厨房与外卖 WebSocket 需鉴权；顾客叫号屏 WebSocket 为公开频道（建议配置 `DISPLAY_SCREEN_TOKEN`）
+- WebSocket 默认拒绝；仅明确列入公开白名单的频道可匿名。叫号屏生产必须配置并校验 `DISPLAY_SCREEN_TOKEN`，且令牌应绑定门店；当前 query 传递方式存在日志/历史风险，不能视为安全的长期凭据
 - 摄像头密码加密存储；操作日志定期清理
