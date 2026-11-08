@@ -90,7 +90,7 @@ async def get_redis() -> redis.Redis:
                     protocol=2,
                 )
                 _redis_pool = pool
-                _redis = redis.Redis(connection_pool=pool, legacy_responses=True)
+                _redis = redis.Redis(connection_pool=pool)
     return _redis
 
 
