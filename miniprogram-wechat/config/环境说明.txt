@@ -5,7 +5,7 @@
 #   ENABLE_WX_AVATAR / ENABLE_WX_NICKNAME / ENABLE_WX_PHONE_BIND
 # ═══════════════════════════════════════════════════════════════
 
-【三种场景对照】（正式上线前可只测前两行）
+【三种场景对照】（正式上线前三种环境都必须验证，release 真机验收不可省略）
 
   场景              API 自动选择              域名校验怎么做
   ──────────────  ───────────────────────  ──────────────────────────────────
@@ -44,3 +44,12 @@
 【改局域网 IP】
   config/env.js → DEV_LAN_HOST；真机勿用 127.0.0.1
   project.config.json → urlCheck（开发 false / 上传前 true）
+
+
+【2026-11-08 正式发布阻断项】
+  1. release 的 PROD_API_BASE 必须是实际 HTTPS 域名，不得保留示例域名/占位符。
+  2. getAccountInfoSync/envVersion 等环境探测失败时，必须 fail-safe 到 release 配置或明确报错；绝不能退回 DEV_LAN_HOST 的 HTTP 地址。
+  3. 配置错误不得在 app.js / api.js 模块顶层抛错导致 App 白屏；应在发布检查或请求前安全处理。
+  4. 微信隐私 API 需按微信官方文档验证；授权前不得调用手机号、人脸等敏感采集接口。
+  5. 发布前检查 project.config.json urlCheck=true、request/upload/download/socket 合法域名、隐私指引和正式支付沙箱。
+  6. 所有 mock 登录、mock_settled、测试支付和调试入口必须在正式构建及后端双重禁用。
