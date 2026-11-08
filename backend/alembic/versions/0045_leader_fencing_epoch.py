@@ -30,6 +30,9 @@ def upgrade() -> None:
                 nullable=False,
                 server_default=sa.text("CURRENT_TIMESTAMP"),
             ),
+            mysql_engine="InnoDB",
+            mysql_charset="utf8mb4",
+            mysql_collate="utf8mb4_unicode_ci",
         )
     conn.execute(
         sa.text(
