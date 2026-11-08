@@ -253,6 +253,6 @@ async def _deduct_order_stock(db: AsyncSession, order: Order) -> None:
     for product_id in sorted(aggregated):
         await deduct_stock(db, product_id, aggregated[product_id], store_id=order.store_id)
     if aggregated:
-        from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+        from app.services.menu_cache_service import invalidate_store_menu_cache
 
-        await enqueue_menu_cache_invalidation(db, order.store_id)
+        await invalidate_store_menu_cache(db, order.store_id)
