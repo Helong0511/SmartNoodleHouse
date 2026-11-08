@@ -231,7 +231,7 @@ def main() -> int:
                         continue
                     normalized = canonicalize_name(distribution)
                     used.add(normalized)
-                    if normalized not in declared and normalized not in DYNAMIC_OR_ENTRYPOINT_DEPENDENCIES:
+                    if normalized not in declared:
                         errors.append(
                             f"{path.relative_to(ROOT)}: 导入 {module_root}，"
                             f"但 backend/requirements.txt 未声明 {distribution}"
