@@ -3,7 +3,7 @@
 > **文档版本**：v3.2（可执行工作包 + 作战 Canvas 对齐）  
 > **配套 Canvas**：Cursor 旁路作战板 `canvases/crm-exec-playbook.canvas.tsx`（摘要与勾选；细则与验收以本文 §23 为准）。  
 > **执行入口**：先完成 §23 WP-A0（零开发），再按 WP-B1→B3→B2→B4→C1→C2 用 §20 提示词逐包开工。  
-> **文档定位**：在 **SmartNoodleHouse 已上线能力**之上建设营销闭环；禁止从零重建多租户 / 订单 / 支付。  
+> **文档定位**：本项目尚未正式上线；本文是营销/CRM 规划与实施方案，引用的代码能力须以当前 main 实际实现和审计状态验证；禁止把规划或代码骨架写成已上线运营能力。  
 > **现网校对**：以 `sql/struct.sql`、`sql/data_sys.sql`、`backend/app/tasks/scheduler.py`、`backend/app/services/retention_service.py`、`frontend` 路由与 `AdminLayout` 菜单为准。  
 > **关联文档**：`docs/架构设计.md`、`docs/多门店管理.md`、`docs/面馆管理系统_提示词库.md`、`docs/数据库设计.md`、菜单落地版 v4。  
 > **结构真源**：`struct.sql` → `data_sys.sql` → `data_custom.sql`（可选 `data_test.sql`）。**禁止 `tenant_id`。**  
@@ -1057,3 +1057,4 @@ customers、coupon_templates、customer_coupons、member_levels、balance_*、po
 **一句话：先把现网欢迎券、里程碑、沉睡唤醒、储值、推荐、迎宾配置跑通，再叠加公益台账与活动引擎；不要推倒重来。**  
 
 **执行入口：从 §23 WP-A0 开始勾选；开发按 WP-B1→B3→B2→B4→C* 用 §20 提示词开干。**
+\n\n## 2026-11-08 全量审计对营销/秒杀模块的影响\n\n- 公益折扣：订单创建时客户端传入 social_rule_id 的路径必须执行与常规规则完全相同的日期、星期、时段、每日次数、适用餐品/分类、门店、身份和折扣率校验；否则可被绕过并少收款。\n- 秒杀免费单：不可只将 Order 直接写为 PAID/FREE；必须纳入统一 Payment/免费支付记录、状态机、财务/对账语义和 paid side effects，确保支付进度与财务状态一致。\n- 活动资格、参与门店、限量库存、每人限领、时段和退款规则必须由服务端判定；数据库原子扣减和唯一约束为最终保障。\n- 总部与门店参与范围需显式配置，二维码不能默认信任客户端 store_id；无桌台上下文时也必须安全解析门店。\n- 会员偏好和营销分群只使用符合授权与保留策略的数据；退出/撤回后停止个性化处理。\n\n本文仍为规划与实施文档；全量审查列出的 P1 问题未因本文件更新而修复。参见 docs/audit/FULL_CODE_REVIEW_2026-11-08.md。\n
