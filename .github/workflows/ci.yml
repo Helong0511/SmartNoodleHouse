@@ -362,7 +362,7 @@ jobs:
         working-directory: tests/广告追踪/ad_tracking_dll
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
