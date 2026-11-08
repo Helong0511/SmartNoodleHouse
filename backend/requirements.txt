@@ -14,7 +14,7 @@ PyJWT[crypto]>=2.15.1,<3.0
 passlib[bcrypt]>=1.7.4,<2.0
 # bcrypt>=4.1 移除 __about__，passlib 1.7.4 会 WARNING；钉 4.0.x 兼容（哈希格式不变）
 bcrypt>=4.0.1,<4.1
-# redis-py 8.x held for explicit protocol/retry compatibility review; pin remains on the 5.x line until retry/protocol behavior is tested
+# 暂不升级 redis-py 8.x：先完成 Redis Server 最低版本、协议与重试行为兼容验证，当前固定在 5.x 线
 redis>=5.3.1,<6.0
 httpx>=0.28.1,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
@@ -28,7 +28,7 @@ cryptography>=50.0.2,<51
 Pillow>=13.0.0,<14.0
 pypinyin>=0.55.0,<1.0
 # 农历生日权益日判定：固定在跨平台通用发行线；1.0 的 PyPI 发布文件为 macOS ARM64 专用
-# MIT-licensed, cross-platform Chinese lunar calendar; replaces GPLv3+ zhdate
+# MIT 许可、跨平台的农历日历库，用于替代 GPLv3+ 许可的 zhdate
 lunar-python>=1.4.9,<2.0
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
