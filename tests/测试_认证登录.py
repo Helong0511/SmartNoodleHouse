@@ -30,7 +30,7 @@ async def test_login_updates_last_login_at():
     req = MagicMock()
     data = LoginRequest(username="admin", password="secret")
 
-    with patch("app.api.auth.verify_password", return_value=True), patch(
+    with patch("app.api.auth.verify_password_and_update", return_value=(True, None)), patch(
         "app.api.auth.create_access_token", return_value="tok"
     ), patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:read"})):
         resp = await login(data, req, db)
