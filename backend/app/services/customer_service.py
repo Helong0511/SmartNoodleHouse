@@ -656,12 +656,22 @@ class CustomerService:
             ).scalar_one_or_none()
             if existed:
                 return 0
+        # 先确认原订单是否已经产生 EARN 流水。若退款先于延迟积分发放，
+        # 不能提前占用 refund_id；award_points_for_paid_order 后续会再次补扣。
+        earned = int(
+            await db.scalar(
+                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
+                    PointLedger.order_id == order.id,
+                    PointLedger.entry_type == "EARN",
+                )
+            )
+            or 0
+        )
         deducted = CustomerService.points_from_amount(refund_amount)
         if deducted <= 0:
-            # Even a refund that rounds to zero points must consume its refund_id
-            # idempotency key. Otherwise a delayed retry could deduct points earned
-            # from a later order after this refund was already assessed.
-            if refund_id is not None:
+            # 退款金额折算为 0 分时，仅在原订单已经发放积分后写零值幂等标记。
+            # EARN 尚不存在时保留 refund_id，供延迟发分后的 catch-up 使用。
+            if refund_id is not None and earned > 0:
                 db.add(
                     PointLedger(
                         customer_id=customer.id,
@@ -674,16 +684,7 @@ class CustomerService:
                 )
                 await db.flush()
             return 0
-        # 本单净已发积分上限，避免跨单扣光余额
-        earned = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
-                    PointLedger.order_id == order.id,
-                    PointLedger.entry_type == "EARN",
-                )
-            )
-            or 0
-        )
+        # 本单净已发积分上限，避免跨单扣光
         already = int(
             await db.scalar(
                 select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
