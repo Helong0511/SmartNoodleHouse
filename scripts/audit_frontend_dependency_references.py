@@ -91,9 +91,9 @@ def main() -> int:
                 continue
             name = package_name(specifier)
             imports[name].append(str(path.relative_to(ROOT)))
-            if name in seen:
-                duplicate_imports.append(f"{path.relative_to(ROOT)}: {name}")
-            seen.add(name)
+            if specifier in seen:
+                duplicate_imports.append(f"{path.relative_to(ROOT)}: {specifier}")
+            seen.add(specifier)
             if name not in declared:
                 errors.append(f"{path.relative_to(ROOT)}: 引用了未声明的 npm 依赖 {name}")
 
