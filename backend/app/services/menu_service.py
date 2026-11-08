@@ -260,6 +260,10 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     from app.services.menu_cache_service import sync_store_menu_schedule_generation
 
     durable_generation = await sync_store_menu_schedule_generation(db, sid, expected_sched)
+    # This endpoint is a read path with one deliberate metadata write. Commit the
+    # schedule transition before mirroring it to Redis; otherwise a later request
+    # failure could roll back MySQL while leaving Redis ahead permanently.
+    await db.commit()
     remote_version = await ensure_menu_generation(sid, durable_generation)
     if remote_version is None:
         invalidate_local_menu_cache(sid)
