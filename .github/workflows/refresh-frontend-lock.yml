@@ -24,6 +24,10 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm to the repository package manager version
+        run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
       - name: Regenerate lockfile from npm registry
         working-directory: frontend
         run: npm update --package-lock-only --ignore-scripts --no-audit --no-fund
@@ -37,9 +41,10 @@ jobs:
       - name: Verify exact lock and production dependency tree
         working-directory: frontend
         run: |
-          npm ci --ignore-scripts
-          npm ls --depth=0
-          npm audit --omit=dev
+          npm ci
+          npm install-scripts ls
+          npm ls --all
+          npm audit --audit-level=high
       - name: Verify frontend type-check and build
         working-directory: frontend
         run: |
