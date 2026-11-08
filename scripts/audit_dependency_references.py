@@ -115,6 +115,66 @@ class SameScopeImportAudit(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_new_scope(node)
 
+    def _visit_branch(self, body: list[ast.stmt]) -> None:
+        # 条件分支、异常回退和循环体是独立执行路径；不能把互斥分支的延迟导入误判为重复。
+        self.scopes.append(set())
+        for child in body:
+            self.visit(child)
+        self.scopes.pop()
+
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        self._visit_branch(node.body)
+        if node.orelse:
+            self._visit_branch(node.orelse)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_branch(node.body)
+        for handler in node.handlers:
+            self.visit(handler)
+        if node.orelse:
+            self._visit_branch(node.orelse)
+        if node.finalbody:
+            self._visit_branch(node.finalbody)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.type:
+            self.visit(node.type)
+        self._visit_branch(node.body)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars:
+                self.visit(item.optional_vars)
+        self._visit_branch(node.body)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self.visit_With(node)
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.target)
+        self.visit(node.iter)
+        self._visit_branch(node.body)
+        if node.orelse:
+            self._visit_branch(node.orelse)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.visit_For(node)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        self._visit_branch(node.body)
+        if node.orelse:
+            self._visit_branch(node.orelse)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for case in node.cases:
+            if case.guard:
+                self.visit(case.guard)
+            self._visit_branch(case.body)
+
 
 def parse_requirements() -> tuple[set[str], list[str]]:
     declared: set[str] = set()
