@@ -61,7 +61,7 @@ jobs:
           import onnxruntime
           from insightface.app import FaceAnalysis
 
-          assert numpy.__version__ == "2.4.4", numpy.__version__
+          assert numpy.__version__ == "2.4.6", numpy.__version__
           assert onnxruntime.__version__ == "1.31.1", onnxruntime.__version__
           print("OpenCV", cv2.__version__, "NumPy", numpy.__version__, "ONNX Runtime", onnxruntime.__version__)
           print("InsightFace FaceAnalysis import: OK")
