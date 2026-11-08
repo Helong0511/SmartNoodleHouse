@@ -1,3 +1,7 @@
+# 文档复核（2026-11-08）
+# systemd 服务以非 root 用户运行，监听地址、工作目录、环境文件权限和重启策略需与当前 unit 文件一致。变更后执行 systemd-analyze verify、daemon-reload、restart 和 journalctl 脱敏检查；不得在文档中粘贴实际环境变量值。
+# 具体配置以当前 main 的配置文件、CI 和目标环境实际验证为准；不记录真实密钥、密码或 token。
+
 # SmartNoodleHouse — systemd 服务安装（Ubuntu 22.04.5）
 # ═══════════════════════════════════════════════════════════════
 # 服务单元：systemd/smart-noodle.service
