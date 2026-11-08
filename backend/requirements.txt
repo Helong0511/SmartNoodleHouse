@@ -1,4 +1,4 @@
-fastapi>=0.162.0,<0.163.0
+fastapi>=0.162.2,<0.163.0
 # CVE-2025-62727 / CVE-2026-54283 等 Starlette 旧版本漏洞；锁定安全下限
 starlette>=1.10.0,<2.0
 uvicorn[standard]>=0.54.0,<1.0
