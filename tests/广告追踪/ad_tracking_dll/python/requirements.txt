@@ -1,1 +1,2 @@
-pytest>=8,<9
+# 复用仓库统一测试依赖，避免不同目录维护互相漂移的 pytest 版本。
+-r ../../../requirements.txt
