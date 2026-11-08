@@ -202,6 +202,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip pip-audit
           pip-audit --strict -r backend/requirements.lock
+          pip-audit --strict -r tests/requirements.txt
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -251,6 +252,10 @@ jobs:
         run: |
           cargo metadata --locked --format-version 1 > /dev/null
           cargo tree --locked -d
+      - name: Audit Rust dependencies against RustSec
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit --locked
       - name: Build and run Rust tests
         run: cargo test --locked --all-targets
 
