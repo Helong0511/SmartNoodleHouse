@@ -1,3 +1,7 @@
+> **文档维护说明（2026-11-08）**：版本记录应与 Cargo.toml、Cargo.lock、实际 DLL 文件版本和发布 tag 同步。不得只因测试通过就提升版本号；每次发布记录 commit、目标平台、构建参数、SHA-256、测试结果和兼容性。 具体发布事实以当前 Cargo manifest/lock、CI、构建产物和签名校验为准；本机 Windows 结果不代表 Linux/macOS 结果。不得记录真实密钥或生产 token。
+>
+> ---
+>
 ## v1.1.1 - 商业发布版加固
 
 - 增加 Release 优化、LTO、去符号、无调试信息配置。
