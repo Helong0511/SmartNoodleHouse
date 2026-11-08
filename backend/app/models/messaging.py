@@ -84,8 +84,8 @@ class OutboxEvent(Base):
     __tablename__ = "outbox_events"
     __table_args__ = (
         UniqueConstraint("aggregate_type", "aggregate_id", "event_kind", name="uq_outbox_agg"),
-        Index("ix_oe_next_retry_at_status", "next_retry_at", "status"),
-        Index("ix_oe_locked_at_status", "locked_at", "status"),
+        Index("idx_oe_status_retry", "status", "next_retry_at"),
+        Index("idx_oe_status_locked", "status", "locked_at"),
     )
 
     id: Mapped[int] = mapped_column(
