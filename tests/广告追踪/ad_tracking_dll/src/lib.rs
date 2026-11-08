@@ -87,8 +87,9 @@ struct State {
     current_kid: Option<u8>,
 }
 
-// 商业发布加固：DLL 卸载时主动清零密钥内存。
-// 注意：客户端 DLL 内的密钥仍然不能视为绝对保密，核心长期密钥应放服务端/KMS。
+// 防御性析构：若 State 被显式销毁则清零；全局 static 不保证在 DLL 卸载时运行析构。
+// 宿主程序必须在卸载动态库前调用 tracking_clear_keys()。
+// 客户端 DLL 内的密钥仍不能视为绝对保密，核心长期密钥应放服务端/KMS。
 impl Drop for State {
     fn drop(&mut self) {
         for key in self.keys.values_mut() {
@@ -647,6 +648,26 @@ pub extern "C" fn tracking_remove_key(kid: c_uchar) -> i32 {
             set_error("KID not found");
             ERR_KEY_NOT_FOUND
         }
+    })
+}
+
+/// 显式清理全部密钥。宿主必须在卸载 DLL 前调用，不能依赖 static 析构。
+#[no_mangle]
+pub extern "C" fn tracking_clear_keys() -> i32 {
+    ffi_guard(|| {
+        let mut state = match STATE.write() {
+            Ok(v) => v,
+            Err(_) => {
+                set_error("state lock poisoned");
+                return ERR_INTERNAL;
+            }
+        };
+        for key in state.keys.values_mut() {
+            secure_zeroize(key);
+        }
+        state.keys.clear();
+        state.current_kid = None;
+        OK
     })
 }
 
