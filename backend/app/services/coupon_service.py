@@ -1348,6 +1348,19 @@ class CouponService:
         return await CouponService.list_milestone_rewards(db, sid, include_disabled=True)
 
     @staticmethod
+    async def _lock_customer_for_milestone(db: AsyncSession, customer_id: int):
+        """顾客级里程碑互斥锁；调用方必须在建立计数快照前获取。"""
+        from app.models import Customer
+
+        return (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
     async def issue_milestones_after_paid(db: AsyncSession, order: Order) -> list[CustomerCoupon]:
         """支付成功后：按本店累计成单数，对已达阈值且未发过的规则自动发券。
 
@@ -1358,6 +1371,11 @@ class CouponService:
         cid = getattr(order, "customer_id", None)
         sid = getattr(order, "store_id", None)
         if not cid or not sid:
+            return []
+        # 同一顾客的支付发券与退款回收必须串行；两条主路径均先锁订单、再锁顾客。
+        # 该锁必须在累计订单数快照建立前取得，避免 REPEATABLE READ 读取等待前的旧快照。
+        customer = await CouponService._lock_customer_for_milestone(db, int(cid))
+        if not customer:
             return []
         count = await CouponService.count_paid_orders_at_store(db, int(cid), int(sid))
         rules = list(
@@ -1447,6 +1465,11 @@ class CouponService:
         if ps != "REFUNDED" and st != "REFUNDED":
             return []
 
+        # 与支付发券共用顾客行锁。此方法由退款 Outbox 在退款事务提交后调用，
+        # 且 Outbox handler 会先锁订单；因此锁序固定为 Order -> Customer。
+        customer = await CouponService._lock_customer_for_milestone(db, int(cid))
+        if not customer:
+            return []
         count = await CouponService.count_paid_orders_at_store(db, int(cid), int(sid))
         prefix = f"MILESTONE:{int(cid)}:{int(sid)}:"
         rows = list(

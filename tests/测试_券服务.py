@@ -248,3 +248,103 @@ async def test_resolve_percent_applies_when_better_than_member():
     )
     assert cid == 11
     assert disc == Decimal("20.00")
+
+
+@pytest.mark.asyncio
+async def test_milestone_customer_mutex_is_a_for_update_lock():
+    customer = SimpleNamespace(id=17)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = customer
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+
+    locked = await CouponService._lock_customer_for_milestone(db, 17)
+
+    assert locked is customer
+    stmt = db.execute.call_args.args[0]
+    assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_milestone_issue_locks_customer_before_count(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        CouponService,
+        "_lock_customer_for_milestone",
+        AsyncMock(side_effect=lambda db, cid: calls.append(("lock", cid)) or SimpleNamespace(id=cid)),
+    )
+    monkeypatch.setattr(
+        CouponService,
+        "count_paid_orders_at_store",
+        AsyncMock(side_effect=lambda db, cid, sid: calls.append(("count", cid, sid)) or 0),
+    )
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+
+    issued = await CouponService.issue_milestones_after_paid(
+        db, SimpleNamespace(id=101, customer_id=17, store_id=3)
+    )
+
+    assert issued == []
+    assert calls == [("lock", 17), ("count", 17, 3)]
+
+
+@pytest.mark.asyncio
+async def test_milestone_reclaim_locks_customer_before_count(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        CouponService,
+        "_lock_customer_for_milestone",
+        AsyncMock(side_effect=lambda db, cid: calls.append(("lock", cid)) or SimpleNamespace(id=cid)),
+    )
+    monkeypatch.setattr(
+        CouponService,
+        "count_paid_orders_at_store",
+        AsyncMock(side_effect=lambda db, cid, sid: calls.append(("count", cid, sid)) or 0),
+    )
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+
+    revoked = await CouponService.reclaim_milestones_after_full_refund(
+        db,
+        SimpleNamespace(
+            id=102, customer_id=17, store_id=3,
+            payment_status="REFUNDED", status="REFUNDED",
+        ),
+        refund_id=9001,
+    )
+
+    assert revoked == []
+    assert calls == [("lock", 17), ("count", 17, 3)]
+
+
+@pytest.mark.asyncio
+async def test_milestone_reclaim_handler_locks_order_before_refund(monkeypatch):
+    from app.services.paid_side_effects import _handle_milestone_reclaim
+
+    order = SimpleNamespace(id=102, customer_id=17)
+    refund = SimpleNamespace(id=9001, order_id=102, status="SUCCESS")
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = order
+    refund_result = MagicMock()
+    refund_result.scalar_one_or_none.return_value = refund
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[order_result, refund_result])
+    row = SimpleNamespace(
+        aggregate_id=9001,
+        payload='{"order_id": 102, "refund_id": 9001}',
+    )
+
+    reclaim = AsyncMock()
+    monkeypatch.setattr(CouponService, "reclaim_milestones_after_full_refund", reclaim)
+    await _handle_milestone_reclaim(db, row)
+
+    assert db.execute.await_count == 2
+    order_stmt, refund_stmt = [call.args[0] for call in db.execute.await_args_list]
+    assert order_stmt._for_update_arg is not None
+    assert refund_stmt._for_update_arg is not None
+    reclaim.assert_awaited_once_with(db, order, refund_id=9001)

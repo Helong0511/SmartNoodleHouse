@@ -1417,3 +1417,55 @@ async def test_resolve_auto_confirm_unknown_outbox_uses_payload_order_not_inbox_
     assert db.execute.await_count == 4
     db.commit.assert_awaited_once()
     audit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_milestone_handler_starts_fresh_transaction_after_idempotency_precheck(monkeypatch):
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker, worker_common
+
+    row = MagicMock(
+        id=9901,
+        aggregate_type="paid_side_effect",
+        aggregate_id=1234,
+        event_kind="milestone_coupon",
+        locked_by="worker:milestone",
+        payload='{"order_id":1234}',
+        sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=db)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: ctx)
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    monkeypatch.setattr(idempotency, "try_acquire", AsyncMock(return_value=True))
+    monkeypatch.setattr(worker_common, "rollback_if_claim_lost", AsyncMock(return_value=False))
+
+    handler = AsyncMock()
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("paid_side_effect", "milestone_coupon"))
+    outbox_worker.OUTBOX_HANDLERS[("paid_side_effect", "milestone_coupon")] = handler
+
+    async def run_handler(_handler, _db, _row, **kwargs):
+        # One commit must end the preflight read snapshot before handler work starts.
+        assert db.commit.await_count == 1
+        await _handler(_db, _row)
+        return True
+
+    monkeypatch.setattr(
+        outbox_worker, "_run_handler_with_lease", AsyncMock(side_effect=run_handler)
+    )
+    try:
+        assert await outbox_worker.process_outbox_item(9901) is True
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("paid_side_effect", "milestone_coupon"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("paid_side_effect", "milestone_coupon")] = old_handler
+
+    handler.assert_awaited_once()
+    assert db.commit.await_count >= 3

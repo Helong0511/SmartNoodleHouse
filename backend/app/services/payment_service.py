@@ -2511,33 +2511,23 @@ class PaymentService:
                                 event_kind="coupon_release",
                                 payload={"order_id": int(order.id)},
                             )
-                    # 全额退：回收因该单计入而超出阈值的未用里程碑券
+                    # 全额退：始终交由提交后的 Outbox worker 回收里程碑券。
+                    # 不能在当前退款事务内同步计算：order_net_collected 已可能建立
+                    # REPEATABLE READ 快照；另一个订单的支付/退款副作用也可能并发。
+                    # Outbox handler 会按 Order -> Customer 锁序串行发券/回收，并在锁后计数。
                     if order.customer_id:
-                        from app.services.coupon_service import CouponService
                         from app.services.outbox_worker import enqueue_outbox
 
-                        try:
-                            async with db.begin_nested():
-                                await CouponService.reclaim_milestones_after_full_refund(
-                                    db, order, refund_id=int(row.id)
-                                )
-                        except Exception:
-                            logger.exception(
-                                "里程碑券回收失败，已入队 outbox order_id=%s refund_no=%s",
-                                order.id,
-                                row.refund_no,
-                            )
-                            # Outbox 必须与退款 SUCCESS 同事务持久化；失败时回滚整个确认事务。
-                            await enqueue_outbox(
-                                db,
-                                aggregate_type="refund",
-                                aggregate_id=int(row.id),
-                                event_kind="milestone_reclaim",
-                                payload={
-                                    "order_id": int(order.id),
-                                    "refund_id": int(row.id),
-                                },
-                            )
+                        await enqueue_outbox(
+                            db,
+                            aggregate_type="refund",
+                            aggregate_id=int(row.id),
+                            event_kind="milestone_reclaim",
+                            payload={
+                                "order_id": int(order.id),
+                                "refund_id": int(row.id),
+                            },
+                        )
                 elif net < total:
                     order.payment_status = "PARTIAL_REFUND"
                 else:

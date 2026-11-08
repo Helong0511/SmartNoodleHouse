@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy import select
@@ -232,15 +233,34 @@ async def _handle_campaign_attribution_reverse(db: AsyncSession, row) -> None:
 
 @register_outbox_handler("refund", "milestone_reclaim")
 async def _handle_milestone_reclaim(db: AsyncSession, row) -> None:
-    """全额退款后回收超档里程碑券。幂等：status_reason=milestone_reclaim。"""
+    """全额退款后回收超档里程碑券。锁序 Order -> PaymentRefund -> Customer。"""
     from app.models import Order, PaymentRefund
     from app.services.coupon_service import CouponService
 
-    refund = await db.get(PaymentRefund, int(row.aggregate_id))
-    if not refund:
-        return
-    order = await db.get(Order, refund.order_id)
+    payload = json.loads(row.payload) if isinstance(row.payload, str) else (row.payload or {})
+    order_id = int((payload or {}).get("order_id") or 0)
+    if order_id <= 0:
+        raise ValueError("milestone_reclaim payload missing order_id")
+
+    # 先锁订单，保持与支付/退款状态机一致的 Order-first 锁顺序。
+    order = (
+        await db.execute(
+            select(Order).where(Order.id == order_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if not order or not order.customer_id:
+        return
+    refund = (
+        await db.execute(
+            select(PaymentRefund)
+            .where(
+                PaymentRefund.id == int(row.aggregate_id),
+                PaymentRefund.order_id == order_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if not refund or str(refund.status or "").upper() != "SUCCESS":
         return
     await CouponService.reclaim_milestones_after_full_refund(
         db, order, refund_id=int(refund.id)
