@@ -57,6 +57,8 @@ jobs:
           python scripts/check_text_encoding.py
       - name: Check duplicate Python imports
         run: python scripts/check_duplicate_imports.py
+      - name: Audit backend dependency references
+        run: python scripts/check_python_dependency_usage.py
       - name: Compile check
         run: |
           python -m compileall backend/app -q
@@ -188,6 +190,8 @@ jobs:
         run: npm ci
       - name: Check duplicate frontend and mini-program imports
         run: node scripts/check_duplicate_imports.mjs
+      - name: Audit frontend dependency references
+        run: node scripts/check_dependency_usage.mjs
       - name: Unit tests
         run: npm test --if-present
       - name: Type check and build
