@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import bcrypt
+import asyncio
 
+import bcrypt
 import pytest
 
 from app.core.security import (
@@ -23,6 +24,37 @@ async def test_async_password_hashing_wrappers_roundtrip_without_blocking_api_lo
     assert encoded.startswith("$argon2id$")
     assert valid is True
     assert upgraded is None
+
+
+@pytest.mark.asyncio
+async def test_argon2_async_wrappers_limit_concurrency_per_event_loop(monkeypatch):
+    from app.core import security
+
+    active = 0
+    max_active = 0
+
+    def fake_hash(password: str) -> str:
+        return password
+
+    async def fake_run_in_threadpool(func, *args):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0.01)
+            return func(*args)
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(security, "hash_password", fake_hash)
+    monkeypatch.setattr(security, "run_in_threadpool", fake_run_in_threadpool)
+
+    results = await asyncio.gather(
+        *(security.hash_password_async(f"password-{index}") for index in range(8))
+    )
+
+    assert len(results) == 8
+    assert max_active <= 2
 
 
 def test_new_password_hashes_use_argon2id():
