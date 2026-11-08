@@ -77,7 +77,7 @@ def test_database_and_every_canonical_table_use_utf8mb4_unicode_ci():
     table_statements = [
         statement
         for statement in statements
-        if re.search(r"^CREATE TABLE IF NOT EXISTS", statement, re.IGNORECASE)
+        if re.search(r"CREATE TABLE IF NOT EXISTS", statement, re.IGNORECASE)
     ]
     assert table_statements, "canonical schema contains no CREATE TABLE statements"
 
