@@ -55,7 +55,8 @@ def test_outbox_polling_interval_matches_scheduler_catalog() -> None:
         and isinstance(decorator.func, ast.Attribute)
         and decorator.func.attr == "scheduled_job"
     )
-    assert scheduled_job.args[0] == ast.Constant("interval")
+    assert isinstance(scheduled_job.args[0], ast.Constant)
+    assert scheduled_job.args[0].value == "interval"
     seconds = next(keyword.value for keyword in scheduled_job.keywords if keyword.arg == "seconds")
     assert isinstance(seconds, ast.Constant)
     assert seconds.value == schedule["every"].value
