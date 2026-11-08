@@ -1,2 +1,2 @@
-# Rust DLL Python FFI 测试依赖（与主后端测试环境分离）。
-pytest==9.2.0
+# Rust DLL 的 Python FFI 测试复用仓库统一 pytest 版本，避免重复声明。
+-r ../../../requirements-core.txt
