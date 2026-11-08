@@ -30,6 +30,7 @@ async def test_real_redis_menu_cache_lock_fencing_and_version_invalidation(monke
         menu_cache.menu_rebuild_lock_key(store_id),
         menu_cache.menu_bundle_key(store_id),
         menu_cache.menu_version_key(store_id),
+        menu_cache.menu_schedule_key(store_id),
     )
 
     async def get_live_redis():
@@ -73,6 +74,15 @@ async def test_real_redis_menu_cache_lock_fencing_and_version_invalidation(monke
         assert await redis_client.get(keys[2]) == "2"
         assert await redis_client.get(keys[1]) is None
         assert await menu_cache.get_menu_bundle(store_id) is None
+
+        # 时段 marker 必须独立于短 TTL bundle；首次写入/时段切换都推进 generation。
+        assert await menu_cache.sync_menu_schedule_generation(store_id, 11) == 3
+        assert await redis_client.get(keys[3]) == "11"
+        assert await menu_cache.sync_menu_schedule_generation(store_id, 11) == 3
+        assert await menu_cache.sync_menu_schedule_generation(store_id, 12) == 4
+        assert await redis_client.get(keys[2]) == "4"
+        assert await redis_client.get(keys[3]) == "12"
+        assert await redis_client.get(keys[1]) is None
     finally:
         await redis_client.delete(*keys)
         await redis_client.aclose()
