@@ -1,3 +1,7 @@
+> **文档维护说明（2026-11-08）**：systemd 应启动宿主 API 服务，由 API 进程加载 Rust 动态库；不能直接执行 .so。运行用户、文件权限、库搜索路径、ABI、架构和重启策略均需在目标发行版现场验证。 具体发布事实以当前 Cargo manifest/lock、CI、构建产物和签名校验为准；本机 Windows 结果不代表 Linux/macOS 结果。不得记录真实密钥或生产 token。
+>
+> ---
+>
 # Linux systemd 部署说明
 
 ## 1. 重要概念
