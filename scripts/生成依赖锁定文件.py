@@ -117,7 +117,7 @@ def build_lock_text(
 
     # 将当前环境中实际解析安装的传递依赖一并固定，避免 pip 下次安装时漂移。
     # pip/setuptools/wheel 属于安装工具链，不作为应用运行时依赖锁定。
-    bootstrap_tools = {"pip", "setuptools", "wheel"}
+    bootstrap_tools = {"pip", "setuptools", "wheel", "packaging"}
     for name, pin in frozen.items():
         if name not in direct_names and name not in bootstrap_tools:
             output[name] = f"{name}=={pin}"
