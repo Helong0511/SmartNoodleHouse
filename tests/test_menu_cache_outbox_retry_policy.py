@@ -168,7 +168,6 @@ async def test_reco_invalidation_outbox_handler_raises_when_redis_is_unavailable
     monkeypatch.setattr(reco_cache, "get_redis", redis_unavailable)
 
     key = ("reco_cache", "invalidate")
-    previous = reco_cache.OUTBOX_HANDLERS.get(key) if hasattr(reco_cache, "OUTBOX_HANDLERS") else None
     from app.services.outbox_worker import OUTBOX_HANDLERS, _resolve_outbox_handler
 
     previous = OUTBOX_HANDLERS.get(key)
