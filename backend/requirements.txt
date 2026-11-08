@@ -1,7 +1,7 @@
 fastapi>=0.162.0,<0.163.0
 # CVE-2025-62727 / CVE-2026-54283 等 Starlette 旧版本漏洞；锁定安全下限
-starlette>=1.6.0,<2.0
-uvicorn[standard]>=0.27.0,<1.0
+starlette>=1.10.0,<2.0
+uvicorn[standard]>=0.54.0,<1.0
 # CVE-2024-1135（请求走私）修复于 23.0.0
 gunicorn>=26.2.0,<27
 sqlalchemy[asyncio]>=2.1.8,<3.0
@@ -15,14 +15,14 @@ passlib[bcrypt]>=1.7.4,<2.0
 # bcrypt>=4.1 移除 __about__，passlib 1.7.4 会 WARNING；钉 4.0.x 兼容（哈希格式不变）
 bcrypt>=4.0.1,<4.1
 # redis-py 8.x held for explicit protocol/retry compatibility review; pin remains on the 5.x line until retry/protocol behavior is tested
-redis>=5.0.0,<6.0
+redis>=5.3.1,<6.0
 httpx>=0.28.1,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
 python-multipart>=0.0.33,<1.0
 aiofiles>=23.2.1,<25
 apscheduler>=3.11.3,<4.0
 websockets>=12.0,<14
-opencv-python-headless>=4.14.0.94,<5.0
+opencv-python-headless>=5.0.0.93,<6.0
 numpy>=1.26.0,<3.0
 # Pillow 13.0.0（2026-10-16）修复多项 JPEG/TIFF/OpenJPEG/PDF 等关键图像解析漏洞；生产 Python 3.11+
 cryptography>=50.0.2,<51
