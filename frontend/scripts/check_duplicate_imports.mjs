@@ -9,7 +9,7 @@ import process from "node:process";
 import ts from "typescript";
 
 const REPO_ROOT = path.resolve(process.cwd(), "..");
-const SCAN_ROOTS = ["src", "miniprogram-wechat", "miniprogram-alipay"];
+const SCAN_ROOTS = ["frontend", "miniprogram-wechat", "miniprogram-alipay"];
 const EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue"]);
 const failures = [];
 let scanned = 0;
@@ -18,7 +18,7 @@ function collectFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   const found = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "miniprogram_npm") continue;
+    if (["node_modules", "dist", "miniprogram_npm", ".git", ".cache", "coverage", "build", "out"].includes(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) found.push(...collectFiles(full));
     else if (EXTENSIONS.has(path.extname(entry.name))) found.push(full);
@@ -40,7 +40,7 @@ function scriptBlocks(source, file) {
 }
 
 for (const rootName of SCAN_ROOTS) {
-  const root = rootName === "src" ? path.join(process.cwd(), "src") : path.join(REPO_ROOT, rootName);
+  const root = rootName === "frontend" ? process.cwd() : path.join(REPO_ROOT, rootName);
   for (const file of collectFiles(root)) {
     scanned += 1;
     let source;
@@ -77,7 +77,7 @@ for (const rootName of SCAN_ROOTS) {
           && ts.isStringLiteral(node.arguments[0])
           && ((node.expression.kind === ts.SyntaxKind.Identifier && node.expression.text === "require")
             || node.expression.kind === ts.SyntaxKind.ImportKeyword)) {
-          specifier = "dynamic:" + node.arguments[0].text;
+          specifier = node.arguments[0].text;
         }
         if (specifier !== null) {
           const key = scopeStack.join("/") + "/" + (typeOnly ? "type" : "value") + ":" + specifier;
