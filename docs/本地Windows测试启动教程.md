@@ -1,3 +1,7 @@
+> **文档维护说明（2026-11-08）**：本教程仅用于 Windows 本地开发，不等同于 Ubuntu 生产部署。SQLite/内存测试仅用于适合的单元测试，不能代替 MySQL 8.x migration/索引/锁/字符集集成测试；Redis 功能需启动真实 Redis 7.x 才能完成对应验证。命令按当前 lockfile 和 CI 版本执行。 当前实现以 main 代码、CI、数据库迁移和 README 为准。专题设计不等于已生产验收；未验证项标记待验证。禁止记录有效密钥、密码或访问 token。
+>
+> ---
+>
 # 本地（Windows）测试启动教程
 
 > **场景：本地调试**（Windows 10/11 + PowerShell）。  
