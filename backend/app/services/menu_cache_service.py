@@ -1,7 +1,6 @@
-"""Transactional menu generation updates and cache invalidation Outbox events.
+"""菜单缓存代际与失效 Outbox。
 
-MySQL owns the durable generation. Redis versions are only mirrors and can be
-reconstructed after failover or a complete Redis data loss.
+MySQL 保存唯一可信的持久代际；Redis 版本只是可重建镜像，主从切换或全量丢失后可恢复。
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ async def _read_generation(db: AsyncSession, store_id: int) -> int:
 
 
 async def advance_store_menu_generation(db: AsyncSession, store_id: int) -> int:
-    """Increment generation in the caller's business transaction."""
+    """在调用方业务事务内递增门店菜单代际。"""
     sid = int(store_id)
     result = await db.execute(
         update(Store)
@@ -38,7 +37,7 @@ async def advance_store_menu_generation(db: AsyncSession, store_id: int) -> int:
 async def sync_store_menu_schedule_generation(
     db: AsyncSession, store_id: int, active_schedule_id: int | None
 ) -> int:
-    """Atomically advance generation exactly once when the active schedule changes."""
+    """仅在当前生效的时段方案发生变化时，原子递增一次菜单代际。"""
     sid = int(store_id)
     schedule_token = int(active_schedule_id) if active_schedule_id is not None else -1
     await db.execute(
@@ -60,7 +59,7 @@ async def sync_store_menu_schedule_generation(
 
 
 async def enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None) -> None:
-    """Advance durable generation and enqueue invalidation in the same DB transaction."""
+    """在同一个数据库事务内递增持久代际并写入缓存失效 Outbox。"""
     if not store_id:
         return
     sid = int(store_id)
@@ -75,3 +74,13 @@ async def enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None
         payload={"store_id": sid, "generation": generation},
         max_attempts=CACHE_INVALIDATION_MAX_ATTEMPTS,
     )
+
+async def invalidate_store_menu_cache(db: AsyncSession, store_id: int | None) -> None:
+    """立即清理当前进程缓存，并在业务事务中持久化菜单代际与失效事件。"""
+    if not store_id:
+        return
+    sid = int(store_id)
+    from app.services.recommendation_service import invalidate_store_local_caches
+
+    invalidate_store_local_caches(sid)
+    await enqueue_menu_cache_invalidation(db, sid)
