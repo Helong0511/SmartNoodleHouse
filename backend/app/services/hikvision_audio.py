@@ -10,16 +10,18 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
 import os
 import re
 import socket
 import struct
+from threading import Lock
 import time
 import warnings
 import wave
 from io import BytesIO
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse, urlsplit
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 # G.711 推流：8kHz 单声道 = 8000 字节/秒
 _G711_RATE = 8000
+_MAX_G711_DURATION_SECONDS = 120
+_MAX_G711_PAYLOAD_BYTES = _G711_RATE * _MAX_G711_DURATION_SECONDS
 _CHUNK_BYTES = 640  # 80ms/块，减少 syscall；短句可更快出声
 _CHUNK_SLEEP = _CHUNK_BYTES / _G711_RATE
 # 国内海康门口机多数为 alaw；探测未命中时先用此值，避免堵死首播
@@ -89,6 +93,8 @@ _CODEC_DETECT_PENDING: set[str] = set()
 _SESSION_NEED_CLOSE: dict[str, bool] = {}
 # audioData Digest 挑战缓存（同机短时复用，少一次 401 往返）
 _DIGEST_WWW_CACHE: HotCache[str, str] = HotCache("hikvision.digest_www", max_size=32, ttl_seconds=120.0)
+_DIGEST_NONCE_CACHE: HotCache[str, int] = HotCache("hikvision.digest_nonce", max_size=32, ttl_seconds=120.0)
+_DIGEST_NONCE_LOCK = Lock()
 
 
 def _device_lock_key(base_url: str, channel: int) -> str:
@@ -142,7 +148,30 @@ async def invalidate_hikvision_caches(*, base_url: str, channel: int | None = No
         _SPEAKER_VOL_CACHE.delete(ck)
         _CODEC_DETECT_PENDING.discard(str(ck))
         _SESSION_NEED_CLOSE.pop(str(ck), None)
-        _DIGEST_WWW_CACHE.delete(str(ck))
+
+    # Digest challenge/nonce 缓存按 host:port 前缀清理；密码变更后不复用旧 nonce 计数。
+    try:
+        parsed_base = urlparse(base)
+        digest_host = parsed_base.hostname or ""
+        digest_port = parsed_base.port or (443 if parsed_base.scheme.lower() == "https" else 80)
+        digest_prefix = f"{digest_host}:{digest_port}|"
+        with _DIGEST_WWW_CACHE._lock:
+            digest_keys = [
+                key for key in list(_DIGEST_WWW_CACHE._data.keys())
+                if str(key).startswith(digest_prefix)
+            ]
+        for key in digest_keys:
+            _DIGEST_WWW_CACHE.delete(key)
+        with _DIGEST_NONCE_LOCK:
+            with _DIGEST_NONCE_CACHE._lock:
+                nonce_keys = [
+                    key for key in list(_DIGEST_NONCE_CACHE._data.keys())
+                    if str(key).startswith(digest_prefix)
+                ]
+            for key in nonce_keys:
+                _DIGEST_NONCE_CACHE.delete(key)
+    except Exception:
+        logger.debug("clear hikvision digest caches failed", exc_info=True)
 
     try:
         from app.core.cache_keys import hikvision_codec_key
@@ -331,7 +360,11 @@ async def try_sync_camera_osd_name(
     display_name: str,
 ) -> dict:
     """最佳努力：USB/无 ISAPI 基址时跳过；失败只记日志不抛给前端。"""
-    base = resolve_isapi_base(source_url)
+    try:
+        base = resolve_isapi_base(source_url)
+    except Exception as exc:
+        logger.warning("跳过不安全的海康 OSD 目标 err=%s", str(exc)[:120])
+        return {"ok": False, "reason": "unsafe_source"}
     if not base:
         return {"ok": False, "reason": "not_isapi"}
     try:
@@ -615,6 +648,26 @@ def _md5_hex(s: str) -> str:
     return hashlib.md5(s.encode("utf-8")).hexdigest()
 
 
+def _digest_header_value(value: str, *, field: str, max_length: int = 512) -> str:
+    """校验并转义 Digest quoted-string，阻断 CR/LF 与头部注入。"""
+    raw = str(value or "")
+    if len(raw) > max_length or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in raw):
+        raise ValueError(f"invalid Digest {field}")
+    return raw.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _next_digest_nonce_count(digest_key: str, nonce: str) -> int:
+    """同一设备/凭证/nonce 的 nc 单调递增，避免复用缓存挑战时重复 nc=00000001。"""
+    key = f"{digest_key}|{nonce}"
+    with _DIGEST_NONCE_LOCK:
+        current = _DIGEST_NONCE_CACHE.get(key)
+        next_count = int(current or 0) + 1
+        if next_count > 0xFFFFFFFF:
+            next_count = 1
+        _DIGEST_NONCE_CACHE.put(key, next_count)
+        return next_count
+
+
 def _build_digest_authorization(
     www_authenticate: str,
     *,
@@ -622,38 +675,79 @@ def _build_digest_authorization(
     uri: str,
     username: str,
     password: str,
+    nonce_count: int = 1,
 ) -> str:
-    """构造 HTTP Digest Authorization（兼容 Hikvision qop=auth）。"""
-    realm_m = re.search(r'realm="([^"]+)"', www_authenticate, re.I)
-    nonce_m = re.search(r'nonce="([^"]+)"', www_authenticate, re.I)
-    qop_m = re.search(r"qop=\"([^\"]+)\"", www_authenticate, re.I)
-    opaque_m = re.search(r'opaque="([^"]+)"', www_authenticate, re.I)
+    """构造 HTTP Digest Authorization；支持 MD5/MD5-sess 与 qop=auth。"""
+    realm_m = re.search(r'realm="([^"]*)"', www_authenticate, re.I)
+    nonce_m = re.search(r'nonce="([^"]*)"', www_authenticate, re.I)
+    qop_m = re.search(r'qop="([^"]*)"', www_authenticate, re.I)
+    opaque_m = re.search(r'opaque="([^"]*)"', www_authenticate, re.I)
+    algorithm_m = re.search(r"algorithm=([A-Za-z0-9_-]+)", www_authenticate, re.I)
     realm = realm_m.group(1) if realm_m else ""
     nonce = nonce_m.group(1) if nonce_m else ""
-    ha1 = _md5_hex(f"{username}:{realm}:{password}")
-    ha2 = _md5_hex(f"{method}:{uri}")
-    if qop_m and "auth" in qop_m.group(1).lower():
-        cnonce = hashlib.md5(os.urandom(8)).hexdigest()
-        nc = "00000001"
-        resp = _md5_hex(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}")
-        parts = [
-            f'username="{username}"',
-            f'realm="{realm}"',
-            f'nonce="{nonce}"',
-            f'uri="{uri}"',
-            f'response="{resp}"',
-            "qop=auth",
-            f"nc={nc}",
-            f'cnonce="{cnonce}"',
-        ]
-        if opaque_m:
-            parts.append(f'opaque="{opaque_m.group(1)}"')
-        return "Digest " + ", ".join(parts)
-    resp = _md5_hex(f"{ha1}:{nonce}:{ha2}")
-    return (
-        f'Digest username="{username}", realm="{realm}", nonce="{nonce}", '
-        f'uri="{uri}", response="{resp}"'
+    if not realm or not nonce:
+        raise ValueError("Digest challenge missing realm/nonce")
+
+    algorithm = (algorithm_m.group(1) if algorithm_m else "MD5").upper()
+    if algorithm not in ("MD5", "MD5-SESS"):
+        raise ValueError(f"unsupported Digest algorithm: {algorithm}")
+    method = str(method or "").upper()
+    if not re.fullmatch(r"[A-Z]{1,16}", method):
+        raise ValueError("invalid Digest method")
+    if not uri.startswith("/") or any(ch in uri for ch in "\r\n "):
+        raise ValueError("invalid Digest URI")
+
+    qop_tokens = (
+        [item.strip().lower() for item in qop_m.group(1).split(",") if item.strip()]
+        if qop_m
+        else []
     )
+    if qop_tokens and "auth" not in qop_tokens:
+        raise ValueError("unsupported Digest qop")
+
+    safe_username = _digest_header_value(username, field="username", max_length=256)
+    safe_realm = _digest_header_value(realm, field="realm")
+    safe_nonce = _digest_header_value(nonce, field="nonce")
+    safe_uri = _digest_header_value(uri, field="uri", max_length=2048)
+    safe_opaque = (
+        _digest_header_value(opaque_m.group(1), field="opaque")
+        if opaque_m
+        else None
+    )
+
+    cnonce = hashlib.md5(os.urandom(16)).hexdigest()
+    ha1 = _md5_hex(f"{username}:{realm}:{password}")
+    if algorithm == "MD5-SESS":
+        ha1 = _md5_hex(f"{ha1}:{nonce}:{cnonce}")
+    ha2 = _md5_hex(f"{method}:{uri}")
+
+    parts = [
+        f'username="{safe_username}"',
+        f'realm="{safe_realm}"',
+        f'nonce="{safe_nonce}"',
+        f'uri="{safe_uri}"',
+    ]
+    if qop_tokens:
+        nc = f"{max(1, min(int(nonce_count), 0xFFFFFFFF)):08x}"
+        response = _md5_hex(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}")
+        parts.extend(
+            [
+                f'response="{response}"',
+                "qop=auth",
+                f"nc={nc}",
+                f'cnonce="{cnonce}"',
+            ]
+        )
+    else:
+        response = _md5_hex(f"{ha1}:{nonce}:{ha2}")
+        parts.append(f'response="{response}"')
+        if algorithm == "MD5-SESS":
+            parts.append(f'cnonce="{cnonce}"')
+    if algorithm_m:
+        parts.append(f"algorithm={algorithm}")
+    if safe_opaque is not None:
+        parts.append(f'opaque="{safe_opaque}"')
+    return "Digest " + ", ".join(parts)
 
 
 def _read_http_response(sock: socket.socket) -> tuple[int, dict[str, str], bytes]:
@@ -697,12 +791,31 @@ def _stream_audio_data_content_length_zero(
     返回 first_chunk_ms / send_ms 供上层日志。
     should_abort：可选无参回调，返回 True 时中断推流（会员打断陌生迎宾）。
     """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise ValueError("audioData raw TCP host must be a pinned IP literal") from exc
+    if not (1 <= int(port) <= 65535):
+        raise ValueError("invalid audioData TCP port")
+    if (
+        not isinstance(path, str)
+        or not path.startswith("/ISAPI/System/TwoWayAudio/channels/")
+        or any(ord(ch) < 0x21 or ord(ch) == 0x7F for ch in path)
+    ):
+        raise ValueError("invalid audioData request path")
+    if len(g711_data) > _MAX_G711_PAYLOAD_BYTES:
+        raise ValueError("audioData payload exceeds 120-second safety limit")
+
+    digest_key = f"{host}:{port}|{path}|{username}|{_auth_fingerprint(username, password)}"
+
     def _one_shot(auth_header: str | None) -> tuple[socket.socket, int, dict[str, str]]:
         sock = socket.create_connection((host, port), timeout=5.0)
         sock.settimeout(5.0)
+        host_literal = f"[{host}]" if ":" in host else host
+        host_header = host_literal if port in (80, 443) else f"{host_literal}:{port}"
         lines = [
             f"PUT {path} HTTP/1.1",
-            f"Host: {host if port in (80, 443) else f'{host}:{port}'}",
+            f"Host: {host_header}",
             "Content-Type: application/octet-stream",
             "Content-Length: 0",
             "Connection: keep-alive",
@@ -728,15 +841,24 @@ def _stream_audio_data_content_length_zero(
     chunk_sleep = _CHUNK_SLEEP * pace
     # 最多 2 块（约 160ms）零休眠；3 块短句仍易被固件截成一声
     burst_bytes = min(len(g711_data), _CHUNK_BYTES * 2)
-    digest_key = f"{host}:{port}|{path}|{username}"
-
-    # 1) Digest：优先用缓存的 WWW-Authenticate，省掉首包 401
+    # 1) Digest：优先用缓存的 WWW-Authenticate，省掉首包 401；nonce-count 每次递增。
     www_cached = _DIGEST_WWW_CACHE.get(digest_key)
     auth_header = None
     if www_cached:
-        auth_header = _build_digest_authorization(
-            www_cached, method="PUT", uri=path, username=username, password=password
-        )
+        nonce_match = re.search(r'nonce="([^"]*)"', www_cached, re.I)
+        if not nonce_match:
+            _DIGEST_WWW_CACHE.delete(digest_key)
+            www_cached = None
+        else:
+            nonce_count = _next_digest_nonce_count(digest_key, nonce_match.group(1))
+            auth_header = _build_digest_authorization(
+                www_cached,
+                method="PUT",
+                uri=path,
+                username=username,
+                password=password,
+                nonce_count=nonce_count,
+            )
     sock, status, hdrs = _one_shot(auth_header)
     first_chunk_ms = -1
     aborted = False
@@ -745,8 +867,17 @@ def _stream_audio_data_content_length_zero(
             www = hdrs.get("www-authenticate") or ""
             if www:
                 _DIGEST_WWW_CACHE.put(digest_key, www)
+            nonce_match = re.search(r'nonce="([^"]*)"', www, re.I)
+            if not nonce_match:
+                raise RuntimeError("audioData Digest challenge 缺少 nonce")
+            nonce_count = _next_digest_nonce_count(digest_key, nonce_match.group(1))
             auth = _build_digest_authorization(
-                www, method="PUT", uri=path, username=username, password=password
+                www,
+                method="PUT",
+                uri=path,
+                username=username,
+                password=password,
+                nonce_count=nonce_count,
             )
             sock.close()
             sock, status, hdrs = _one_shot(auth)
@@ -810,11 +941,36 @@ class HikvisionTwoWayAudio:
         channel: int = 1,
         timeout: float = 30.0,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.username = username
-        self.password = password
+        raw_base = (base_url or "").strip().rstrip("/")
+        parts = urlsplit(raw_base)
+        if (
+            parts.scheme.lower() not in ("http", "https")
+            or not parts.hostname
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path not in ("", "/")
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError("invalid Hikvision ISAPI base URL")
+        try:
+            if parts.port is not None and not (1 <= parts.port <= 65535):
+                raise ValueError("invalid Hikvision ISAPI port")
+        except ValueError as exc:
+            raise ValueError("invalid Hikvision ISAPI port") from exc
+        from app.services.camera_credentials import pin_camera_url_for_connect
+
+        pinned = pin_camera_url_for_connect(raw_base)
+        pinned_parts = urlsplit(pinned)
+        if pinned_parts.scheme.lower() not in ("http", "https") or not pinned_parts.hostname:
+            raise ValueError("unsafe Hikvision ISAPI destination")
+        self.base_url = f"{pinned_parts.scheme.lower()}://{pinned_parts.netloc}"
+        self.username = (username or "admin").strip() or "admin"
+        self.password = password or ""
         self.channel = int(channel)
-        self.timeout = timeout
+        if not 1 <= self.channel <= 256:
+            raise ValueError("Hikvision channel must be between 1 and 256")
+        self.timeout = max(5.0, min(120.0, float(timeout)))
 
     async def _lock_for(self) -> asyncio.Lock:
         key = _device_lock_key(self.base_url, self.channel)
@@ -1023,6 +1179,13 @@ class HikvisionTwoWayAudio:
                 "error": "empty_payload",
                 "device_playback": "unverified",
             }
+        if len(g711_data) > _MAX_G711_PAYLOAD_BYTES:
+            return {
+                "status": "failed",
+                "error": "payload_too_large",
+                "device_playback": "unverified",
+                "detail": "maximum audio duration is 120 seconds",
+            }
         codec = normalize_g711_codec(codec)
         timeout = httpx.Timeout(
             max(float(self.timeout), len(g711_data) / float(_G711_RATE) + 20.0),
@@ -1116,7 +1279,7 @@ class HikvisionTwoWayAudio:
             session_id = _parse_session_id(open_resp.text) or ""
             path = f"/ISAPI/System/TwoWayAudio/channels/{self.channel}/audioData"
             if session_id:
-                path = f"{path}?sessionId={session_id}"
+                path = f"{path}?sessionId={quote(session_id, safe='')}"
 
             t0 = time.perf_counter()
             # 语音时长按「有效语音」算；会员长句尾部再垫静音，close 落在静音段
