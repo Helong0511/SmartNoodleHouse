@@ -753,7 +753,7 @@ class CameraSpeakerTTS(TTSProvider):
             logger.info("摄像头无网络地址，跳过对讲播报 id=%s", camera_id)
             return "failed"
 
-        base = resolve_isapi_base(source_url)
+        base = await asyncio.to_thread(resolve_isapi_base, source_url)
         if not base:
             logger.warning("无法解析摄像头 ISAPI 地址 id=%s url=%s", camera_id, source_url)
             return "failed"
@@ -811,7 +811,9 @@ class CameraSpeakerTTS(TTSProvider):
                 return None
             return task.result()
 
-        client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
+        client = await asyncio.to_thread(
+            HikvisionTwoWayAudio, base, user, password, timeout=30.0
+        )
         loop = asyncio.get_running_loop()
         t0 = time.perf_counter()
 
