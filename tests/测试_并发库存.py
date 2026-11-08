@@ -250,7 +250,11 @@ async def test_store_stock_delete_locks_product_before_store_override(monkeypatc
 
         async def execute(self, statement):
             self.statements.append(str(statement).lower())
-            return Result(product if len(self.statements) == 1 else row)
+            if len(self.statements) == 1:
+                return Result(product)
+            if len(self.statements) == 2:
+                return Result(None)
+            return Result(row)
 
         async def delete(self, obj):
             return None
@@ -270,9 +274,10 @@ async def test_store_stock_delete_locks_product_before_store_override(monkeypatc
         101, request=None, db=db, user=SimpleNamespace(), store_id=7,
     )
 
-    assert len(db.statements) == 2
+    assert len(db.statements) == 3
     assert "from products" in db.statements[0] and "for update" in db.statements[0]
-    assert "store_product_stocks" in db.statements[1] and "for update" in db.statements[1]
+    assert "order_items" in db.statements[1] and "join orders" in db.statements[1]
+    assert "store_product_stocks" in db.statements[2] and "for update" in db.statements[2]
 
 @pytest.mark.asyncio
 async def test_product_base_stock_update_locks_product_and_enqueues_delivery_mirror(monkeypatch):
