@@ -1,6 +1,6 @@
 # Cwm9 部署与运维审计报告
 
-> 审计日期：2026-11-06（本次部署与备份恢复条目复核）
+> 历史专项审计日期：2026-11-06；全量审查补充：2026-11-08\n> 当前基线：main @ 442beb4761b29f5b415830e91e06c97241f74ef3。
 > 审计范围：进程模型、Leader 选举、定时任务、反向代理、systemd、健康探针、日志、备份恢复、监控指标、发布回滚
 > 审计方式：部署脚本与运维文档逐项复核；CI 结果以对应提交的 GitHub Actions 检查为准，不沿用历史测试计数
 
@@ -304,3 +304,4 @@
 ## 15. 结论
 
 进程模型（Leader 锁 + worker 角色）、调度互斥、Outbox/收件箱回收、健康探针、非 root systemd、nginx TLS/WS/限流等部署控制点在代码与模板中落实，并由相应可靠性测试覆盖。代码层面的发布控制已通过 CI；但“已合并 main”不等于“已完成生产上线”。生产启用前仍须完成 BLK-001 沙箱真实联调、BLK-002 历史密钥轮换、BLK-003 生产 schema 对比、BLK-004 监控告警接入、BLK-005 小程序提审，以及真实备份恢复演练和容量压测。以上依赖平台账号、生产环境或运维操作，不能由仓库 CI 代替；任一资金/支付/回调链路未完成沙箱验证时，不得开放真实交易。
+\n\n---\n\n## 2026-11-08 全量审查新增部署阻断\n\n### D-01 生产数据库初始化命令风险（P0）\nREADME 旧生产步骤曾调用包含 DROP DATABASE 的 struct.sql 和含 TRUNCATE 的 data_sys.sql。任何已有数据的生产库不得执行。README/部署说明已在文档修订分支中区分“全新空库初始化”与“已有库 Alembic 升级”；仍需为脚本本身加入生产保护、目标库确认和自动化测试。\n\n### D-02 APP_ENV 与 lifespan 安全门禁（P0）\n生产校验不能只依赖 lifespan。应用工厂阶段应校验；未知环境值 fail-closed；关键 mock/验签旁路单独禁止生产调用。ASGI --lifespan off 也必须有测试覆盖。\n\n### D-03 httpx URL 日志泄露（P0）\nhttpx INFO 日志曾记录包含微信 AppSecret 的完整 URL query。需轮换历史泄露凭据，降低第三方客户端日志级别，统一脱敏 URL/query/header，并扫描轮转日志、备份和运维工单。\n\n### D-04 release 小程序配置（P0）\n两端 release API 地址不能是占位符；环境检测失败不得回退 HTTP 内网地址；顶层配置校验不能导致 App 白屏。必须执行正式版真机检查。\n\n### D-05 测试与运维边界\n本机 compileall 通过，但本机 pytest 因环境缺 pytest/argon2 未完成收集；不能写成全量通过。PR #113 的 12/12 CI 是历史合并检查结果，仍需当前 commit Actions 复核。生产 MySQL 迁移、Redis 故障注入、备份恢复、支付/外卖沙箱、告警通知仍需预生产/运维实际执行。\n\n本报告不关闭上述问题。逐条状态见 [REPAIR_TRACKER.md](REPAIR_TRACKER.md) 和 [FULL_CODE_REVIEW_2026-11-08.md](FULL_CODE_REVIEW_2026-11-08.md)。\n
