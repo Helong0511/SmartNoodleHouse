@@ -37,6 +37,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          npm install-scripts ls
           npm ls vue element-plus vite axios --depth=0
           npm view vue version
           npm view element-plus version
