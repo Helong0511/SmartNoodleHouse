@@ -9,7 +9,7 @@ from app.core.exceptions import AppException
 from app.core.cache_keys import reco_key, reco_rebuild_lock_key
 from app.services.reco_cache import release_reco_lock, set_cached_reco_if_owner, try_acquire_reco_lock
 from app.models import CustomerTasteProfile
-from app.services.recommendation_service import invalidate_store_caches
+from app.services.recommendation_service import invalidate_store_local_caches
 from app.services.taste_learning_service import TasteLearningService
 from reco_factories import (
     make_category,
@@ -212,7 +212,7 @@ async def test_logged_in_hot_customer_personalized(db_session, fake_redis):
     cust = await make_customer(db)
     await _profile(db, cust.id, "CATEGORY", str(cat.id), 0.9, 4, target_name="招牌面")
     await _profile(db, cust.id, "PRODUCT", "700001", 0.8, 3)
-    await invalidate_store_caches(store.id)
+    invalidate_store_local_caches(store.id)
 
     data = await _call(db, store, customer=cust)
     assert data["state"] == "HOT"
