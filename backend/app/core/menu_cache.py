@@ -95,6 +95,23 @@ async def bump_menu_version(store_id: int) -> int:
         await delete_with_retry(r, menu_bundle_key(store_id))
         return version
     except Exception:
+        # noeviction 模式下，Redis 达到 maxmemory 会拒绝 INCR 等写命令，
+        # 但 DEL 仍可执行。即使版本递增失败，也必须尽力删除旧 bundle，
+        # 否则旧版本戳 + 旧 bundle 会继续匹配，导致菜单变更被缓存遮蔽。
+        logger.warning(
+            "菜单版本递增失败，尝试仅删除聚合缓存 store=%s",
+            store_id,
+            exc_info=True,
+        )
+        try:
+            r = await get_redis()
+            await delete_with_retry(r, menu_bundle_key(store_id))
+        except Exception:
+            logger.warning(
+                "Redis 不可用，菜单聚合缓存无法主动删除 store=%s",
+                store_id,
+                exc_info=True,
+            )
         return 0
 
 
