@@ -22,15 +22,16 @@ async def test_redis_client_keeps_resp2_and_fail_fast_pool_policy(monkeypatch):
     )
 
     client = await redis_client.get_redis()
-    pool = client.connection_pool
+    try:
+        pool = client.connection_pool
 
-    assert pool.max_connections == 17
-    assert pool.timeout == pytest.approx(0.75)
-    assert pool.connection_kwargs["socket_connect_timeout"] == pytest.approx(2.0)
-    assert pool.connection_kwargs["socket_timeout"] == pytest.approx(3.0)
-    assert pool.connection_kwargs["protocol"] == 2
-    assert pool.connection_kwargs["retry"].get_retries() == 0
-    assert client.connection_pool.connection_kwargs["retry"].get_retries() == 0
-    assert client.connection_pool.connection_kwargs["health_check_interval"] == 30
-
-    await redis_client.close_redis()
+        assert pool.max_connections == 17
+        assert pool.timeout == pytest.approx(0.75)
+        assert pool.connection_kwargs["socket_connect_timeout"] == pytest.approx(2.0)
+        assert pool.connection_kwargs["socket_timeout"] == pytest.approx(3.0)
+        assert pool.connection_kwargs["protocol"] == 2
+        assert pool.connection_kwargs["retry"].get_retries() == 0
+        assert client.connection_pool.connection_kwargs["health_check_interval"] == 30
+        assert client.legacy_responses is True
+    finally:
+        await redis_client.close_redis()
