@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+# 统一使用 PyJWT；摄像头票据、员工登录和顾客令牌共用同一套校验异常与算法配置。
+# 不要再混入 python-jose，避免两套 JWT 实现造成算法、声明和错误处理差异。
 import jwt
 from jwt import InvalidTokenError as JWTError
 from passlib.context import CryptContext

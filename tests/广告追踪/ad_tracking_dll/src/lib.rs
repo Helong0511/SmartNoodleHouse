@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use once_cell::sync::Lazy;
-use rand::RngCore;
+use rand::{rngs::SysRng, TryRng};
 use serde_json::{Map, Value};
 use std::{
     cell::RefCell,
@@ -40,7 +40,9 @@ const AAD_PREFIX: &[u8] = b"ad-tracking-engine:v1";
 #[inline(never)]
 fn secure_zeroize(bytes: &mut [u8]) {
     for byte in bytes {
-        unsafe { std::ptr::write_volatile(byte, 0); }
+        unsafe {
+            std::ptr::write_volatile(byte, 0);
+        }
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
@@ -123,7 +125,11 @@ fn cstr_string(ptr: *const c_char, max: usize, what: &str) -> Result<String, i32
     let bytes = c.to_bytes();
     if bytes.len() > max {
         set_error(format!("{what} too large"));
-        return Err(if what == "token" { ERR_TOKEN_TOO_LARGE } else { ERR_PAYLOAD_INVALID });
+        return Err(if what == "token" {
+            ERR_TOKEN_TOO_LARGE
+        } else {
+            ERR_PAYLOAD_INVALID
+        });
     }
     std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
         set_error(format!("{what} is not valid UTF-8"));
@@ -141,7 +147,9 @@ fn write_out(out: *mut *mut c_char, value: String) -> Result<(), i32> {
         ERR_INTERNAL
     })?;
     // SAFETY: ownership is transferred to the caller, which must call tracking_free.
-    unsafe { *out = c.into_raw(); }
+    unsafe {
+        *out = c.into_raw();
+    }
     Ok(())
 }
 
@@ -189,12 +197,20 @@ fn decode_hex_key(s: &str) -> Result<[u8; 32], i32> {
 
 fn strict_payload_enabled() -> bool {
     match env::var("AD_TRACKING_STRICT_PAYLOAD") {
-        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"),
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
         Err(_) => true,
     }
 }
 
-fn validate_string_field(obj: &Map<String, Value>, name: &str, min: usize, max: usize) -> Result<(), i32> {
+fn validate_string_field(
+    obj: &Map<String, Value>,
+    name: &str,
+    min: usize,
+    max: usize,
+) -> Result<(), i32> {
     let value = obj.get(name).and_then(Value::as_str).ok_or_else(|| {
         set_error(format!("{name} must be a string"));
         ERR_PAYLOAD_INVALID
@@ -218,7 +234,15 @@ fn validate_payload(payload: &Value, now: i64, check_expiration: bool) -> Result
     }
 
     const REQUIRED: [&str; 9] = [
-        "v", "kid", "iat", "exp", "click_id", "offer_id", "campaign_id", "publisher_id", "advertiser_id",
+        "v",
+        "kid",
+        "iat",
+        "exp",
+        "click_id",
+        "offer_id",
+        "campaign_id",
+        "publisher_id",
+        "advertiser_id",
     ];
     for f in REQUIRED {
         if !obj.contains_key(f) {
@@ -229,10 +253,29 @@ fn validate_payload(payload: &Value, now: i64, check_expiration: bool) -> Result
 
     if strict_payload_enabled() {
         const ALLOWED: [&str; 18] = [
-            "v", "kid", "iat", "exp", "click_id", "offer_id", "campaign_id", "publisher_id", "advertiser_id",
-            "source", "sub_id", "fbclid", "fbp", "gclid", "utm_source", "utm_medium", "utm_campaign", "utm_content",
+            "v",
+            "kid",
+            "iat",
+            "exp",
+            "click_id",
+            "offer_id",
+            "campaign_id",
+            "publisher_id",
+            "advertiser_id",
+            "source",
+            "sub_id",
+            "fbclid",
+            "fbp",
+            "gclid",
+            "utm_source",
+            "utm_medium",
+            "utm_campaign",
+            "utm_content",
         ];
-        if let Some(unknown) = obj.keys().find(|k| !ALLOWED.contains(&k.as_str()) && k.as_str() != "utm_term") {
+        if let Some(unknown) = obj
+            .keys()
+            .find(|k| !ALLOWED.contains(&k.as_str()) && k.as_str() != "utm_term")
+        {
             set_error(format!("unsupported payload field: {unknown}"));
             return Err(ERR_PAYLOAD_INVALID);
         }
@@ -258,7 +301,18 @@ fn validate_payload(payload: &Value, now: i64, check_expiration: bool) -> Result
 
     validate_string_field(obj, "click_id", 1, 128)?;
 
-    for name in ["source", "sub_id", "fbclid", "fbp", "gclid", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"] {
+    for name in [
+        "source",
+        "sub_id",
+        "fbclid",
+        "fbp",
+        "gclid",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
+    ] {
         if obj.contains_key(name) {
             validate_string_field(obj, name, 1, 256)?;
         }
@@ -313,6 +367,8 @@ fn aad_for(version: u8, kid: u8) -> [u8; 23] {
     aad
 }
 
+// 生成端统一补齐版本、KID、签发/过期时间和 click_id，再进行 AES-256-GCM 加密。
+// AAD 绑定协议版本与 KID，避免攻击者只改外层头部就把密文解释成另一把密钥。
 fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     if ttl == 0 || ttl > MAX_TTL_SECONDS {
         set_error("ttl_seconds out of allowed range");
@@ -321,10 +377,12 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
 
     let now = now_unix()?;
     let (kid, mut key) = current_key()?;
-    let exp = now.checked_add(i64::try_from(ttl).map_err(|_| ERR_INVALID_ARGUMENT)?).ok_or_else(|| {
-        set_error("ttl calculation overflow");
-        ERR_INVALID_ARGUMENT
-    })?;
+    let exp = now
+        .checked_add(i64::try_from(ttl).map_err(|_| ERR_INVALID_ARGUMENT)?)
+        .ok_or_else(|| {
+            set_error("ttl calculation overflow");
+            ERR_INVALID_ARGUMENT
+        })?;
 
     let obj = payload.as_object_mut().ok_or_else(|| {
         set_error("payload must be a JSON object");
@@ -340,7 +398,12 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     obj.insert("kid".into(), Value::from(kid));
     obj.insert("iat".into(), Value::from(now));
     obj.insert("exp".into(), Value::from(exp));
-    if !obj.contains_key("click_id") || obj["click_id"].as_str().map(|s| s.is_empty()).unwrap_or(true) {
+    if !obj.contains_key("click_id")
+        || obj["click_id"]
+            .as_str()
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
+    {
         obj.insert("click_id".into(), Value::String(Uuid::now_v7().to_string()));
     }
 
@@ -355,16 +418,34 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    // 使用操作系统 CSPRNG 生成 GCM nonce；随机源失败必须拒绝加密，不能回退到弱随机数。
+    if SysRng.try_fill_bytes(&mut nonce_bytes).is_err() {
+        secure_zeroize(&mut key);
+        secure_zeroize(&mut nonce_bytes);
+        set_error("system cryptographic random source failed");
+        return Err(ERR_INTERNAL);
+    }
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
     })?;
     let aad = aad_for(VERSION, kid);
-    let ciphertext = cipher.encrypt(Nonce::from_slice(&nonce_bytes), Payload { msg: &plaintext, aad: &aad }).map_err(|_| {
-        set_error("AES-GCM encryption failed");
+    let nonce = Nonce::try_from(nonce_bytes.as_slice()).map_err(|_| {
+        set_error("invalid AES-GCM nonce length");
         ERR_INTERNAL
     })?;
+    let ciphertext = cipher
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: &plaintext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| {
+            set_error("AES-GCM encryption failed");
+            ERR_INTERNAL
+        })?;
     secure_zeroize(&mut key);
 
     let mut raw = Vec::with_capacity(HEADER_LEN + ciphertext.len());
@@ -375,6 +456,8 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     Ok(URL_SAFE_NO_PAD.encode(raw))
 }
 
+// 验证顺序必须保持：长度/编码 -> 头部 -> KID -> GCM 认证 -> JSON/业务字段。
+// 未知 KID 对外统一返回令牌无效，不能泄露服务端当前配置了哪些密钥。
 fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
     if token.is_empty() {
         set_error("token is empty");
@@ -415,13 +498,24 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         ERR_INTERNAL
     })?;
 
-    let nonce = &raw[2..HEADER_LEN];
-    let ciphertext = &raw[HEADER_LEN..];
-    let aad = aad_for(version, kid);
-    let plaintext = cipher.decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad: &aad }).map_err(|_| {
-        set_error("token authentication failed");
+    let nonce = Nonce::try_from(&raw[2..HEADER_LEN]).map_err(|_| {
+        set_error("invalid AES-GCM nonce length");
         ERR_TOKEN_INVALID
     })?;
+    let ciphertext = &raw[HEADER_LEN..];
+    let aad = aad_for(version, kid);
+    let plaintext = cipher
+        .decrypt(
+            &nonce,
+            Payload {
+                msg: ciphertext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| {
+            set_error("token authentication failed");
+            ERR_TOKEN_INVALID
+        })?;
     secure_zeroize(&mut key);
 
     if plaintext.len() > MAX_PAYLOAD_CHARS {
@@ -448,6 +542,8 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
     Ok(payload)
 }
 
+// Rust panic 不能跨越 C ABI 边界；所有导出函数都必须经过此保护层。
+// 发生 panic 时返回稳定错误码，避免把异常传播到 Python/C 调用方导致进程崩溃。
 fn ffi_guard<F: FnOnce() -> i32 + std::panic::UnwindSafe>(f: F) -> i32 {
     clear_error();
     match catch_unwind(AssertUnwindSafe(f)) {
@@ -460,16 +556,31 @@ fn ffi_guard<F: FnOnce() -> i32 + std::panic::UnwindSafe>(f: F) -> i32 {
 }
 
 fn detect_performance_profile() -> PerformanceProfile {
-    let cpu_count = thread::available_parallelism().map(|n| n.get()).unwrap_or(1).max(1);
+    let cpu_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .max(1);
     let recommended_workers = env_usize("AD_TRACKING_WORKERS")
         .filter(|v| *v > 0)
         .unwrap_or_else(|| cpu_count.min(16).max(1));
     let recommended_batch = env_usize("AD_TRACKING_BATCH_SIZE")
         .filter(|v| *v > 0)
         .unwrap_or_else(|| {
-            if cpu_count <= 2 { 2_000 } else if cpu_count <= 4 { 5_000 } else if cpu_count <= 8 { 10_000 } else { 20_000 }
+            if cpu_count <= 2 {
+                2_000
+            } else if cpu_count <= 4 {
+                5_000
+            } else if cpu_count <= 8 {
+                10_000
+            } else {
+                20_000
+            }
         });
-    PerformanceProfile { cpu_count, recommended_workers, recommended_batch }
+    PerformanceProfile {
+        cpu_count,
+        recommended_workers,
+        recommended_batch,
+    }
 }
 
 fn env_usize(name: &str) -> Option<usize> {
@@ -483,11 +594,20 @@ pub extern "C" fn tracking_set_key(kid: c_uchar, key_hex: *const c_char) -> i32 
             set_error("kid=0 is reserved");
             return ERR_INVALID_ARGUMENT;
         }
-        let s = match cstr_string(key_hex, 64, "key") { Ok(v) => v, Err(e) => return e };
-        let key = match decode_hex_key(&s) { Ok(v) => v, Err(e) => return e };
+        let s = match cstr_string(key_hex, 64, "key") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let key = match decode_hex_key(&s) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
         let mut state = match STATE.write() {
             Ok(v) => v,
-            Err(_) => { set_error("state lock poisoned"); return ERR_INTERNAL; }
+            Err(_) => {
+                set_error("state lock poisoned");
+                return ERR_INTERNAL;
+            }
         };
         if !state.keys.contains_key(&kid) && state.keys.len() >= MAX_KEYS {
             set_error("maximum number of keys reached");
@@ -505,7 +625,10 @@ pub extern "C" fn tracking_remove_key(kid: c_uchar) -> i32 {
     ffi_guard(|| {
         let mut state = match STATE.write() {
             Ok(v) => v,
-            Err(_) => { set_error("state lock poisoned"); return ERR_INTERNAL; }
+            Err(_) => {
+                set_error("state lock poisoned");
+                return ERR_INTERNAL;
+            }
         };
         if state.current_kid == Some(kid) {
             set_error("cannot remove current KID");
@@ -530,7 +653,10 @@ pub extern "C" fn tracking_set_current_kid(kid: c_uchar) -> i32 {
         }
         let mut state = match STATE.write() {
             Ok(v) => v,
-            Err(_) => { set_error("state lock poisoned"); return ERR_INTERNAL; }
+            Err(_) => {
+                set_error("state lock poisoned");
+                return ERR_INTERNAL;
+            }
         };
         if !state.keys.contains_key(&kid) {
             set_error("cannot select a KID that has no key");
@@ -542,14 +668,29 @@ pub extern "C" fn tracking_set_current_kid(kid: c_uchar) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn tracking_generate(payload_json: *const c_char, ttl_seconds: u64, out_token: *mut *mut c_char) -> i32 {
+pub extern "C" fn tracking_generate(
+    payload_json: *const c_char,
+    ttl_seconds: u64,
+    out_token: *mut *mut c_char,
+) -> i32 {
     ffi_guard(|| {
-        if out_token.is_null() { set_error("out_token is null"); return ERR_NULL_INPUT; }
-        unsafe { *out_token = std::ptr::null_mut(); }
-        let s = match cstr_string(payload_json, MAX_PAYLOAD_CHARS, "payload") { Ok(v) => v, Err(e) => return e };
+        if out_token.is_null() {
+            set_error("out_token is null");
+            return ERR_NULL_INPUT;
+        }
+        unsafe {
+            *out_token = std::ptr::null_mut();
+        }
+        let s = match cstr_string(payload_json, MAX_PAYLOAD_CHARS, "payload") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
         let payload: Value = match serde_json::from_str(&s) {
             Ok(v) => v,
-            Err(_) => { set_error("payload_json is invalid JSON"); return ERR_PAYLOAD_INVALID; }
+            Err(_) => {
+                set_error("payload_json is invalid JSON");
+                return ERR_PAYLOAD_INVALID;
+            }
         };
         match encode_payload(payload, ttl_seconds) {
             Ok(token) => write_out(out_token, token).map_or_else(|e| e, |_| OK),
@@ -561,13 +702,27 @@ pub extern "C" fn tracking_generate(payload_json: *const c_char, ttl_seconds: u6
 #[no_mangle]
 pub extern "C" fn tracking_verify(token: *const c_char, out_json: *mut *mut c_char) -> i32 {
     ffi_guard(|| {
-        if out_json.is_null() { set_error("out_json is null"); return ERR_NULL_INPUT; }
-        unsafe { *out_json = std::ptr::null_mut(); }
-        let token = match cstr_string(token, MAX_TOKEN_CHARS, "token") { Ok(v) => v, Err(e) => return e };
-        let payload = match decode_token(&token, true) { Ok(v) => v, Err(e) => return e };
+        if out_json.is_null() {
+            set_error("out_json is null");
+            return ERR_NULL_INPUT;
+        }
+        unsafe {
+            *out_json = std::ptr::null_mut();
+        }
+        let token = match cstr_string(token, MAX_TOKEN_CHARS, "token") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let payload = match decode_token(&token, true) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
         let json = match serde_json::to_string(&payload) {
             Ok(v) => v,
-            Err(_) => { set_error("failed to serialize verification result"); return ERR_INTERNAL; }
+            Err(_) => {
+                set_error("failed to serialize verification result");
+                return ERR_INTERNAL;
+            }
         };
         write_out(out_json, json).map_or_else(|e| e, |_| OK)
     })
@@ -581,15 +736,24 @@ pub extern "C" fn tracking_parse(token: *const c_char, out_json: *mut *mut c_cha
 #[no_mangle]
 pub extern "C" fn tracking_free(ptr: *mut c_char) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
-        if ptr.is_null() { return; }
+        if ptr.is_null() {
+            return;
+        }
         // SAFETY: pointer must originate from CString::into_raw in this library.
-        unsafe { drop(CString::from_raw(ptr)); }
+        unsafe {
+            drop(CString::from_raw(ptr));
+        }
     }));
 }
 
 #[no_mangle]
 pub extern "C" fn tracking_last_error() -> *const c_char {
-    LAST_ERROR.with(|e| e.borrow().as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()))
+    LAST_ERROR.with(|e| {
+        e.borrow()
+            .as_ref()
+            .map(|s| s.as_ptr())
+            .unwrap_or(std::ptr::null())
+    })
 }
 
 #[no_mangle]
@@ -599,13 +763,20 @@ pub extern "C" fn tracking_version() -> *const c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn tracking_abi_version() -> u32 { ABI_VERSION }
+pub extern "C" fn tracking_abi_version() -> u32 {
+    ABI_VERSION
+}
 
 #[no_mangle]
 pub extern "C" fn tracking_performance_info(out_json: *mut *mut c_char) -> i32 {
     ffi_guard(|| {
-        if out_json.is_null() { set_error("out_json is null"); return ERR_NULL_INPUT; }
-        unsafe { *out_json = std::ptr::null_mut(); }
+        if out_json.is_null() {
+            set_error("out_json is null");
+            return ERR_NULL_INPUT;
+        }
+        unsafe {
+            *out_json = std::ptr::null_mut();
+        }
         let p = *PERFORMANCE;
         let value = serde_json::json!({
             "cpu_count": p.cpu_count,
@@ -617,7 +788,10 @@ pub extern "C" fn tracking_performance_info(out_json: *mut *mut c_char) -> i32 {
         });
         match serde_json::to_string(&value) {
             Ok(s) => write_out(out_json, s).map_or_else(|e| e, |_| OK),
-            Err(_) => { set_error("failed to serialize performance info"); ERR_INTERNAL }
+            Err(_) => {
+                set_error("failed to serialize performance info");
+                ERR_INTERNAL
+            }
         }
     })
 }
@@ -660,7 +834,11 @@ mod tests {
         for index in [HEADER_LEN + 2, 2, usize::MAX] {
             let t = token();
             let mut bytes = URL_SAFE_NO_PAD.decode(&t).unwrap();
-            let idx = if index == usize::MAX { bytes.len() - 1 } else { index };
+            let idx = if index == usize::MAX {
+                bytes.len() - 1
+            } else {
+                index
+            };
             bytes[idx] ^= 1;
             let bad = URL_SAFE_NO_PAD.encode(bytes);
             assert_eq!(decode_token(&bad, true).unwrap_err(), ERR_TOKEN_INVALID);
@@ -679,7 +857,10 @@ mod tests {
             "offer_id": 10001, "campaign_id": 20001, "publisher_id": 30001, "advertiser_id": 40001,
             "unknown_field": "x"
         });
-        assert_eq!(encode_payload(payload, 3600).unwrap_err(), ERR_PAYLOAD_INVALID);
+        assert_eq!(
+            encode_payload(payload, 3600).unwrap_err(),
+            ERR_PAYLOAD_INVALID
+        );
     }
 
     #[test]

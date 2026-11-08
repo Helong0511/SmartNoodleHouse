@@ -5,7 +5,7 @@ import json
 import pytest
 from sqlalchemy import select
 
-from app.models import OutboxEvent
+from app.models import OutboxEvent, Store
 from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 from app.services.outbox_policy import CACHE_INVALIDATION_MAX_ATTEMPTS
 from app.services.outbox_worker import claim_outbox_item
@@ -17,6 +17,8 @@ async def test_menu_cache_invalidation_outbox_does_not_dead_letter_on_transient_
     db_session,
 ):
     store_id = 981234
+    db_session.add(Store(id=store_id, store_no="GEN-981234", name="Outbox代际测试门店", status=1))
+    await db_session.flush()
 
     await enqueue_menu_cache_invalidation(db_session, store_id)
     await db_session.flush()
@@ -39,6 +41,7 @@ async def test_menu_cache_invalidation_outbox_does_not_dead_letter_on_transient_
     assert row.status == "PENDING"
     assert row.max_attempts == CACHE_INVALIDATION_MAX_ATTEMPTS
     assert row.max_attempts == 2_147_483_647
+    assert int(json.loads(row.payload)["generation"]) >= 1_000_000_000
 
 
 @pytest.mark.asyncio

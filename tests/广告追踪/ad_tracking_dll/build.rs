@@ -14,9 +14,13 @@ fn main() {
         res.set("OriginalFilename", "ad_tracking_engine.dll");
         res.set("ProductName", "Ad Tracking Engine");
         res.set("ProductVersion", "1.1.0.0");
-        res.set("LegalCopyright", "版权所有 © 2026 深圳市指动空间科技有限公司");
+        res.set(
+            "LegalCopyright",
+            "版权所有 © 2026 深圳市指动空间科技有限公司",
+        );
         res.set("Comments", "Rust 高性能广告追踪安全引擎");
         res.set("Contact", "18011189359");
-        res.compile().expect("无法编译 Windows DLL Version Resource");
+        res.compile()
+            .expect("无法编译 Windows DLL Version Resource");
     }
 }

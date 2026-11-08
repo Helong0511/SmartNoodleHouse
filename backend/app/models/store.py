@@ -35,6 +35,10 @@ class Store(Base, TimestampMixin):
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), default=None)
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), default=None)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    # Durable menu cache generation; Redis is a rebuildable acceleration layer.
+    menu_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1_000_000_000, server_default="1000000000")
+    # -1 represents no active category schedule.
+    menu_schedule_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=-1, server_default="-1")
 
 
 class DiningTable(Base, TimestampMixin):

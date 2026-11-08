@@ -42,3 +42,7 @@ async def test_redis_pool_uses_explicit_per_process_limit_and_socket_timeouts(mo
     assert captured["socket_connect_timeout"] == 2.0
     assert captured["socket_timeout"] == 3.0
     assert captured["health_check_interval"] == 30
+    assert captured["socket_keepalive"] is True
+    assert captured["protocol"] == 2
+    assert captured["legacy_responses"] is True
+    assert captured["retry"].get_retries() == 0

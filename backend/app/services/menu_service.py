@@ -20,7 +20,7 @@ from sqlalchemy.orm import aliased
 from app.core.hot_cache import HotCache
 from app.core.exceptions import AppException
 from app.core.menu_cache import (
-    bump_menu_version,
+    ensure_menu_generation,
     get_menu_bundle,
     get_menu_version,
     maintain_rebuild_lock,
@@ -256,12 +256,12 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         sample = items[0] if isinstance(items[0], dict) else {}
         return "visibility_rule" in sample
 
-    # 时段标记独立于短 TTL bundle 持久化；即使所有 Worker 的缓存都过期，
-    # 午/晚市切换仍会原子递增版本并删除旧 bundle，不能依赖“旧缓存还在不在”。
-    remote_version = await get_menu_version(
-        sid, sync_schedule=True, active_schedule_id=expected_sched
-    )
-    if remote_version is None:
+    # MySQL 是菜单代际与时段切换的持久事实源；Redis 丢失后可据此恢复。
+    from app.services.menu_cache_service import sync_store_menu_schedule_generation
+
+    durable_generation = await sync_store_menu_schedule_generation(db, sid, expected_sched)
+    remote_version = await ensure_menu_generation(sid, durable_generation)
+    if remote_version is None or remote_version != durable_generation:
         invalidate_local_menu_cache(sid)
         raise AppException(
             50301,
@@ -367,24 +367,16 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                         bundle = None
                     try:
                         if bundle is None:
-                            # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
+                            # 版本只由 MySQL 的持久 generation 决定；缓存过期/重建本身
+                            # 不得递增代际，否则 Redis 与数据库会出现不可恢复的分叉。
                             if cached is not None or (
                                 hit is not None and _bundle_schedule_id(hit) != expected_sched
                             ):
-                                bumped = await bump_menu_version(sid)
-                                if bumped <= 0:
-                                    raise AppException(
-                                        50301,
-                                        "菜单版本更新失败，请稍后重试",
-                                        status_code=503,
-                                    )
                                 invalidate_local_menu_cache(sid)
-                            # 先固定 DB 快照对应的菜单版本。若构建期间写路径 bump 版本，
-                            # 后续 Lua 发布会拒绝将旧快照写回 Redis。
                             build_version = await get_menu_version(sid)
-                            if build_version <= 0:
-                                build_version = await bump_menu_version(sid)
-                            if build_version <= 0:
+                            if build_version != durable_generation:
+                                build_version = await ensure_menu_generation(sid, durable_generation)
+                            if build_version is None or build_version <= 0:
                                 raise AppException(
                                     50301,
                                     "菜单版本初始化失败，请稍后重试",
@@ -407,8 +399,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
 
     version = await get_menu_version(sid)
     if version <= 0:
-        # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
-        version = await bump_menu_version(sid)
+        # Redis key 丢失时只能从 MySQL 持久代际恢复，不能自行 INCR 生成分叉版本。
+        version = await ensure_menu_generation(sid, durable_generation) or 0
     if version <= 0:
         invalidate_local_menu_cache(sid)
         if lock_ok and lock_token:

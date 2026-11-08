@@ -1,4 +1,6 @@
-use ad_tracking_engine::{tracking_generate, tracking_set_current_kid, tracking_set_key, tracking_verify, tracking_free};
+use ad_tracking_engine::{
+    tracking_free, tracking_generate, tracking_set_current_kid, tracking_set_key, tracking_verify,
+};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::ffi::CString;
 

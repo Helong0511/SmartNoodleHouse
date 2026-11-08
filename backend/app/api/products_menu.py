@@ -11,6 +11,7 @@ from app.models import OptionGroup, Product, ProductCategory, Store
 from app.schemas.product import MenuCopyRequest
 from app.services.audit_service import AuditService
 from app.services.menu_copy_service import MenuCopyService
+from app.services.menu_cache_service import invalidate_store_menu_cache
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
@@ -175,6 +176,8 @@ async def copy_menu_to_store(data: MenuCopyRequest, request: Request, db: DbSess
         on_product_conflict=data.on_product_conflict,  # type: ignore[arg-type]
         clone_shared_option_groups=bool(data.clone_shared_option_groups),
     )
+    # 跨店复制会新增目标店分类/餐品/规格，必须同步清理本地缓存并推进持久代际。
+    await invalidate_store_menu_cache(db, int(data.target_store_id))
     await AuditService.log_staff(
         db,
         user=user,

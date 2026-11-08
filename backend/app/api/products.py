@@ -33,7 +33,7 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services.audit_service import AuditService
-from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+from app.services.menu_cache_service import invalidate_store_menu_cache
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.services.taste_profile_service import profile_payload, recompute_product
 from app.services.category_require import (
@@ -50,6 +50,42 @@ def _visibility_fields(p) -> dict:
     from app.utils.product_visibility import visibility_payload
 
     return visibility_payload(p)
+
+
+async def _ensure_product_store_move_safe(
+    db: DbSession,
+    product: Product,
+    target_store_id: int,
+    *,
+    provided_fields: set[str],
+    category_id: int | None,
+    option_group_ids: list[int] | None,
+) -> None:
+    """阻止带历史订单、库存覆盖或外卖映射的餐品直接跨店，避免历史与库存归属串店。"""
+    if int(product.store_id) == int(target_store_id):
+        return
+
+    checks = (
+        (select(OrderItem.id).where(OrderItem.product_id == int(product.id)).limit(1), "已有订单历史"),
+        (select(StoreProductStock.id).where(StoreProductStock.product_id == int(product.id)).limit(1), "已有门店库存覆盖"),
+        (select(DeliveryProductMap.id).where(DeliveryProductMap.product_id == int(product.id)).limit(1), "已有外卖平台映射"),
+    )
+    for statement, reason in checks:
+        if await db.scalar(statement) is not None:
+            raise AppException(
+                40001,
+                f"该餐品{reason}，不能直接跨门店迁移；请使用菜单跨店复制并分别处理历史/库存/外卖数据",
+            )
+
+    # 必须明确绑定目标门店分类与规格组，不能把源门店关系带到目标门店。
+    if "category_id" not in provided_fields or category_id is None:
+        raise AppException(40001, "跨门店迁移餐品必须同时指定目标门店分类")
+    if "option_group_ids" not in provided_fields or option_group_ids is None:
+        raise AppException(40001, "跨门店迁移餐品必须明确指定目标门店规格组（可传空数组）")
+    if product.require_category_ids and "require_category_ids" not in provided_fields:
+        raise AppException(40001, "跨门店迁移餐品必须重新指定分类依赖")
+    if product.require_product_ids and "require_product_ids" not in provided_fields:
+        raise AppException(40001, "跨门店迁移餐品必须重新指定餐品依赖")
 
 
 async def _validate_require_product_ids(
@@ -599,7 +635,7 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         await recompute_product(db, int(product.id))
     except Exception:
         logger.exception("新品口味画像自动推导失败 product_id=%s", product.id)
-    await enqueue_menu_cache_invalidation(db, int(product.store_id))
+    await invalidate_store_menu_cache(db, int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id, "product_no": product.product_no}, request=request)
 
 
@@ -619,6 +655,8 @@ async def update_product(
     if not product:
         return success(None, message="餐品不存在", request=request)
     assert_store_access(user, product.store_id)
+    original_store_id = int(product.store_id)
+    provided_fields = set(data.model_fields_set)
 
     payload = data.model_dump(
         exclude_unset=True,
@@ -644,6 +682,14 @@ async def update_product(
             raise AppException(40301, "仅超管可迁移餐品所属门店")
         new_sid = int(payload["store_id"])
         assert_store_access(user, new_sid)
+        await _ensure_product_store_move_safe(
+            db,
+            product,
+            new_sid,
+            provided_fields=provided_fields,
+            category_id=data.category_id,
+            option_group_ids=data.option_group_ids,
+        )
         product.store_id = new_sid
         del payload["store_id"]
         # 迁店时同步改编号前缀（保留分类+餐品逻辑）
@@ -718,6 +764,8 @@ async def update_product(
         for idx, gid in enumerate(data.option_group_ids):
             db.add(ProductOptionGroup(product_id=product.id, group_id=gid, sort_order=idx))
     await db.flush()
+    for affected_store_id in sorted({original_store_id, int(product.store_id)}):
+        await invalidate_store_menu_cache(db, affected_store_id)
     if "stock" in payload and product.store_id:
         # 品牌库存是无门店覆盖时的有效库存；与订单扣减共用同一事务 Outbox，
         # handler 重读最新有效库存（若有门店覆盖则以覆盖值为准）。
@@ -746,7 +794,6 @@ async def update_product(
         await recompute_product(db, int(product.id))
     except Exception:
         logger.exception("餐品更新后口味画像重算失败 product_id=%s", product.id)
-    await enqueue_menu_cache_invalidation(db, int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id}, request=request)
 
 
@@ -766,6 +813,8 @@ async def upload_product_image(
     url = await save_upload(file, subdir="products")
     await _set_main_product_image(db, product, url)
     await db.flush()
+    # 主图会直接进入菜单缓存；上传成功前先在同一事务推进缓存代际。
+    await invalidate_store_menu_cache(db, int(product.store_id))
     await db.refresh(product)
     updated_at = serialize_dt(product.updated_at)
     await AuditService.log_staff(
@@ -804,7 +853,7 @@ async def delete_product(product_id: int, request: Request, db: DbSession, user:
     await db.execute(delete(DeliveryProductMap).where(DeliveryProductMap.product_id == product_id))
     await db.delete(product)
     await db.flush()
-    await enqueue_menu_cache_invalidation(db, int(product.store_id))
+    await invalidate_store_menu_cache(db, int(product.store_id))
     await AuditService.log_staff(
         db,
         user=user,

@@ -50,7 +50,8 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx pytest-cov aiosqlite
+          pip install -r tests/requirements.txt
+          python -m pip check
           python scripts/check_requirements_lock.py
       - name: Verify tracked text encoding and line endings
         run: |
@@ -58,6 +59,9 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall backend/app -q
+      - name: Audit dependency declarations and import references
+        run: |
+          python scripts/audit_dependency_references.py
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
@@ -110,7 +114,7 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx
+          pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
       - name: Prepare database
         env:
@@ -180,6 +184,8 @@ jobs:
           node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major !== 24 || minor < 12) process.exit(1)"
       - name: Install dependencies
         run: npm ci
+      - name: Verify approved npm install scripts
+        run: npm install-scripts ls
       - name: Unit tests
         run: npm test --if-present
       - name: Type check and build
@@ -198,6 +204,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip pip-audit
           pip-audit --strict -r backend/requirements.lock
+          pip-audit --strict -r tests/requirements.txt
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -210,6 +217,8 @@ jobs:
           test "$(npm --version)" = "11.19.1"
           npm ci
           npm audit --audit-level=high
+      - name: Audit frontend dependency references and duplicate lock entries
+        run: python scripts/audit_frontend_dependency_references.py
 
   miniprogram-static-check:
     name: miniprogram-static-check
@@ -228,6 +237,69 @@ jobs:
             echo "Checking $file"
             node --check --input-type=module < "$file"
           done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
+
+  rust-ad-tracking:
+    name: rust-ad-tracking (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.89.0", "stable"]
+    defaults:
+      run:
+        working-directory: tests/广告追踪/ad_tracking_dll
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - name: Verify declared MSRV and locked dependency graph
+        run: |
+          rustc --version
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Check Rust formatting
+        if: matrix.toolchain == 'stable'
+        run: cargo fmt --all -- --check
+      - name: Audit Rust dependency graph
+        if: matrix.toolchain == 'stable'
+        run: cargo tree --locked -d
+      - name: Audit Rust dependencies against RustSec
+        if: matrix.toolchain == 'stable'
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit
+      - name: Detect unused Rust dependencies
+        if: matrix.toolchain == 'stable'
+        run: |
+          cargo install cargo-machete --locked --version 0.9.2
+          cargo machete
+      - name: Build and run Rust tests
+        run: cargo test --locked --all-targets
+
+  windows-rust-dll:
+    name: windows-rust-dll
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: tests/广告追踪/ad_tracking_dll
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify locked Windows DLL build
+        shell: pwsh
+        run: |
+          rustc --version
+          cargo metadata --locked --format-version 1 | Out-Null
+          cargo test --locked
+          cargo build --release --locked
+          if (-not (Test-Path "target/release/ad_tracking_engine.dll")) {
+            throw "Windows DLL was not produced"
+          }
 
   windows-sapi-dependency:
     name: windows-sapi-dependency

@@ -228,7 +228,12 @@ async def patch_member_profile(
     """
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
-    from app.utils.birthday import VALID_CALENDARS, normalize_calendar
+    from app.utils.birthday import (
+        VALID_CALENDARS,
+        birthday_for_picker,
+        format_birthday_display,
+        normalize_calendar,
+    )
 
     # 生日：YYYY-MM-DD；传空串清除；不得晚于今天。
     # 历法=农历时，控件数字即农历年月日，落库前换算为公历锚点。
@@ -315,12 +320,6 @@ async def patch_member_profile(
         request=request,
         category=AuditService.CATEGORY_CUSTOMER,
     )
-    from app.utils.birthday import (
-        birthday_for_picker,
-        format_birthday_display,
-        normalize_calendar,
-    )
-
     cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
     store_id = getattr(customer, "registered_store_id", None) or getattr(
         customer, "first_seen_store_id", None

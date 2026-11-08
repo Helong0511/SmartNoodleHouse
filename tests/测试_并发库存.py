@@ -215,7 +215,7 @@ async def test_store_stock_upsert_locks_product_before_store_override(monkeypatc
     monkeypatch.setattr(products_stocks, "require_bound_store", lambda user, sid: 7)
     monkeypatch.setattr(products_stocks, "assert_store_access", lambda user, sid: None)
     monkeypatch.setattr(products_stocks, "success", lambda data, request: data)
-    monkeypatch.setattr(products_stocks, "enqueue_menu_cache_invalidation", AsyncMock())
+    monkeypatch.setattr(products_stocks, "invalidate_store_menu_cache", AsyncMock())
     monkeypatch.setattr(products_stocks.AuditService, "log_staff", AsyncMock())
     monkeypatch.setattr("app.services.stock_service._emit_stock_mirror", AsyncMock())
 
@@ -266,7 +266,7 @@ async def test_store_stock_delete_locks_product_before_store_override(monkeypatc
     monkeypatch.setattr(products_stocks, "require_bound_store", lambda user, sid: 7)
     monkeypatch.setattr(products_stocks, "assert_store_access", lambda user, sid: None)
     monkeypatch.setattr(products_stocks, "success", lambda data, request: data)
-    monkeypatch.setattr(products_stocks, "enqueue_menu_cache_invalidation", AsyncMock())
+    monkeypatch.setattr(products_stocks, "invalidate_store_menu_cache", AsyncMock())
     monkeypatch.setattr(products_stocks.AuditService, "log_staff", AsyncMock())
     monkeypatch.setattr("app.services.stock_service._emit_stock_mirror", AsyncMock())
 
@@ -311,7 +311,7 @@ async def test_product_base_stock_update_locks_product_and_enqueues_delivery_mir
     monkeypatch.setattr(products, "success", lambda data, request: data)
     monkeypatch.setattr(products.AuditService, "log_staff", AsyncMock())
     monkeypatch.setattr(products, "recompute_product", AsyncMock())
-    monkeypatch.setattr(products, "enqueue_menu_cache_invalidation", AsyncMock())
+    monkeypatch.setattr(products, "invalidate_store_menu_cache", AsyncMock())
     monkeypatch.setattr("app.services.stock_service._emit_stock_mirror", mirror)
 
     result = await products.update_product(

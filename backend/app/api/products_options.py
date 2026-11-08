@@ -8,7 +8,7 @@ from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_perm
 from app.api.products_common import store_code_prefix
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import Option, OptionGroup
+from app.models import Option, OptionGroup, ProductOptionGroup
 from app.schemas.product import OptionCreate, OptionGroupCreate, OptionGroupUpdate, OptionUpdate
 from app.services.audit_service import AuditService
 from app.services.store_scope import require_bound_store
@@ -49,6 +49,24 @@ async def _apply_option_default_flag(db: DbSession, opt: Option, want_default: b
     elif want_default is False:
         opt.is_default = False
         await db.flush()
+
+
+async def _ensure_option_group_store_move_safe(
+    db: DbSession, group: OptionGroup, target_store_id: int | None
+) -> None:
+    """规格组已有餐品绑定时禁止跨店迁移，避免源店餐品引用到目标店规格。"""
+    if group.store_id == target_store_id:
+        return
+    linked_id = await db.scalar(
+        select(ProductOptionGroup.id)
+        .where(ProductOptionGroup.group_id == int(group.id))
+        .limit(1)
+    )
+    if linked_id is not None:
+        raise AppException(
+            40001,
+            "该规格组仍绑定餐品，不能直接跨门店迁移；请先解除餐品绑定或使用菜单跨店复制",
+        )
 
 
 def assert_option_group_manage(user: CurrentUser, group: OptionGroup | None = None) -> None:
@@ -268,6 +286,8 @@ async def update_option_group(
     if role != "SUPER_ADMIN":
         raw.pop("store_id", None)
     target_sid = raw.get("store_id", group.store_id) if "store_id" in raw else group.store_id
+    if "store_id" in raw:
+        await _ensure_option_group_store_move_safe(db, group, target_sid)
     if "code" in raw and raw["code"] is not None:
         new_code = await _normalize_group_code(db, str(raw["code"]), target_sid)
         await _ensure_unique_group_code(db, new_code, target_sid, exclude_id=group.id)
