@@ -8,12 +8,39 @@ from sqlalchemy import delete, or_, select
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
-from app.models import Product, StoreProductStock
+from app.models import Order, OrderItem, Product, StoreProductStock
 from app.services.audit_service import AuditService
 from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
+
+
+
+async def _assert_no_active_orders_for_stock_mutation(
+    db: DbSession, *, store_id: int, product_id: int
+) -> None:
+    """库存来源只能在没有未完成订单引用该餐品时切换。
+
+    OrderItem 未记录扣减来源；在订单仍可取消/退款回库期间修改覆盖记录，
+    会让 restore_stock 按新的覆盖状态把库存加回错误的库存池。
+    """
+    active_item_id = await db.scalar(
+        select(OrderItem.id)
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(
+            Order.store_id == int(store_id),
+            OrderItem.product_id == int(product_id),
+            Order.status.notin_(("CANCELLED", "REFUNDED", "COMPLETED")),
+        )
+        .limit(1)
+    )
+    if active_item_id is not None:
+        raise AppException(
+            40962,
+            "该餐品存在未完成订单，暂不能修改或删除门店库存覆盖；请待订单结束后再调整",
+            status_code=409,
+        )
 
 
 class StoreStockUpsert(BaseModel):
@@ -104,6 +131,9 @@ async def upsert_store_stock(
         raise AppException(40401, "餐品不存在")
     if int(product.store_id) != int(sid):
         raise AppException(40301, "餐品不属于该门店")
+    await _assert_no_active_orders_for_stock_mutation(
+        db, store_id=int(sid), product_id=int(product_id)
+    )
     row = (
         await db.execute(
             select(StoreProductStock)
