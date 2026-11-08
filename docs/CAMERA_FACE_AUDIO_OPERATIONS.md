@@ -46,3 +46,4 @@ python scripts\现场验收海康迎宾.py --camera-id 1 --play-g711 --heard yes
 ```
 
 结果写入 `tests/_out/field_camera_<id>.json`。脚本故意不 import `face_service`（避免 InsightFace 冷启动卡住）。
+\n\n## 2026-11-08 运维安全补充\n\n- 不要把 RTSP URL（尤其包含账号密码）、ISAPI 凭据、摄像头 token 或抓拍图片放入文档、聊天、工单和命令历史。\n- 修改摄像头密码后检查后端加密存储、缓存失效和连接重建；泄露时立即轮换设备凭据。\n- 迎宾测试必须使用授权测试会员；未经授权顾客不得进入人脸匹配流程。\n- 现场验收的 JSON 输出不得包含人脸向量、明文 RTSP 密码或顾客个人信息。\n- 客户端动作完成标记不是活体证明；以服务端 challenge token 和动作验证结果为准。\n
