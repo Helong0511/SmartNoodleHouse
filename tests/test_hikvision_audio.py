@@ -217,6 +217,8 @@ def test_hikvision_audio_constructor_pins_and_validates_base_url(monkeypatch) ->
         audio.HikvisionTwoWayAudio("http://admin:secret@10.0.0.10", "admin", "secret")
     with pytest.raises(ValueError, match="base URL"):
         audio.HikvisionTwoWayAudio("http://10.0.0.10/ISAPI", "admin", "secret")
+    with pytest.raises(ValueError, match="username"):
+        audio.HikvisionTwoWayAudio("http://10.0.0.10", "admin\\r\\nX: y", "secret")
 
 
 def test_play_g711_rejects_payload_over_two_minutes(monkeypatch) -> None:
@@ -244,3 +246,20 @@ def test_try_sync_osd_treats_unsafe_target_as_best_effort(monkeypatch) -> None:
         )
     )
     assert result == {"ok": False, "reason": "unsafe_source"}
+
+
+def test_hikvision_async_state_is_isolated_per_event_loop(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.camera_credentials.pin_camera_url_for_connect",
+        lambda _url: "http://10.0.0.10:80",
+    )
+
+    async def get_state_and_lock():
+        client = audio.HikvisionTwoWayAudio("http://10.0.0.10", "admin", "secret")
+        return audio._get_loop_state(), await client._lock_for()
+
+    first_state, first_lock = asyncio.run(get_state_and_lock())
+    second_state, second_lock = asyncio.run(get_state_and_lock())
+
+    assert first_state is not second_state
+    assert first_lock is not second_lock
