@@ -26,4 +26,6 @@ alwaysApply: true
 - **MySQL**：库表字符集 **`utf8mb4` / `utf8mb4_unicode_ci`**（见 `sql/struct.sql`），连接串带 `charset=utf8mb4`。
 - **禁止**：把文件存成 GBK/ANSI；在 `.env` / 注释里用控制台易乱码的特殊符号（如 `▸`、非常见 Unicode 装饰符）；PowerShell 默认 GBK 控制台直接 `print` 中文/特殊字符当「文件已损坏」依据。
 - **校验**：改完含中文的文本后，用编辑器或 `Path.read_text(encoding="utf-8")` 确认可读；勿以 Windows 终端乱码判断文件编码错误。
+- **提交前强制校验**：在仓库根目录执行 `python scripts/check_text_encoding.py`；CI 同样执行，检查所有 Git 跟踪文本文件的 UTF-8、无 BOM、LF。
+- **数据库字符集验收**：执行 Alembic 迁移后运行 `python scripts/验证数据库.py`，确认当前连接会话、数据库默认字符集/排序规则、所有表排序规则及文本列字符集符合 `utf8mb4 / utf8mb4_unicode_ci`。
 - **跨场景命令**：本地给 PowerShell 语法；生产给 bash。涉及路径、换行、编码的脚本在两端分别验证，不要假设同一条命令两边通用。
