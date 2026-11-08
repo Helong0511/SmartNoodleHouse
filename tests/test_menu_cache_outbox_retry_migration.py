@@ -47,12 +47,12 @@ def test_upgrade_extends_only_menu_and_recommendation_cache_invalidation_retry_b
             conn.exec_driver_sql(
                 """
                 INSERT INTO outbox_events
-                    (id, aggregate_type, event_kind, max_attempts, attempt_count, status)
+                    (id, aggregate_type, event_kind, max_attempts, attempt_count, status, next_retry_at)
                 VALUES
-                    (1, 'menu_cache', 'invalidate', 8, 8, 'FAILED'),
-                    (2, 'reco_cache', 'invalidate_abc', 8, 8, 'FAILED'),
-                    (3, 'webhook_task', 'execute', 8, 8, 'FAILED'),
-                    (4, 'reco_cache', 'ordinary_event', 8, 8, 'FAILED')
+                    (1, 'menu_cache', 'invalidate', 8, 8, 'FAILED', '2026-11-08 12:00:00'),
+                    (2, 'reco_cache', 'invalidate_abc', 8, 8, 'FAILED', '2026-11-08 12:00:00'),
+                    (3, 'webhook_task', 'execute', 8, 8, 'FAILED', NULL),
+                    (4, 'reco_cache', 'ordinary_event', 8, 8, 'FAILED', NULL)
                 """
             )
 
@@ -62,13 +62,16 @@ def test_upgrade_extends_only_menu_and_recommendation_cache_invalidation_retry_b
             module.upgrade()  # idempotent for repeated deployment/recovery
 
             rows = conn.exec_driver_sql(
-                "SELECT id, max_attempts FROM outbox_events ORDER BY id"
+                """
+                SELECT id, max_attempts, attempt_count, status, next_retry_at
+                FROM outbox_events ORDER BY id
+                """
             ).all()
             assert [tuple(row) for row in rows] == [
-                (1, 2_147_483_647),
-                (2, 2_147_483_647),
-                (3, 8),
-                (4, 8),
+                (1, 2_147_483_647, 8, "FAILED", "2026-11-08 12:00:00"),
+                (2, 2_147_483_647, 8, "FAILED", "2026-11-08 12:00:00"),
+                (3, 8, 8, "FAILED", None),
+                (4, 8, 8, "FAILED", None),
             ]
 
             # Downgrade must not re-dead-letter events that already exceeded 8 attempts.
