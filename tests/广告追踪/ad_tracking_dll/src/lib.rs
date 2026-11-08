@@ -651,22 +651,30 @@ pub extern "C" fn tracking_remove_key(kid: c_uchar) -> i32 {
     })
 }
 
-/// 显式清理全部密钥。宿主必须在卸载 DLL 前调用，不能依赖 static 析构。
+/// 清除 State 中的全部密钥。独立成函数，确保锁正常或中毒时走相同清理逻辑。
+fn clear_state_keys(state: &mut State) {
+    for key in state.keys.values_mut() {
+        secure_zeroize(key);
+    }
+    state.keys.clear();
+    state.current_kid = None;
+}
+
+/// 显式清理全部密钥。即使锁已中毒，也必须恢复内部守卫并尽力清除密钥。
+/// 宿主必须在卸载 DLL 前调用，不能依赖 static 析构。
 #[no_mangle]
 pub extern "C" fn tracking_clear_keys() -> i32 {
     ffi_guard(|| {
         let mut state = match STATE.write() {
             Ok(v) => v,
-            Err(_) => {
-                set_error("state lock poisoned");
-                return ERR_INTERNAL;
+            Err(poisoned) => {
+                // 密钥清理是关闭流程的最后一道防线；锁中毒不能成为跳过清理的理由。
+                let state = poisoned.into_inner();
+                STATE.clear_poison();
+                state
             }
         };
-        for key in state.keys.values_mut() {
-            secure_zeroize(key);
-        }
-        state.keys.clear();
-        state.current_kid = None;
+        clear_state_keys(&mut state);
         OK
     })
 }
@@ -845,6 +853,28 @@ mod tests {
             "offer_id": 10001, "campaign_id": 20001, "publisher_id": 30001, "advertiser_id": 40001,
             "source": "facebook"
         }), 3600).unwrap()
+    }
+
+    #[test]
+    fn clear_keys_recovers_poisoned_lock_and_zeroes_state() {
+        let state = std::sync::Arc::new(RwLock::new(State {
+            keys: HashMap::from([(7, [0xA5; 32])]),
+            current_kid: Some(7),
+        }));
+        let poison_target = Arc::clone(&state);
+        let _ = thread::spawn(move || {
+            let _guard = poison_target.write().unwrap();
+            panic!("simulate panic while holding the key-state lock");
+        })
+        .join();
+
+        let mut recovered = state.write().unwrap_err().into_inner();
+        clear_state_keys(&mut recovered);
+        assert!(recovered.keys.is_empty());
+        assert_eq!(recovered.current_kid, None);
+        drop(recovered);
+        state.clear_poison();
+        assert!(state.read().unwrap().keys.is_empty());
     }
 
     #[test]
