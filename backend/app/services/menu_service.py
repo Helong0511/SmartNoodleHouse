@@ -1,5 +1,9 @@
 """小程序菜单聚合服务（Task 12）：分类 + 在售餐品一次成型。
 
+菜单缓存协调（Redis）不可用时，本服务对菜单读取 fail-closed：
+不能验证远端 generation，就不能返回本地旧 bundle，也不能在未持有分布式
+重建锁时自行回源。短暂 503 优先于跨 Worker 旧菜单或 MySQL 缓存击穿。
+
 口径与 GET /categories、GET /products 公开读路径保持一致：
 - 分类 status=1、按当前时段方案重排；
 - 餐品 status=ON_SALE，NOT EXISTS 本店停售覆盖；售罄餐品仍展示（不按库存过滤）；
