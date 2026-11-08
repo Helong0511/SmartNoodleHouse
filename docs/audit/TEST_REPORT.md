@@ -153,3 +153,26 @@ python -m pytest tests/ -q --tb=line --no-header
 ## 10. 结论
 
 以上 **791 passed / 8 skipped / 0 failed** 仅为 2026-09-29 的历史 SQLite 测试记录。后续 CI 已加入 MySQL 8、Redis 7、前端构建/测试和依赖安全审计；当前 main 的实际通过情况必须按对应 commit 的 Actions 检查读取。生产沙箱联调、生产 schema 演练、备份恢复、告警接入与全链路容量验收仍属外部上线阻塞项。
+---
+
+## 2026-11-08 当前审查环境测试补充（不是全量通过报告）
+
+审查基线：main @ 442beb4761b29f5b415830e91e06c97241f74ef3。
+
+| 检查项 | 结果 | 解释 |
+|---|---|---|
+| python -m compileall -q backend/app | 通过 | 236 个后端 Python 文件未发现语法错误 |
+| pytest --collect-only -q（默认 Python 3.13） | 未运行成功 | 当前解释器环境缺少 pytest |
+| pytest -q --no-header（Python 3.11 / pytest 9.0.2） | 收集失败 | tests/conftest.py 导入 backend security 时缺少 argon2，尚未进入用例执行 |
+| 仓库 pytest_out.txt | 历史失败记录 | 1 failed、23 passed；test_draft_publish_idempotent_pause 失败，需当前 main CI 复核 |
+| PR #113 CI 历史记录 | 12/12 通过 | 包含 Redis 7.4、MySQL migration、Rust stable/1.89、Windows DLL、前端/小程序等检查；此为既有 PR 结果，不等同于本轮所有问题已通过 |
+
+### 当前结论
+
+- 本机 pytest 未能完成收集，不可表述为“测试全部通过”。
+- 缺少 argon2 属于测试环境依赖未安装，但不能据此推断测试本身无问题。
+- 历史 pytest_out.txt 的营销任务失败必须在当前 commit 的 CI 中复核；如已修复，应标注旧日志基线，不可静默删除失败历史。
+- P0/P1 新发现项需补充独立回归测试，尤其是 APP_ENV/lifespan、日志脱敏、金额校验、Webhook 重试、WebSocket 授权、支付宝隐私授权和 destructive SQL 防护。
+- 当前 CI 的真实执行结果以 GitHub Actions 对应 commit 的 job 日志为准；报告必须记录 SHA、时间、运行环境、命令、passed/failed/skipped。
+
+
