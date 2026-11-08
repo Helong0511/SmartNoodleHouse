@@ -149,3 +149,15 @@ curl -sI https://your-domain.com/
 #   分片键评估：orders/payments 按 store_id + created_at 范围；热表保留 6–12 个月。
 #   报表只读：配置只读副本 DATABASE_URL_READONLY（应用层后续接入）；写库仍主库。
 #   JWT 多服务：JWT_ALGORITHM=RS256 并配置 JWT_PRIVATE_KEY/JWT_PUBLIC_KEY（PEM）。
+
+
+# ── 2026-11-08 上线阻断安全门禁（必须完成）──
+# 1) 本脚本不允许对已有数据库执行初始化 SQL。struct.sql 含 DROP DATABASE，
+#    data_sys.sql 含 TRUNCATE；生产已有库只允许在备份和预演后执行 Alembic upgrade head。
+# 2) APP_ENV 必须显式为 production；未知值按生产策略；不得依赖 lifespan 单独完成安全校验。
+# 3) 所有 ALLOW_*_MOCK=false；支付 mock、跳过验签、mock 登录等服务端旁路还须自身拒绝生产。
+# 4) httpx/SDK 请求日志不得输出完整 URL query、AppSecret、token；历史泄露凭据必须轮换。
+# 5) 微信/支付宝 release API 必须为真实 HTTPS 域名；环境探测失败不得回退到 DEV_LAN_HOST/HTTP。
+# 6) 发布前核验双端隐私授权真机流程、支付/退款沙箱、Webhook 重试、Redis 故障和备份恢复。
+# 7) 当前全量审查记录 P0/P1，未逐项关闭前禁止上线：
+#    docs/audit/FULL_CODE_REVIEW_2026-11-08.md
