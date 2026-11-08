@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use once_cell::sync::Lazy;
-use rand::TryRng;
+use rand::{rngs::SysRng, TryRng};
 use serde_json::{Map, Value};
 use std::{
     cell::RefCell,
@@ -356,10 +356,10 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     // AES-GCM nonce 使用由操作系统熵源播种并周期重播种的 CSPRNG；失败时禁止降级。
-    rand::rng().try_fill_bytes(&mut nonce_bytes).map_err(|_| {
-        set_error("operating system random source unavailable");
-        ERR_INTERNAL
-    })?;
+    if SysRng.try_fill_bytes(&mut nonce_bytes).is_err() {
+        set_error("system cryptographic random source failed");
+        return Err(ERR_INTERNAL);
+    }
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
