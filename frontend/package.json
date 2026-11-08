@@ -29,5 +29,8 @@
     "vitest": "^5.1.0",
     "vue-tsc": "^3.3.14"
   },
-  "packageManager": "npm@11.19.1"
+  "packageManager": "npm@11.19.1",
+  "allowScripts": {
+    "vue-demi@0.14.10": true
+  }
 }
