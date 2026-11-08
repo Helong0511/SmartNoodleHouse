@@ -12,8 +12,8 @@ from httpx import ASGITransport, AsyncClient
 from app.api.miniprogram import get_menu_bundle_api
 from app.core import menu_cache, perf_metrics
 from app.core.performance_middleware import JsonGZipMiddleware, PerformanceMetricsMiddleware
-from app.models import StoreProductStock
-from app.services.recommendation_service import invalidate_store_caches
+from app.models import Store, StoreProductStock
+from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 from tests.reco_factories import make_category, make_product, make_store
 
 
@@ -105,6 +105,16 @@ class FakeRedis:
             if self.kv.get(keys[0]) == str(argv[0]):
                 return await self.delete(keys[0])
             return 0
+        # MySQL generation is authoritative; Redis only mirrors it and can be rebuilt.
+        if "MENU_ENSURE_DURABLE_GENERATION" in script:
+            version_key, bundle_key = keys
+            desired = int(argv[0])
+            current = self.kv.get(version_key)
+            if current is None or int(current) < desired:
+                self.kv[version_key] = str(desired)
+                self.kv.pop(bundle_key, None)
+                return desired
+            return int(current)
         # 持久化菜单时段代际：模拟 Redis Lua 原子比较、INCR、marker 写入及 bundle 删除。
         if "MENU_SYNC_SCHEDULE_GENERATION" in script:
             schedule_key, version_key, bundle_key = keys
@@ -361,21 +371,22 @@ async def test_menu_bundle_version_flow(fake_redis, db_session):
     assert first["code"] == 0
     d1 = first["data"]
     assert d1["changed"] is True
-    assert d1["version"] == 1
+    assert d1["version"] >= 1_000_000_000
     assert len(d1["categories"]) == 1
     assert [it["id"] for it in d1["products"]["items"]] == [p1.id]
     assert d1["products"]["items"][0]["has_options"] is False
 
     # 携带相同版本：changed:false 小响应（可附带 visibility_day 等元数据）
-    fresh = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=1)
+    first_version = d1["version"]
+    fresh = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=first_version)
     assert fresh["data"]["changed"] is False
-    assert fresh["data"]["version"] == 1
+    assert fresh["data"]["version"] == first_version
 
-    # 餐品写路径失效：版本递增，客户端旧版本重新拿全量
-    await invalidate_store_caches(store.id)
-    changed = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=1)
+    # 餐品写路径在 DB 事务内递增持久代际；下一次读取恢复 Redis 镜像。
+    await enqueue_menu_cache_invalidation(db, store.id)
+    changed = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=first_version)
     assert changed["data"]["changed"] is True
-    assert changed["data"]["version"] == 2
+    assert changed["data"]["version"] == first_version + 1
     assert len(changed["data"]["products"]["items"]) == 1
 
 
@@ -390,10 +401,11 @@ async def test_menu_bundle_invalidates_stale_local_cache_from_remote_version(fak
     old_version = first["data"]["version"]
     assert first["data"]["products"]["items"][0]["name"] == "旧菜单名"
 
-    # 模拟另一个 worker 更新数据并只 bump Redis 版本；本 worker 的进程内缓存没有被直接清除。
+    # 模拟另一个 worker 提交业务变更与 DB generation；本 worker 的进程内缓存未被直接清除。
     product.name = "新菜单名"
     await db.flush()
-    new_version = await menu_cache.bump_menu_version(store.id)
+    await enqueue_menu_cache_invalidation(db, store.id)
+    new_version = int(await db.scalar(select(Store.menu_generation).where(Store.id == store.id)))
     assert new_version > old_version
 
     refreshed = await get_menu_bundle_api(
@@ -472,7 +484,7 @@ async def test_menu_bundle_invalidates_on_category_schedule_change(fake_redis, d
     for it in items:
         it.sort_order = 0 if it.category_id == c_early.id else 1
     await db.flush()
-    await invalidate_store_caches(store.id)
+    await enqueue_menu_cache_invalidation(db, store.id)
 
     same_ver = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=v1)
     assert same_ver["data"]["changed"] is True
