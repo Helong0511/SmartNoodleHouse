@@ -261,7 +261,7 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
 
     durable_generation = await sync_store_menu_schedule_generation(db, sid, expected_sched)
     remote_version = await ensure_menu_generation(sid, durable_generation)
-    if remote_version is None:
+    if remote_version is None or remote_version != durable_generation:
         invalidate_local_menu_cache(sid)
         raise AppException(
             50301,
