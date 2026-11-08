@@ -60,11 +60,16 @@ jobs:
           import cv2
           import numpy
           import onnxruntime
+          import websockets
           from insightface.app import FaceAnalysis
+          from uvicorn.protocols.websockets.websockets_sansio_impl import WebSocketsSansIOProtocol
 
           assert numpy.__version__ == "2.4.6", numpy.__version__
           assert onnxruntime.__version__ == "1.31.1", onnxruntime.__version__
+          assert websockets.__version__ == "17.4", websockets.__version__
+          assert WebSocketsSansIOProtocol is not None
           print("OpenCV", cv2.__version__, "NumPy", numpy.__version__, "ONNX Runtime", onnxruntime.__version__)
+          print("websockets", websockets.__version__, "Uvicorn SansIO: OK")
           print("InsightFace FaceAnalysis import: OK")
           PY
       - name: Verify tracked text encoding and line endings
