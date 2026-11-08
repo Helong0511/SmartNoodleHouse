@@ -27,7 +27,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Regenerate npm lockfile from the official registry
         working-directory: frontend
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+        run: npm update --package-lock-only --ignore-scripts --no-audit --no-fund
       - uses: dtolnay/rust-toolchain@stable
       - name: Regenerate Cargo.lock from current stable constraints
         working-directory: tests/广告追踪/ad_tracking_dll
