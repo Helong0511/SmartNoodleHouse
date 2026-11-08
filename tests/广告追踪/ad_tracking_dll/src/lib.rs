@@ -140,6 +140,7 @@ fn write_out(out: *mut *mut c_char, value: String) -> Result<(), i32> {
         set_error("output contains NUL");
         ERR_INTERNAL
     })?;
+    // 安全约定：内存所有权转交给 C 调用方，调用方必须且只能用 tracking_free 释放。
     // SAFETY: ownership is transferred to the caller, which must call tracking_free.
     unsafe { *out = c.into_raw(); }
     Ok(())
@@ -314,6 +315,7 @@ fn aad_for(version: u8, kid: u8) -> [u8; 23] {
 }
 
 fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
+    // 生成令牌时统一写入版本、KID、签发时间和过期时间，避免调用方伪造安全元数据。
     if ttl == 0 || ttl > MAX_TTL_SECONDS {
         set_error("ttl_seconds out of allowed range");
         return Err(ERR_INVALID_ARGUMENT);
@@ -354,12 +356,14 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
         return Err(ERR_PAYLOAD_INVALID);
     }
 
+    // AES-GCM 的 nonce 必须对同一密钥保持唯一；使用系统 CSPRNG 生成 96 位随机 nonce。
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
     })?;
+    // 将协议版本与 KID 绑定到 AAD，防止密文头部被替换后仍能通过认证。
     let aad = aad_for(VERSION, kid);
     let ciphertext = cipher.encrypt(Nonce::from_slice(&nonce_bytes), Payload { msg: &plaintext, aad: &aad }).map_err(|_| {
         set_error("AES-GCM encryption failed");
@@ -415,6 +419,7 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         ERR_INTERNAL
     })?;
 
+    // 先解析固定头部，再用相同 AAD 验证；任何头部篡改都会导致 GCM 认证失败。
     let nonce = &raw[2..HEADER_LEN];
     let ciphertext = &raw[HEADER_LEN..];
     let aad = aad_for(version, kid);
