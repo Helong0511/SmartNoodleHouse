@@ -355,7 +355,7 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    // AES-GCM nonce 使用由操作系统熵源播种并周期重播种的 CSPRNG；失败时禁止降级。
+    // AES-GCM nonce 直接使用操作系统 CSPRNG；随机源异常时立即失败，禁止降级。
     if SysRng.try_fill_bytes(&mut nonce_bytes).is_err() {
         set_error("system cryptographic random source failed");
         return Err(ERR_INTERNAL);
