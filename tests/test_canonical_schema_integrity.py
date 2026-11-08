@@ -155,7 +155,7 @@ def test_sqlalchemy_mysql_table_options_compile_utf8mb4_collation():
 
     assert "ENGINE=InnoDB" in ddl
     assert "CHARSET=utf8mb4" in ddl
-    assert "COLLATE=utf8mb4_unicode_ci" in ddl
+    assert "COLLATE utf8mb4_unicode_ci" in ddl
 
 
 
