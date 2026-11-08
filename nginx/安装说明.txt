@@ -60,3 +60,12 @@ sudo certbot renew --dry-run
 # WebSocket 断连      → 确认 location /api/ws/ 存在且 proxy Upgrade 头正确
 # 上传图 404          → 检查 REPLACE_UPLOADS_DIR 与 .env UPLOAD_DIR 一致
 # 摄像头 403          → /api/cameras/ 默认仅内网；公网管理请走 VPN 或改 allow 网段
+
+
+# ── 2026-11-08 安全核对 ──
+# - 确认 proxy-common.conf 覆盖客户端伪造的 X-Real-IP / X-Forwarded-*，
+#   后端只信任 TRUSTED_PROXY_IPS 中的反向代理。
+# - /api/ready 必须走 API readiness，不得被 SPA fallback 返回 200。
+# - 请求体限制与后端全局 body limit 对齐；Webhook 限制与上传限制分开配置。
+# - WebSocket 未知频道默认拒绝；display 生产令牌不能为空且需绑定 store_id。
+# - 日志和访问日志不得记录支付密钥、AppSecret、长期 token 或 URL query 敏感字段。
