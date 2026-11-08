@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -218,7 +219,7 @@ def test_hikvision_audio_constructor_pins_and_validates_base_url(monkeypatch) ->
     with pytest.raises(ValueError, match="base URL"):
         audio.HikvisionTwoWayAudio("http://10.0.0.10/ISAPI", "admin", "secret")
     with pytest.raises(ValueError, match="username"):
-        audio.HikvisionTwoWayAudio("http://10.0.0.10", "admin\\r\\nX: y", "secret")
+        audio.HikvisionTwoWayAudio("http://10.0.0.10", "admin\r\nX: y", "secret")
 
 
 def test_play_g711_rejects_payload_over_two_minutes(monkeypatch) -> None:
