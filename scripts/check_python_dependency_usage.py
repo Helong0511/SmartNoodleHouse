@@ -43,7 +43,7 @@ DEPENDENCY_MAP = {
     "pywin32": {"reason": "Windows SAPI 专用条件依赖，Linux 部署不安装"},
     "edge-tts": {"modules": {"edge_tts"}},
     "pymysql": {"reason": "Alembic 同步迁移连接使用 mysql+pymysql 方言动态加载"},
-    "boto3": {"modules": {"boto3"}, "reason": "S3/MinIO 可选存储适配器"},
+    "boto3": {"modules": {"boto3"}},  # 必须有真实源码引用；不能仅凭“可选适配器”注释豁免
 }
 
 
