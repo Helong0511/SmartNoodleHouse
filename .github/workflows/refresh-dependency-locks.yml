@@ -1,0 +1,56 @@
+name: Refresh dependency lockfiles
+
+on:
+  push:
+    branches:
+      - fix/menu-db-durable-generation-v1-2026-11-08
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-lockfiles:
+    # 只接受本分支明确标记的单次刷新提交，避免每次 push 自动改写依赖锁。
+    if: contains(github.event.head_commit.message, '[refresh-locks]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Regenerate npm lockfile from the official registry
+        working-directory: frontend
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Regenerate Cargo.lock from current stable constraints
+        working-directory: tests/广告追踪/ad_tracking_dll
+        run: cargo update
+      - name: Verify npm lockfile and frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Verify Cargo.lock and Rust tests
+        working-directory: tests/广告追踪/ad_tracking_dll
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null
+          cargo test --locked --all-targets
+      - name: Commit only regenerated lockfiles
+        shell: bash
+        run: |
+          if git diff --quiet -- frontend/package-lock.json tests/广告追踪/ad_tracking_dll/Cargo.lock; then
+            echo "Lockfiles are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package-lock.json tests/广告追踪/ad_tracking_dll/Cargo.lock
+          git commit -m "chore(deps): refresh npm and cargo lockfiles"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
