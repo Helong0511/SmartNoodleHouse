@@ -57,10 +57,10 @@ async def test_stale_worker_cannot_regress_redis_generation(monkeypatch):
             assert actual_version_key == version_key
             assert actual_bundle_key == bundle_key
             assert int(desired) == 1_000_000_041
-            return -1  # Redis already reflects a newer committed DB generation.
+            return 1_000_000_042  # Redis already reflects a newer committed DB generation.
 
     async def get_redis():
         return FakeRedis()
 
     monkeypatch.setattr(menu_cache, "get_redis", get_redis)
-    assert await menu_cache.ensure_menu_generation(store_id, 1_000_000_041) is None
+    assert await menu_cache.ensure_menu_generation(store_id, 1_000_000_041) == 1_000_000_042
