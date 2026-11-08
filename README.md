@@ -35,8 +35,9 @@
 
 - Python 3.11+
 - Node.js 22.20+、24.12+ 或 26+（推荐 26 Active LTS；24 为 Maintenance LTS；Node 20 已于 2026-04-30 EOL）
+- Rust 1.88+（仅在本机编译 `ad_tracking_engine` DLL/so 时需要）
 - MySQL 8
-- Redis 7
+- Redis Server 7.2+（生产环境使用 Redis 官方 APT 仓库）
 - 微信 / 支付宝小程序开发者工具（可选）
 
 ### 2. 数据库
