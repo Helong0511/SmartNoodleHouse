@@ -277,7 +277,7 @@ DISPLAY_SCREEN_TOKEN=随机一串
 | 支付宝隐私检查 | `miniprogram-alipay/app.json` | `usePrivacyCheck: true` |
 | 前端开发代理 | `frontend/vite.config.ts` | 本地 `/api` 代理到 `127.0.0.1:8000` |
 | Nginx 反代 | `nginx/smart-noodle.conf` | HTTPS、静态资源、WebSocket |
-| systemd 服务 | `systemd/smart-noodle.service` | gunicorn 开机自启 |
+| systemd 服务 | `systemd/smart-noodle.service` | Uvicorn 内置多进程管理器开机自启 |
 | 启动命令（Windows） | `scripts/运行命令.txt` | 含正式版上线检查清单 |
 | 部署命令（Ubuntu） | `scripts/生产部署-ubuntu.txt` | 生产环境速查 |
 
@@ -314,7 +314,7 @@ python -m compileall backend
 
 ## 生产部署
 
-目标环境：**Ubuntu 22.04 LTS**，不使用 Docker。对外仅暴露 **HTTPS 443**；后端 gunicorn 监听 `127.0.0.1:8000`，由 Nginx 反代。
+目标环境：**Ubuntu 22.04 LTS**，不使用 Docker。对外仅暴露 **HTTPS 443**；后端 Uvicorn 多进程监听 `127.0.0.1:8000`，由 Nginx 反代。
 
 更完整的命令速查见 `scripts/生产部署-ubuntu.txt`；小程序环境对照见 `miniprogram-*/config/环境说明.txt`。
 
@@ -355,7 +355,7 @@ python -m compileall backend
   厨房 KDS / 收银 ───┼── 服务器      HTTPS :443 ── Nginx
   大厅叫号屏 ────────┘    Ubuntu         │
                     MySQL + Redis        ├─ /          → frontend/dist（后台、叫号屏、H5 扫码页）
-                    API :8000（本机）    ├─ /api       → gunicorn
+                    API :8000（本机）    ├─ /api       → Uvicorn
                                          └─ /uploads   → 本地上传目录
 
   微信小程序 / 支付宝小程序 ──request──→ https://你的域名/api

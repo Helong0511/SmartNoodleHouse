@@ -17,7 +17,6 @@ DEPENDENCY_MAP = {
     "fastapi": {"modules": {"fastapi"}},
     "starlette": {"modules": {"starlette"}, "reason": "FastAPI 的核心运行时依赖；单独固定安全修复版本"},
     "uvicorn": {"reason": "ASGI 启动命令，不由业务模块 import"},
-    "gunicorn": {"reason": "生产进程管理 CLI，不由业务模块 import"},
     "sqlalchemy": {"modules": {"sqlalchemy"}},
     "aiomysql": {"reason": "SQLAlchemy mysql+aiomysql 方言按数据库 URL 动态加载"},
     "alembic": {"modules": {"alembic"}, "reason": "迁移脚本与 Alembic CLI"},

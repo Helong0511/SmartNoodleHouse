@@ -88,6 +88,81 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall backend/app -q
+      - name: Verify production ASGI worker launch configuration
+        run: |
+          grep -F 'REPLACE_DEPLOY_ROOT/backend/.venv/bin/uvicorn app.main:app' systemd/smart-noodle.service
+          grep -F -- '--workers 2' systemd/smart-noodle.service
+          grep -F -- '--timeout-graceful-shutdown 30' systemd/smart-noodle.service
+          if grep -Eq 'gunicorn|uvicorn[.]workers[.]UvicornWorker' systemd/smart-noodle.service; then
+            echo "Deprecated or removed ASGI worker launch path found" >&2
+            exit 1
+          fi
+          python -m uvicorn --help | grep -F -- '--workers'
+          python - <<'PY'
+          import os
+          import socket
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          from pathlib import Path
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          with tempfile.TemporaryDirectory(prefix="uvicorn-worker-smoke-") as tmp:
+              app_file = Path(tmp) / "uvicorn_smoke.py"
+              app_file.write_text(
+                  "async def app(scope, receive, send):\n"
+                  "    if scope['type'] == 'http':\n"
+                  "        await send({'type': 'http.response.start', 'status': 200, "
+                  "'headers': [(b'content-type', b'text/plain')]})\n"
+                  "        await send({'type': 'http.response.body', 'body': b'uvicorn-workers-ok'})\n",
+                  encoding="utf-8",
+              )
+              with socket.socket() as sock:
+                  sock.bind(("127.0.0.1", 0))
+                  port = sock.getsockname()[1]
+              env = os.environ.copy()
+              env["PYTHONPATH"] = os.pathsep.join(filter(None, [tmp, env.get("PYTHONPATH", "")]))
+              log_path = Path(tmp) / "uvicorn-smoke.log"
+              with log_path.open("w", encoding="utf-8") as log_file:
+                  process = subprocess.Popen(
+                      [
+                          sys.executable, "-m", "uvicorn", "uvicorn_smoke:app",
+                          "--host", "127.0.0.1", "--port", str(port), "--workers", "2",
+                          "--timeout-graceful-shutdown", "5",
+                      ],
+                      env=env,
+                      stdout=log_file,
+                      stderr=subprocess.STDOUT,
+                      text=True,
+                  )
+              try:
+                  for _ in range(40):
+                      if process.poll() is not None:
+                          raise RuntimeError(f"Uvicorn worker manager exited early: {log_path.read_text(encoding='utf-8')}")
+                      try:
+                          with urlopen(f"http://127.0.0.1:{port}/", timeout=0.5) as response:
+                              body = response.read()
+                          if body != b"uvicorn-workers-ok":
+                              raise AssertionError(f"Unexpected ASGI response: {body!r}")
+                          break
+                      except (URLError, TimeoutError, ConnectionError):
+                          time.sleep(0.25)
+                  else:
+                      raise TimeoutError("Uvicorn native two-worker process manager did not become ready")
+              finally:
+                  if process.poll() is None:
+                      process.terminate()
+                      try:
+                          process.wait(timeout=10)
+                      except subprocess.TimeoutExpired:
+                          process.kill()
+                          process.wait(timeout=5)
+              if process.returncode not in (0, -15):
+                  raise RuntimeError(f"Uvicorn worker manager shutdown failed: {log_path.read_text(encoding='utf-8')}")
+          print("Uvicorn native two-worker startup, HTTP response and shutdown: OK")
+          PY
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
@@ -103,6 +178,15 @@ jobs:
           ALLOW_DELIVERY_MOCK: "true"
           REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
         run: python -m pytest -q tests/测试_营销分群活动.py::test_campaign_payload_for_includes_created_by_name -W error::RuntimeWarning
+      - name: Verify concurrent settings reads do not leak unawaited DB cursors
+        env:
+          PYTHONPATH: backend
+          APP_ENV: development
+          APP_DEBUG: "true"
+          JWT_SECRET: "ci-test-jwt-secret-at-least-32-chars!!"
+          FACE_ENCRYPTION_KEY: "ci-test-face-encryption-key-32b!!"
+          REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+        run: python -m pytest -q tests/测试_设置并发.py::test_extreme_concurrent_get_int -W error::RuntimeWarning
       - name: Run unit tests with coverage
         env:
           PYTHONPATH: backend
@@ -114,8 +198,12 @@ jobs:
           ALLOW_AUTH_MOCK: "true"
           ALLOW_DELIVERY_MOCK: "true"
           REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+          # 跟踪延迟回收的未等待协程，确保完整测试套件不吞掉 DB cursor 警告。
+          PYTHONTRACEMALLOC: "10"
         run: |
           python -m pytest -q --tb=short \
+            -W error::RuntimeWarning \
+            -W error::pytest.PytestUnraisableExceptionWarning \
             --cov=app --cov-report=term-missing --cov-report=xml \
             --cov-fail-under=35
 
