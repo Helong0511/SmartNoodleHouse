@@ -991,7 +991,8 @@ async def camera_stream(
 ):
     from camera.camera_manager import CameraManager
     from app.core.security import decode_token
-    from jose import JWTError
+    # 统一使用项目已锁定的 PyJWT，避免运行时依赖未声明的 python-jose。
+    from jwt import InvalidTokenError as JWTError
     from sqlalchemy.orm import selectinload
     from app.models import User
 
