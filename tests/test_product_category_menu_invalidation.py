@@ -16,7 +16,33 @@ async def test_category_cache_invalidation_clears_each_affected_store_once(
     local_invalidations: list[int] = []
     outbox_invalidations: list[int] = []
 
-    from app.services import recommendation_service
+    async def fake_invalidate(_db, store_id):
+        local_invalidations.append(int(store_id))
+        outbox_invalidations.append(int(store_id))
+
+    monkeypatch.setattr(
+        products_categories,
+        "invalidate_store_menu_cache",
+        fake_invalidate,
+    )
+
+    await products_categories._invalidate_category_menu(
+        db_session, 3, 2, 3, None, 2
+    )
+
+    assert local_invalidations == [2, 3]
+    assert outbox_invalidations == [2, 3]
+
+
+
+@pytest.mark.asyncio
+async def test_shared_menu_invalidation_clears_local_cache_and_enqueues_outbox(
+    db_session, monkeypatch
+):
+    from app.services import menu_cache_service, recommendation_service
+
+    local_invalidations: list[int] = []
+    outbox_invalidations: list[int] = []
 
     monkeypatch.setattr(
         recommendation_service,
@@ -28,18 +54,16 @@ async def test_category_cache_invalidation_clears_each_affected_store_once(
         outbox_invalidations.append(int(store_id))
 
     monkeypatch.setattr(
-        products_categories,
+        menu_cache_service,
         "enqueue_menu_cache_invalidation",
         fake_enqueue,
     )
 
-    await products_categories._invalidate_category_menu(
-        db_session, 3, 2, 3, None, 2
-    )
+    await menu_cache_service.invalidate_store_menu_cache(db_session, 9)
+    await menu_cache_service.invalidate_store_menu_cache(db_session, None)
 
-    assert local_invalidations == [2, 3]
-    assert outbox_invalidations == [2, 3]
-
+    assert local_invalidations == [9]
+    assert outbox_invalidations == [9]
 
 @pytest.mark.asyncio
 async def test_category_store_move_is_rejected_when_products_are_still_linked(
