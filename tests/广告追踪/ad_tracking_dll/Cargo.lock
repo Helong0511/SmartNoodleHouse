@@ -13,7 +13,6 @@ dependencies = [
  "once_cell",
  "proptest",
  "rand",
- "serde",
  "serde_json",
  "uuid",
  "winres",
