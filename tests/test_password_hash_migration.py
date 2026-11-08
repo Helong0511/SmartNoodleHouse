@@ -40,6 +40,17 @@ def test_wrong_password_does_not_produce_an_upgrade_hash():
     assert upgraded is None
 
 
+
+def test_malformed_argon2_hash_fails_closed():
+    # 前缀可识别但编码体损坏时，底层 argon2-cffi 会抛 InvalidHashError。
+    valid, upgraded = verify_password_and_update(
+        "any-password",
+        "$argon2id$v=19$m=65536,t=3,p=4$invalid$invalid",
+    )
+
+    assert valid is False
+    assert upgraded is None
+
 def test_malformed_or_unknown_hash_fails_closed():
     valid, upgraded = verify_password_and_update("any-password", "not-a-valid-password-hash")
 
