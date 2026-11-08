@@ -115,21 +115,11 @@ jobs:
 
 
   dependency-lock-consistency:
-    concurrency:
-      group: dependency-lock-refresh-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
     name: dependency-lock-consistency
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'chore/dependency-audit-unused-imports-cn-comments-2026-11-08' && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -142,22 +132,16 @@ jobs:
         run: |
           python scripts/生成依赖锁定文件.py
           python scripts/check_requirements_lock.py
-      - name: Commit the generated runtime lock to this trusted PR branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if git diff --quiet -- backend/requirements.lock; then
-            echo "Runtime lock is already current."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/requirements.lock
-          git commit -m "chore(deps): lock full resolved Python runtime closure"
-          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c http.extraheader="$AUTH_HEADER" fetch origin "$GITHUB_HEAD_REF"
-          git rebase FETCH_HEAD
-          git -c http.extraheader="$AUTH_HEADER" push origin "HEAD:${GITHUB_HEAD_REF}"
+      - name: Publish regenerated runtime lock for review
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-requirements-lock
+          path: backend/requirements.lock
+          if-no-files-found: error
+          retention-days: 3
+      - name: Require committed runtime lock to match the resolved closure
+        run: git diff --exit-code -- backend/requirements.lock
 
   backend-mysql:
     runs-on: ubuntu-latest
@@ -280,13 +264,7 @@ jobs:
 
 
   frontend-lockfile-consistency:
-    concurrency:
-      group: dependency-lock-refresh-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
     name: frontend-lockfile-consistency
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'chore/dependency-audit-unused-imports-cn-comments-2026-11-08' && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -294,10 +272,6 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -307,12 +281,11 @@ jobs:
         run: |
           npm install --global npm@11.19.1
           test "$(npm --version)" = "11.19.1"
-      - name: Resolve latest stable versions allowed by package.json
+      - name: Verify lockfile is up to date with compatible stable releases
         run: npm update --package-lock-only --ignore-scripts
-      - name: Install refreshed dependency graph
-        run: npm ci
-      - name: Verify audit and production build on refreshed lock
+      - name: Install and verify refreshed dependency graph
         run: |
+          npm ci
           npm audit --audit-level=high
           npm run build
       - name: Publish generated lockfile for review
@@ -323,22 +296,8 @@ jobs:
           path: frontend/package-lock.json
           if-no-files-found: error
           retention-days: 3
-      - name: Commit regenerated npm lockfile to this trusted PR branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if git diff --quiet -- package-lock.json; then
-            echo "Frontend lockfile is already current."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git commit -m "chore(deps): refresh compatible frontend lockfile"
-          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c http.extraheader="$AUTH_HEADER" fetch origin "$GITHUB_HEAD_REF"
-          git rebase FETCH_HEAD
-          git -c http.extraheader="$AUTH_HEADER" push origin "HEAD:${GITHUB_HEAD_REF}"
+      - name: Require committed npm lockfile to match compatible graph
+        run: git diff --exit-code -- package-lock.json
 
   dependency-security-audit:
     name: dependency-security-audit
