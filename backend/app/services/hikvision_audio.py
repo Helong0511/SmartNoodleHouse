@@ -20,7 +20,7 @@ import time
 import warnings
 import wave
 from io import BytesIO
-from threading import Lock
+from threading import Lock, local
 from urllib.parse import quote, urlparse, urlsplit
 from xml.etree import ElementTree as ET
 
