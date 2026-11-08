@@ -11,8 +11,7 @@ from app.models import CategorySortSchedule, CategorySortScheduleItem, ProductCa
 from app.schemas.product import CategoryScheduleCreate, CategoryScheduleUpdate
 from app.services.audit_service import AuditService
 from app.services.category_schedule import parse_hhmm
-from app.services.menu_cache_service import enqueue_menu_cache_invalidation
-from app.services.recommendation_service import invalidate_store_local_caches
+from app.services.menu_cache_service import invalidate_store_menu_cache
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
@@ -154,8 +153,7 @@ async def create_category_schedule(
     await replace_schedule_items(db, sched, data.items)
     await db.flush()
     items = (await load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
-    invalidate_store_local_caches(int(sid))
-    await enqueue_menu_cache_invalidation(db, int(sid))
+    await invalidate_store_menu_cache(db, int(sid))
     await AuditService.log_staff(
         db,
         user=user,
@@ -208,8 +206,7 @@ async def update_category_schedule(
         await replace_schedule_items(db, sched, data.items or [])
     await db.flush()
     items = (await load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
-    invalidate_store_local_caches(int(sched.store_id))
-    await enqueue_menu_cache_invalidation(db, int(sched.store_id))
+    await invalidate_store_menu_cache(db, int(sched.store_id))
     await AuditService.log_staff(
         db,
         user=user,
@@ -337,8 +334,7 @@ async def delete_category_schedule(
     )
     await db.delete(sched)
     await db.flush()
-    invalidate_store_local_caches(int(sched.store_id))
-    await enqueue_menu_cache_invalidation(db, int(sched.store_id))
+    await invalidate_store_menu_cache(db, int(sched.store_id))
     await AuditService.log_staff(
         db,
         user=user,
