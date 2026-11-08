@@ -29,8 +29,6 @@ jobs:
         working-directory: frontend
         run: |
           npm update --package-lock-only --ignore-scripts --no-audit --no-fund
-          npm ls vue element-plus vite axios --depth=0
-          npm outdated --json || true
       - uses: dtolnay/rust-toolchain@stable
       - name: Regenerate Cargo.lock from current stable constraints
         working-directory: tests/广告追踪/ad_tracking_dll
@@ -39,6 +37,11 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          npm ls vue element-plus vite axios --depth=0
+          npm view vue version
+          npm view element-plus version
+          npm view vite version
+          npm outdated --json || true
           npm run build
       - name: Verify Cargo.lock and Rust tests
         working-directory: tests/广告追踪/ad_tracking_dll
