@@ -1,48 +1,64 @@
-# 面馆智能经营系统
+# SmartNoodleHouse｜智能面馆经营系统
 
-微信 / 支付宝小程序扫码点餐 + 统一订单 + 厨房 KDS + 会员 / 人脸迎宾 + 美团 / 饿了么外卖 + 后台 RBAC
+微信 / 支付宝小程序扫码点餐、统一订单与支付、POS 收银、厨房 KDS、顾客叫号、会员营销、多门店、外卖平台对接及人脸迎宾。
 
-## 技术栈
+> 项目尚处于上线前开发、集成与验收阶段。功能说明必须以当前 main 代码、数据库迁移、环境配置和测试证据为准；第三方真实商户联调、平台审核、生产凭据和部署验收不能仅凭代码构建通过而视为完成。
+> 部署方式：原生 Ubuntu/systemd + Nginx + MySQL + Redis，不使用 Docker。
 
-- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x, MySQL 8, Redis 7.2+（官方 Redis APT 源）, APScheduler
-- 后台前端: Vue 3, TypeScript, Vite, Element Plus
-- 微信小程序: `miniprogram-wechat/`
-- 支付宝小程序: `miniprogram-alipay/`
-- 摄像头: OpenCV（海康 RTSP）
-- 实时: WebSocket（厨房 / 订单 / 顾客叫号屏）
+## 文档入口
 
-> **不使用 Docker**。请在本机安装 MySQL、Redis、Python、Node.js 后按下方步骤启动。
+| 文档 | 内容 |
+|---|---|
+| [项目说明文档](项目说明文档.md) | 系统全景、模块职责、开发和部署导航 |
+| [架构设计](docs/架构设计.md) | 分层架构、组件边界、数据流 |
+| [数据库设计](docs/数据库设计.md) | 表结构、初始化、迁移和数据约束 |
+| [部署说明](docs/部署说明.md) | Ubuntu、Nginx、systemd、生产配置 |
+| [后台操作手册](后台操作手册.md) | 门店、员工、菜品、订单、营销和运营操作 |
+| [配置检查清单](配置检查清单.md) | 环境变量与发布前配置核验 |
+| [支付对接](docs/支付对接.md) / [退款流程](docs/退款流程.md) | 支付、回调、退款与账务边界 |
+| [多门店管理](docs/多门店管理.md) / [外卖对接](docs/外卖对接.md) | 租户隔离、总部覆盖、平台门店与 SKU 映射 |
+| [KDS 与取餐叫号](docs/厨房KDS与取餐叫号.md) | 厨房工作站和顾客显示屏 |
+| [安全说明](docs/安全说明.md) | 认证、授权、密钥、生产安全 |
+| [审计基线](docs/audit/BASELINE.md) / [问题台账](docs/audit/REPAIR_TRACKER.md) | 仓库基线和修复追踪 |
+| [测试报告](docs/audit/TEST_REPORT.md) | 历史测试与当前可追溯测试证据 |
+| [依赖审计](docs/依赖包审计与升级基线.md) | 依赖、锁文件、重复引用和升级基线 |
+| [通用审计与缺陷预防手册](docs/通用项目审计与缺陷预防手册.md) | 可复制到其他项目的工程审计标准 |
+| [通用上线审计清单模板](docs/通用项目上线审计清单模板.md) | 新项目上线前逐项验收模板 |
 
-## 功能概览
+## 技术栈与目录
 
-| 模块 | 能力 |
-|------|------|
-| 堂食 | 微信 / 支付宝扫码点餐、服务端计价、支付回调验签 |
-| 厨房 KDS | 实时 WebSocket、状态流转、外卖催单 / 退款高亮、出餐回传平台 |
-| 顾客叫号屏 | 大厅电视只读展示「制作中 / 请取餐」，堂食桌号 + 打包取餐号 |
-| 免烹饪直出 | 卤味等现成品可跳过制作流程，KDS 一键「直接出餐」 |
-| 会员 | 注册、口味画像、一键复购、积分兑换券/过期清零/明细查询；订单页醒目显示桌号 / 取餐号 |
-| 人脸迎宾 | 仅主动授权、多帧确认、冷却、TTS 播报 |
-| 外卖 | 美团 / 饿了么：新单、取消、退款、催单、配送、隐私号、餐品同步 |
-| 后台 | 餐品 / 规格 / 订单 / 桌台 / 支付 / 摄像头 / **外卖管理** / RBAC |
+- 后端：Python 3.11+、FastAPI、SQLAlchemy 2.x、Alembic。
+- 数据库：MySQL 8.x；Redis 7.x 用于缓存、限流、锁和跨进程协调。
+- 管理后台：Vue 3、TypeScript、Vite、Element Plus。
+- 小程序：微信原生小程序目录 miniprogram-wechat/；支付宝原生小程序目录 miniprogram-alipay/。
+- 广告追踪 DLL：Rust crate 位于 tests/广告追踪/ad_tracking_dll/，通过 Python FFI 测试。
+- 摄像头：camera/，支持海康 RTSP 接入；设备型号和网络部署需按现场环境验收。
+- 实时：WebSocket 用于厨房、订单和顾客显示场景。
+- 部署：Ubuntu + Nginx + systemd；不使用 Docker。
 
-## 本地安装与启动
+主要目录：
+- backend/：API、服务、模型、任务、迁移和启动校验。
+- frontend/：管理后台。
+- miniprogram-wechat/、miniprogram-alipay/：双端小程序。
+- camera/：摄像头与人脸相关能力。
+- sql/：初始化 DDL 与种子数据。
+- tests/：自动化测试与 Rust DLL。
+- scripts/、nginx/、systemd/：部署与运维。
+- docs/：架构、业务、审计、操作和部署文档。
 
-> **Windows 本地逐步教程（推荐）**：[docs/本地Windows测试启动教程.md](docs/本地Windows测试启动教程.md)  
-> 含：依赖、`.env`、灌库顺序、后端/前端/小程序、pytest、常见问题。
+## 核心业务链路
 
-### 1. 准备环境
+1. 顾客通过门店/桌台二维码进入微信或支付宝小程序；服务端校验扫码 token 并解析门店上下文。
+2. 服务端读取菜单、规格、库存和营销规则，重新计算订单金额；客户端金额不作为支付依据。
+3. 订单进入统一订单状态机，调用对应支付渠道；支付回调验签、幂等处理后更新订单和账务状态。
+4. 订单进入 KDS；厨房员工按权限推进制作状态；顾客端/叫号屏展示进度。
+5. 会员、积分、优惠券和推荐按授权与门店隔离规则执行。
+6. 外卖平台 webhook 经签名/来源检查和幂等 inbox 进入统一订单流；菜单、库存和状态同步需真实平台凭证验证。
+7. 人脸迎宾属于敏感个人信息处理：必须主动授权、最少采集、可撤回；未授权用户不得建立可识别身份档案。
 
-- Python 3.11+
-- Node.js 22.20+、24.12+ 或 26+（推荐 26 Active LTS；24 为 Maintenance LTS；Node 20 已于 2026-04-30 EOL）
-- Rust 1.89+（仅在本机编译 `ad_tracking_engine` DLL/so 时需要）
-- MySQL 8
-- Redis Server 7.2+（生产环境使用 Redis 官方 APT 仓库）
-- 微信 / 支付宝小程序开发者工具（可选）
+## 数据库初始化与升级
 
-### 2. 数据库
-
-**全新环境**按结构 + 生产种子初始化（会删除并重建同名库，已有业务数据勿执行 `struct.sql`）：
+全新隔离环境初始化前，先检查 SQL 文件是否含清库操作，并确认目标数据库不是生产数据：
 
 ```bash
 mysql -u root -p < sql/struct.sql
@@ -51,650 +67,69 @@ mysql -u root -p < sql/data_custom.sql
 python scripts/初始化管理员.py
 ```
 
-生产部署前必须修改 `sql/struct.sql` 内数据库账号密码占位符，并设置管理员强密码：
+- sql/struct.sql：结构真源和 canonical schema。
+- sql/data_sys.sql：系统必要种子；包含清理/重建种子数据操作，必须确认目标库。
+- sql/data_custom.sql：门店经营种子。
+- sql/data_test.sql：仅测试环境。
+- 已有数据库升级使用 backend/Alembic 迁移；执行前备份并在隔离副本演练。禁止对生产库直接运行全新初始化脚本。
 
-```bash
-# 先把 struct.sql 中 REPLACE_WITH_STRONG_DB_PASSWORD 换成强密码
-mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
-set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
-python scripts/初始化管理员.py
-```
+## 本地开发
 
-| 脚本 | 说明 |
-|------|------|
-| `sql/struct.sql` | **结构真源**：建库授权、完整 DDL（含 Alembic baseline 的 CANONICAL SCHEMA 段） |
-| `sql/data_sys.sql` | **系统必要种子**：角色权限、全局系统参数、默认会员等级、平台券模板等（含全表 TRUNCATE） |
-| `sql/data_custom.sql` | **门店经营种子**：SH01 菜单/规格/桌台 + SH01/SH02 门店壳与里程碑等（幂等，无 TRUNCATE） |
-| `sql/data_test.sql` | **仅本地测试**：补齐 SH02 分类/菜品/桌台/员工/摄像头/人脸样例（禁止写入生产） |
+Windows PowerShell：
 
-已有库升级请用 Alembic：`cd backend && alembic upgrade head`（`0001_baseline` 只执行 `struct.sql` 的 CANONICAL SCHEMA，不删库）。
+```powershell
+# 项目根目录
+python --version
+node --version
+npm --version
 
-开发种子默认管理员: `admin` / `admin123`（生产请用 `初始化管理员.py` 设置强密码）
-
-### 3. 后端
-
-```bash
+# 后端（按当前锁文件和开发说明安装）
 cd backend
-pip install -r requirements.txt
-copy ..\.env.development.example ..\.env   # Windows 本地开发
-# cp ../.env.production.example ../.env    # Linux 生产
-uvicorn app.main:app --reload --app-dir .
-```
+python -m pip install -r requirements.txt
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload --app-dir .
 
-API 文档: http://127.0.0.1:8000/docs
-
-### 4. 后台管理前端
-
-```bash
+# 管理后台（新终端）
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-浏览器打开: http://127.0.0.1:5173
-
-侧边栏含：**厨房 KDS**、**外卖管理**（订单 / 退款 / 门店绑定 / 餐品映射 / 回调日志）。
-
-大厅可另开浏览器标签页作为 **顾客叫号屏**（见下文「厨房 KDS 与顾客叫号屏」），无需登录。
-
-### 5. 微信小程序
-
-开放平台入口：
-
-| 平台 | 网址 |
-|------|------|
-| 微信公众平台（小程序后台） | https://mp.weixin.qq.com |
-| 微信开放平台 | https://open.weixin.qq.com |
-| 微信小程序开发文档 | https://developers.weixin.qq.com/miniprogram/dev/framework/ |
-
-1. 用微信开发者工具打开 `miniprogram-wechat`
-2. 填写 AppID（或测试号），开发阶段可关闭域名校验
-3. 修改 `miniprogram-wechat/config/env.js` 中 `DEV_LAN_HOST`（真机联调）；API 地址由该文件按环境自动选择
-4. 扫桌台二维码，或编译参数: `token=桌台token&channel=wechat`
-5. **取餐进度**（与大厅叫号屏同步，无需手填 `store_id`）：
-   - 支付成功页、**订单** Tab 列表 / 详情会醒目显示 **桌号**（堂食）或 **取餐号**（打包，订单号末 4 位）
-   - 状态：排队中 → 制作中 → **请取餐**（变绿后可对照大厅 `/display?store_id=门店ID` 屏自取）
-   - 订单页每 8 秒自动刷新；打包单可点击取餐号卡片复制
-
-### 6. 支付宝小程序
-
-开放平台入口：
-
-| 平台 | 网址 |
-|------|------|
-| 支付宝开放平台 | https://open.alipay.com |
-| 支付宝开放文档 | https://opendocs.alipay.com |
-
-1. 打开 `miniprogram-alipay`，填写 AppID
-2. 修改 `miniprogram-alipay/config/env.js` 中 `DEV_LAN_HOST`（与项目根 `.env` 一致）
-3. 扫码参数: `token=桌台token&channel=alipay`
-4. **取餐进度**：与微信小程序相同（`pages/result`、`pages/orders` + `utils/pickup.js`）
-
-## 堂食流程
-
-```
-顾客扫桌台二维码
-  → 微信 / 支付宝小程序
-  → 识别 qr_token（不可伪造桌号）
-  → 提示注册会员 / 可选人脸迎宾
-  → 选规格下单支付
-  → 厨房 KDS 制作 → 顾客叫号屏 / 小程序同步状态
-  → 送到桌 或 顾客自取
-```
-
-- **注册会员**：历史订单、口味偏好、一键复购
-- **人脸迎宾**：仅主动授权后生效，可随时关闭；未授权只做匿名客流
-
-## 厨房 KDS 与顾客叫号屏
-
-店内通常有 **两块屏 + 顾客手机**，职责不同，勿混用：
-
-| | 厨房 KDS | 顾客叫号屏 | 小程序订单页 |
-|--|---------|-----------|-------------|
-| **位置** | 厨房内 | 收银台 / 等位区 | 顾客手机 |
-| **地址** | `/kitchen` | `/display?store_id=门店ID` | 订单详情 / 订单列表 |
-| **登录** | 需厨房 / 店长账号 | 不需要（可选令牌） | 顾客登录 |
-| **内容** | 菜品明细、备注、操作按钮 | 桌号或取餐号 + 制作中 / 请取餐 | 大号桌号 / 取餐号 + 进度 |
-| **能否操作** | 是（改订单状态） | 否（只读） | 否 |
-
-### 厨房 KDS
-
-1. 浏览器打开后台 → 侧边栏 **厨房 KDS**，或直接访问 `http://127.0.0.1:5173/kitchen`（生产为 `https://你的域名/kitchen`）
-2. 使用 **厨房 / 店长 / 超管** 账号登录
-3. 触屏设备：用 Chrome / Edge 打开上述地址即可触摸操作，无需专用驱动；建议点 **全屏**
-4. 状态按钮流程：**开始制作** → **进入烹饪** → **制作完成** → **出餐**（`READY` 后顾客侧显示「请取餐」）
-5. 刷新：WebSocket 正常时为实时推送；断线后每 **8 秒** 轮询兜底
-
-**免烹饪 / 卤味直出**（需先执行 `sql/tools/010_product_no_cooking.sql`，并在后台餐品勾选「免烹饪」）：
-
-- 订单内 **全部为** 免烹饪餐品时，KDS 显示「现成品·直出」，可直接点 **直接出餐**（跳过制作流程）
-- 含需烹饪餐品的单禁止直出，须按正常流程操作
-
-### 顾客叫号屏
-
-面向等餐顾客，只展示 **本店堂食 / 打包自取** 订单（不含美团 / 饿了么外卖单）。
-
-**打开方式**
-
-```
-http://127.0.0.1:5173/display?store_id=1          # 本地开发，1 换成实际门店 ID
-https://你的域名/display?store_id=1               # 生产环境
-```
-
-生产环境建议在 `.env` 设置访问令牌，并在 URL 带上 `token` 参数：
-
-```bash
-DISPLAY_SCREEN_TOKEN=随机一串
-# 访问：https://你的域名/display?store_id=1&token=随机一串
-```
-
-留空 `DISPLAY_SCREEN_TOKEN` 时不校验令牌（仅建议开发环境）。
-
-**屏上展示**
-
-- 左栏 **制作中**：排队中 / 制作中的单
-- 右栏 **请取餐**：厨房点「制作完成」后进入；忙时顾客可 **自行到取餐台领取**，无需等人工叫号
-- **堂食**：显示 **桌号**（如 `A01`）
-- **打包自取**：显示 **取餐号**（订单号末 4 位，如 `K7M2`）
-- 新进入「请取餐」时有提示音；WebSocket 实时更新，断线每 8 秒轮询
-
-**部署建议**
-
-- 厨房触屏一体机 → `/kitchen`（员工登录）
-- 大厅电视 / 非触屏 + 电视棒 → `/display?store_id=…`（常亮全屏，无需触摸）
-
-### 小程序取餐对照
-
-支付成功页与 **订单列表 / 订单详情** 会醒目显示：
-
-| 用餐方式 | 小程序显示 | 与叫号屏对照 |
-|---------|-----------|-------------|
-| 堂食（送到桌） | 大号 **桌号** | 叫号屏「制作中 / 请取餐」中的同一桌号 |
-| 打包外带 | 大号 **取餐号**（订单号末 4 位） | 叫号屏「请取餐」中的同一号码 |
-
-状态变为 **请取餐** 时，小程序卡片变绿，并提示可到取餐台自取。订单页每 8 秒自动刷新，与叫号屏、KDS 同步。
-
-**送到桌**：顾客看小程序或大厅屏均可；服务员按桌号送餐。  
-**前台自取**：顾客对照取餐号，看到「请取餐」即可自取，减轻忙时人工叫号压力。
-
-### 相关 API（联调参考）
-
-| 接口 | 说明 |
-|------|------|
-| `GET /api/orders/kitchen/active` | 厨房 KDS 数据（需厨房权限） |
-| `GET /api/orders/display/active?store_id=` | 叫号屏数据（公开，可选 `token`） |
-| `WS /api/ws/kitchen` | 厨房推送（需员工 token） |
-| `WS /api/ws/display?store_id=` | 叫号屏推送（公开，可选 `token`） |
-| `GET /api/orders/{id}`、`GET /api/orders/mine` | 含 `pickup_code`、`pickup_label`、`customer_status_label` 等字段 |
-
-## 外卖接入（美团 / 饿了么）
-
-### 能力
-
-- 推单落库 → 统一 `Order` → 厨房 KDS（自动接单，平台 confirm 异步回传）
-- 回调事件：新单 / 取消 / 退款 / 催单 / 配送状态 / 完成 / 隐私号降级
-- 商家：同意 / 拒绝退款、主动取消、出餐回传、菜单 / 价格 / 库存同步
-- 门店绑定：`platform_store_bindings`（门店级 Token 优先，`.env` 全局兜底）
-- OAuth：饿了么 Token 定时刷新（约每 6 小时检查）
-
-### 回调地址（生产需 HTTPS）
-
-| 平台 | 路径 | 成功响应 |
-|------|------|----------|
-| 美团 | `POST /api/delivery/meituan/notify` | `{"data":"ok"}`（须 2s 内） |
-| 饿了么 | `POST /api/delivery/eleme/notify` | `{"message":"ok"}` |
-
-开发模式：`APP_ENV=development` 且 `APP_DEBUG=true` 时，回调 JSON 可带 `"_dev_simulate": true` 跳过验签。
-
-### 配置步骤
-
-1. 填写 `.env` 中 `MEITUAN_*` / `ELEME_*`
-2. 后台 → **外卖管理** → 门店绑定（`app_poi_code` / `shopId`，饿了么建议填 access + refresh token）
-3. 配置餐品映射后，可同步菜单 / 价格 / 库存
-4. 开放平台配置上述 notify URL
-
-## 环境变量与配置文件
-
-真实密钥不可提交 Git。按环境选择模板复制为项目根 `.env`：
-
-| 环境 | 模板文件 | 用法 |
-|------|----------|------|
-| 本地 Windows 联调 | `.env.development.example` | `copy .env.development.example .env` |
-| 生产 Ubuntu 部署 | `.env.production.example` | `cp .env.production.example .env` |
-| 全量字段参考 | `.env.example` | 查阅所有可配置项 |
-
-### 配置文件对照
-
-| 用途 | 路径 | 说明 |
-|------|------|------|
-| 后端 API / 支付 / 桌台码 | 项目根 `.env` | 由 `backend/app/core/config.py` 读取 |
-| 微信/支付宝小程序 API | `miniprogram-*/config/env.js` | `PROD_API_BASE` / `DEV_LAN_HOST` |
-| 小程序环境说明 | `miniprogram-*/config/环境说明.txt` | 本地 vs 正式版对照表 |
-| 微信域名校验 | `miniprogram-wechat/project.config.json` | `setting.urlCheck` |
-| 微信隐私声明 | `miniprogram-wechat/app.json` | `__usePrivacyCheck__`；头像/手机号在公众平台隐私指引配置 |
-| 支付宝隐私检查 | `miniprogram-alipay/app.json` | `usePrivacyCheck: true` |
-| 前端开发代理 | `frontend/vite.config.ts` | 本地 `/api` 代理到 `127.0.0.1:8000` |
-| Nginx 反代 | `nginx/smart-noodle.conf` | HTTPS、静态资源、WebSocket |
-| systemd 服务 | `systemd/smart-noodle.service` | Uvicorn 内置多进程管理器开机自启 |
-| 启动命令（Windows） | `scripts/运行命令.txt` | 含正式版上线检查清单 |
-| 部署命令（Ubuntu） | `scripts/生产部署-ubuntu.txt` | 生产环境速查 |
-
-### 关键环境变量
-
-| 变量 | 本地开发典型值 | 生产典型值 |
-|------|---------------|-----------|
-| `APP_ENV` | `development` | `production` |
-| `APP_HOST` | `0.0.0.0`（真机） | `127.0.0.1`（Nginx 反代） |
-| `H5_PUBLIC_BASE_URL` | `http://192.168.x.x:5173` | `https://你的域名` |
-| `DEV_LAN_HOST` | `192.168.x.x` | 留空 |
-| `MINI_PROGRAM_ENV_VERSION` | `develop` | `release` |
-| `VITE_API_BASE_URL` | `/api` | `/api` |
-| `ALLOW_*_MOCK` | `true` | 全部 `false` |
-| `ALIPAY_AES_KEY` | 可留空（手输手机号） | **必填**（解密授权手机号） |
-| `DISPLAY_SCREEN_TOKEN` | 可留空 | 建议设置 |
-| `XPYUN_ENABLED` | `false` 或 `true` | 打印总开关 |
-| `PRINTER_MODE` | `local`（XP-80T WiFi） | `local` 或 `xpyun` |
-| `PRINTER_HOST` | 打印机局域网 IP | 与后端同网段 |
-| `ALLOW_PRINT_MOCK` | 无打印机可 `true` | 必须 `false` |
-
-未配置第三方密钥时，开发环境相关接口可进入 mock，便于本地联调；生产启动会拒绝 mock 开关。
-
-## 测试
-
-```bash
-pip install -r tests/requirements.txt
-pytest                          # 单元测试（约 120+ 项）
-python tests/simulation_e2e.py  # 全链路模拟（堂食 + 外卖回调）
-python -m compileall backend
-```
-
-数据库脚本在 `sql/`，测试程序在 `tests/`。
-
-## 生产部署
-
-目标环境：**Ubuntu 22.04 LTS**，不使用 Docker。对外仅暴露 **HTTPS 443**；后端 Uvicorn 多进程监听 `127.0.0.1:8000`，由 Nginx 反代。
-
-更完整的命令速查见 `scripts/生产部署-ubuntu.txt`；小程序环境对照见 `miniprogram-*/config/环境说明.txt`。
-
-### 国内上线：服务器与 ICP 备案（必读）
-
-面向中国大陆顾客、使用**微信 / 支付宝小程序正式版**对外营业时，通常须同时满足：
-
-| 项目 | 是否必须（生产） | 说明 |
-|------|------------------|------|
-| **服务器在境内** | 强烈建议 / 实质上必需 | 小程序 `request` 合法域名、H5 桌台码、支付与外卖回调均走公网 HTTPS；未备案域名常被云平台或平台方拦截 |
-| **域名 ICP 备案** | **是** | 在工信部完成网站备案（常见名称：ICP 备案、网站备案）；`H5_PUBLIC_BASE_URL`、`PROD_API_BASE` 所用域名须已备案且解析到该服务器 |
-| **主体资质** | **是** | 企业 / 个体工商户营业执照；个人主体无法使用微信 `getPhoneNumber` 等能力 |
-| **公安备案（公网安备）** | 备案通过后按规定办理 | 各地网警平台，备案号需在网站底部展示（含 H5 落地页） |
-| **本地局域网联调** | 不需要 | `192.168.x.x`、`127.0.0.1` 仅开发用，不能作为正式版小程序合法域名 |
-
-**与本项目的对应关系：**
-
-- 须备案的访问入口：`https://你的域名/`（后台、叫号屏）、`/scan`（桌台 H5）、`/api`（小程序 API）、支付/外卖回调 URL
-- 微信 [mp.weixin.qq.com](https://mp.weixin.qq.com) → 开发设置 → **服务器域名**：只接受已备案且 HTTPS 的域名
-- 支付宝开放平台 [open.alipay.com](https://open.alipay.com) → **服务器域名白名单**：同样要求可公网访问的合规域名
-- 云厂商（阿里云 / 腾讯云 / 华为云等）购买**大陆地域**云主机时，未备案域名通常**无法**开通 80/443 或绑定证书
-
-**建议上线顺序：**
-
-1. 注册域名 → 购买**中国大陆地域**云服务器（或与备案服务商同一接入商）
-2. 提交 ICP 备案（约 1～20 个工作日，各省不同）→ 获得备案号（如 `京ICP备xxxxxxxx号`）
-3. 域名解析到服务器 → 部署本项目的 Nginx + systemd（见下文）
-4. 配置微信 / 支付宝小程序合法域名、隐私政策、支付商户号
-5. 小程序提交审核并发布 **release** 正式版
-
-本地 Windows 联调（`DEV_LAN_HOST`、`MINI_PROGRAM_ENV_VERSION=develop`）**不需要**备案；切勿把未备案域名或未解析的 IP 填入正式版 `PROD_API_BASE` / `H5_PUBLIC_BASE_URL`。
-
-### 部署架构
-
-```
-[店内局域网]                         [公网]
-  海康摄像头 ──RTSP──┐
-  厨房 KDS / 收银 ───┼── 服务器      HTTPS :443 ── Nginx
-  大厅叫号屏 ────────┘    Ubuntu         │
-                    MySQL + Redis        ├─ /          → frontend/dist（后台、叫号屏、H5 扫码页）
-                    API :8000（本机）    ├─ /api       → Uvicorn
-                                         └─ /uploads   → 本地上传目录
-
-  微信小程序 / 支付宝小程序 ──request──→ https://你的域名/api
-  美团 / 饿了么 ──回调 POST──→ https://你的域名/api/delivery/.../notify
-```
-
-要点：
-
-- 摄像头 RTSP **只走店内局域网**，勿将 RTSP 端口暴露公网
-- 全机仅 **一个** `PROCESS_ROLE=leader` 实例（调度 / TTS / 人脸识别）
-- 小程序、H5 桌台码、支付回调均须 **HTTPS 域名**
-
-云主机与店内物理机部署步骤相同；差异仅在网络：云主机安全组放行 443，物理机需路由器端口映射 + DDNS。
-
-### 本地调试 vs 生产环境
-
-| 配置项 | 本地 Windows 联调 | 生产 Ubuntu |
-|--------|------------------|-------------|
-| 环境模板 | `.env.development.example` → `.env` | `.env.production.example` → `.env` |
-| `APP_ENV` | `development` | `production` |
-| `APP_HOST` | `0.0.0.0`（真机可连） | `127.0.0.1`（Nginx 反代） |
-| `H5_PUBLIC_BASE_URL` | `http://192.168.x.x:5173` | `https://你的域名` |
-| `DEV_LAN_HOST` | `192.168.x.x` | 留空 |
-| `MINI_PROGRAM_ENV_VERSION` | `develop` | `release` |
-| 小程序 `config/env.js` | `DEV_LAN_HOST` | `PROD_API_BASE` + `ENABLE_*_PRIVACY_APIS=true` |
-| `ALLOW_*_MOCK` | `true` | 全部 `false` |
-| 微信 `urlCheck` | `false` + 勾选不校验合法域名 | `true` + 配置服务器域名 |
-| 前端 | `npm run dev`（Vite 代理） | `npm run build` + Nginx 托管 `dist` |
-
-### 一、服务器准备
-
-**推荐规格（单店 + 4 路摄像头）**：8 核 16G、200G SSD、10M 带宽。
-
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y git curl wget vim nginx certbot python3-certbot-nginx \
-  mysql-server redis-server build-essential python3.11 python3.11-venv python3-pip
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt install -y nodejs
-```
-
-### 二、数据库初始化
-
-```bash
-sudo mysql_secure_installation
-
-sudo mysql -e "
-CREATE DATABASE smart_noodle_house CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'snh'@'127.0.0.1' IDENTIFIED BY '你的强密码';
-GRANT ALL ON smart_noodle_house.* TO 'snh'@'127.0.0.1';
-FLUSH PRIVILEGES;
-"
-
-sudo systemctl enable redis-server && sudo systemctl start redis-server
-```
-
-**生产**按顺序执行（勿执行 `sql/data_test.sql`）：
-
-```bash
-cd /var/www/smart-noodle
-mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
-
-export ADMIN_INITIAL_PASSWORD='超管强密码'
-python3 scripts/初始化管理员.py
-```
-
-### 三、部署代码与后端 `.env`
-
-```bash
-sudo mkdir -p /var/www/smart-noodle
-sudo chown $USER:$USER /var/www/smart-noodle
-cd /var/www/smart-noodle
-git clone <仓库地址> .
-
-cp .env.production.example .env
-nano .env
-```
-
-**`.env` 生产必改项**（完整字段与中文注释见 `.env.production.example`）：
-
-```bash
-APP_ENV=production
-APP_DEBUG=false
-APP_HOST=127.0.0.1
-APP_PORT=8000
-DATABASE_URL=mysql+aiomysql://snh:URL_ENCODED_DB_PASSWORD@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4
-REDIS_URL=redis://:URL_ENCODED_REDIS_PASSWORD@127.0.0.1:6379/0
-ALLOW_LOOPBACK_PRODUCTION_SERVICES=true  # 仅同机单机部署；远程依赖使用私网地址并保持 false
-JWT_SECRET=随机32位以上
-FACE_ENCRYPTION_KEY=随机32位以上
-ALLOW_PAYMENT_MOCK=false
-ALLOW_AUTH_MOCK=false
-ALLOW_OPENCV_FACE_FALLBACK=false
-ALLOW_DELIVERY_MOCK=false
-ENABLE_RATE_LIMIT=true
-CORS_ORIGINS=https://你的域名.com
-H5_PUBLIC_BASE_URL=https://你的域名.com
-MINI_PROGRAM_ENV_VERSION=release
-VITE_API_BASE_URL=/api
-UPLOAD_DIR=/var/www/smart-noodle/uploads
-JSON_LOGS=true
-WEBHOOK_REQUIRE_ALLOWLIST=false  # 只有配置全部已启用渠道的官方出口 CIDR 后才改为 true，并填写 WEBHOOK_IP_ALLOWLIST
-DISPLAY_SCREEN_TOKEN=随机一串
-PROCESS_ROLE=auto  # systemd 多 Worker 由 Redis Leader 锁选主
-ENABLE_RECOGNITION_WORKER=1
-# WECHAT_* / ALIPAY_* / MEITUAN_* / ELEME_* 见 .env.production.example
-ALIPAY_AES_KEY=                    # 支付宝授权手机号解密，生产必填
-```
-
-注意：数据库和 Redis 密码必须使用 URL 百分号编码（建议直接使用 URL-safe 随机密码）；同机部署才设置 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true`，跨主机部署必须使用私网地址并保持 `false`。
-
-生成随机密钥：
-
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-### 四、后端与前端构建
-
-```bash
-cd /var/www/smart-noodle/backend
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -U pip && pip install -r requirements.txt
-mkdir -p /var/www/smart-noodle/uploads /etc/smart-noodle/certs
-alembic upgrade head
-
-cd /var/www/smart-noodle/frontend
-npm ci
-npm run build
-```
-
-构建产物在 `frontend/dist`；API 使用相对路径 `/api`，由 Nginx 反代到后端。
-
-### 五、Nginx + HTTPS
-
-```bash
-sudo cp /var/www/smart-noodle/nginx/smart-noodle.conf /etc/nginx/sites-available/smart-noodle.conf
-sudo cp /var/www/smart-noodle/nginx/snippets/*.conf /etc/nginx/snippets/
-sudo nano /etc/nginx/sites-available/smart-noodle.conf
-```
-
-须修改 `nginx/smart-noodle.conf` 中占位符：
-
-| 占位符 | 改为 |
-|--------|------|
-| `REPLACE_DOMAIN` | `你的域名.com` |
-| `REPLACE_WEB_ROOT` | `/var/www/smart-noodle/frontend/dist` |
-| `REPLACE_UPLOADS_DIR` | `/var/www/smart-noodle/uploads` |
-
-```bash
-sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo certbot --nginx -d 你的域名.com
-sudo systemctl enable nginx && sudo systemctl reload nginx
-```
-
-详细步骤见 `nginx/安装说明.txt`。
-
-### 六、systemd 开机自启
-
-```bash
-# 将 systemd/smart-noodle.service 中 REPLACE_DEPLOY_ROOT 改为实际部署路径
-sed -i 's|REPLACE_DEPLOY_ROOT|/var/www/smart-noodle|g' systemd/smart-noodle.service
-sudo cp systemd/smart-noodle.service /etc/systemd/system/
-sudo chown -R www-data:www-data /var/www/smart-noodle/uploads
-sudo chmod 640 /var/www/smart-noodle/.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now smart-noodle
-```
-
-完整单元说明见仓库内 `systemd/smart-noodle.service`；安装步骤见 `systemd/安装说明.txt`。
-
-### 七、防火墙与健康检查
-
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 443/tcp
-sudo ufw enable
-
-curl -s http://127.0.0.1:8000/health
-curl -sI https://你的域名.com/
-```
-
-MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
-
-### 八、微信小程序发布
-
-| 文件 | 生产配置 |
-|------|----------|
-| `miniprogram-wechat/config/env.js` | `PROD_API_BASE=https://你的域名.com/api`；`ENABLE_WX_PRIVACY_APIS=true` |
-| `miniprogram-wechat/project.config.json` | `setting.urlCheck: true` |
-| `miniprogram-wechat/app.json` | 已含 `__usePrivacyCheck__` |
-
-**微信公众平台** https://mp.weixin.qq.com （开放平台 https://open.weixin.qq.com ）
-
-| 配置项 | 说明 |
-|--------|------|
-| 开发设置 → 服务器域名 | request / upload / download 填 HTTPS 域名 |
-| 用户隐私保护指引 | 勾选昵称头像、手机号并发布 |
-| URL Link / 明文 Scheme | 桌台一码通扫所需 |
-| 主体 | `getPhoneNumber` 须非个人主体且已认证 |
-
-文档：[隐私协议开发指南](https://developers.weixin.qq.com/miniprogram/dev/framework/user-privacy/PrivacyAuthorize.html)
-
-### 九、支付宝小程序发布
-
-| 文件 | 生产配置 |
-|------|----------|
-| `miniprogram-alipay/config/env.js` | `PROD_API_BASE`；`ENABLE_ALIPAY_PRIVACY_APIS=true` |
-| 项目根 `.env` | `ALIPAY_AES_KEY`（接口内容加密 AES） |
-| `miniprogram-alipay/app.json` | 已设 `usePrivacyCheck: true` |
-
-**支付宝开放平台** https://open.alipay.com （文档 https://opendocs.alipay.com ）
-
-| 配置项 | 说明 |
-|--------|------|
-| 服务器域名白名单 | HTTPS |
-| 小程序隐私政策 | 声明手机号等 |
-| 能力申请 | 「获取会员手机号」 |
-| 接口内容加密 | AES 同步到 `ALIPAY_AES_KEY` |
-
-与微信差异：支付宝须**分两步**授权（先 `agreePrivacyAuthorization`，再 `getAuthorize`），不能 pipe 组合。
-
-文档：[my.getPhoneNumber](https://opendocs.alipay.com/mini/api/getphonenumber)
-
-### 十、桌台码与 H5 一码通扫
-
-桌台二维码 URL 来自 `.env` 的 `H5_PUBLIC_BASE_URL`：
-
-```
-https://你的域名.com/scan?token=桌台token
-```
-
-- `MINI_PROGRAM_ENV_VERSION=release` → 跳转正式版小程序
-- 修改域名后须在后台「桌台管理」**重新打印**二维码
-
-### 十一、店内屏端与外卖
-
-| 终端 | 地址 |
-|------|------|
-| 后台管理 | `https://你的域名.com/` |
-| 厨房 KDS | `https://你的域名.com/kitchen` |
-| 顾客叫号屏 | `https://你的域名.com/display?store_id=1&token=…` |
-| 美团回调 | `POST /api/delivery/meituan/notify` |
-| 饿了么回调 | `POST /api/delivery/eleme/notify` |
-
-微信支付 PEM 放 `/etc/smart-noodle/certs/`，路径与 `.env` 一致。
-
-### 十二、上线检查清单
-
-**备案与合规（国内正式版）**
-
-- [ ] 域名已完成 **ICP 备案**，备案号可查询
-- [ ] 服务器在**中国大陆**（或与备案接入商一致）
-- [ ] 域名已解析到生产服务器，443 可访问
-- [ ] 主体为**企业 / 个体工商户**（微信手机号等能力）
-- [ ] 网站底部展示备案号（H5 `/scan` 等对外页面）
-
-**后端**
-
-- [ ] `.env` 来自 `.env.production.example`，mock 全部为 `false`
-- [ ] `JWT_SECRET`、`FACE_ENCRYPTION_KEY` 已换随机强密钥
-- [ ] `H5_PUBLIC_BASE_URL`、`MINI_PROGRAM_ENV_VERSION=release`
-- [ ] `ALIPAY_AES_KEY`、`DISPLAY_SCREEN_TOKEN` 已配置
-- [ ] 厨房打印机：`XPYUN_ENABLED=true`、`PRINTER_MODE=local`、`PRINTER_HOST` 已填（XP-80T WiFi）
-- [ ] `ALLOW_PRINT_MOCK=false`（生产禁止模拟打印）
-- [ ] `systemctl status smart-noodle` 为 active
-
-**微信小程序**
-
-- [ ] `config/env.js` → `PROD_API_BASE`、`ENABLE_WX_PRIVACY_APIS=true`
-- [ ] `project.config.json` → `urlCheck: true`
-- [ ] 公众平台域名与隐私指引已发布
-
-**支付宝小程序**
-
-- [ ] `config/env.js` → `PROD_API_BASE`、`ENABLE_ALIPAY_PRIVACY_APIS=true`
-- [ ] 开放平台隐私、手机号、AES 已配置
-
-**业务**
-
-- [ ] 桌台码已按新域名重新生成
-- [ ] 外卖回调 URL 已在平台配置
-- [ ] KDS、叫号屏店内可访问
-
-### 十三、日常运维
-
-```bash
-sudo systemctl status smart-noodle nginx mysql redis-server
-sudo journalctl -u smart-noodle -f
-
-cd /var/www/smart-noodle && git pull
-source backend/.venv/bin/activate && pip install -r backend/requirements.txt
-cd frontend && npm ci && npm run build
-sudo systemctl restart smart-noodle
-
-mysqldump -u snh -p smart_noodle_house | gzip > /backup/snh_$(date +%F).sql.gz
-```
-
-### 十四、摄像头（可选）
-
-1. 海康摄像头固定内网 IP，后台添加 RTSP（如 `rtsp://admin:密码@192.168.1.101:554/Streaming/Channels/101`）
-2. 每路 `detect_fps` 建议 2～3
-3. 测试：`ffprobe -rtsp_transport tcp "rtsp://..."`
-
-### 十五、硬件与成本参考
-
-| 项目 | 推荐 |
-|------|------|
-| CPU / 内存 | 8 核 16G |
-| 磁盘 | 200G SSD |
-| 带宽 | 10 Mbps |
-
-云主机包年约 **5300～7400 元/年**；店内物理机首年约 **6500～7500 元**（含宽带）。
-
-### 十六、常见问题
-
-| 现象 | 处理 |
-|------|------|
-| 小程序连不上 API | HTTPS、合法域名、`PROD_API_BASE` 与域名一致 |
-| 支付宝手机号失败 | `ALIPAY_AES_KEY`、两步授权流程 |
-| 微信头像/手机号报错 | 隐私指引未发布；errno 112/104 |
-| 扫桌台码显示 127.0.0.1 | 旧二维码；重打并检查 `H5_PUBLIC_BASE_URL` |
-| 外卖回调失败 | `WEBHOOK_IP_ALLOWLIST`；Nginx 2s 内响应 |
-| 摄像头 OFFLINE | RTSP 账号、同网段 |
-| CPU 100% | 降低 `detect_fps`；仅 1 个 leader |
-
----
-
-## 安全说明
-
-- 顾客端 JWT 鉴权；废弃不安全的 openid 直传登录
-- 人脸特征由服务端提取，禁止客户端传 `feature_vector`
-- 支付 / 外卖回调验签（开发模式可模拟）
-- 支付金额由服务端从数据库重新计算
-- 桌台二维码使用不可预测 token
-- 厨房与外卖 WebSocket 需鉴权；顾客叫号屏 WebSocket 为公开频道（建议配置 `DISPLAY_SCREEN_TOKEN`）
-- 摄像头密码加密存储；操作日志定期清理
+小程序分别使用微信开发者工具打开 miniprogram-wechat/，支付宝开发者工具打开 miniprogram-alipay/。环境地址按各自 config/env.js 和环境说明配置；正式版必须使用 HTTPS 合法域名，不能把本机 IP 或开发 Mock 用于生产。
+
+## 测试与质量门禁
+
+按改动范围执行对应测试，并在合并前执行 CI 等价命令。典型检查：
+- 前端：npm ci、重复导入脚本、依赖使用审计、npm ls、npm test、npm run build、npm audit。
+- Python：锁文件一致性、格式/静态检查、pytest、真实 MySQL/Redis 集成和 Alembic 升降级演练。
+- Rust：cargo metadata --locked、cargo test --locked --all-targets、cargo build --release --locked、RustSec 审计。
+- 微信/支付宝：JS 语法检查、开发者工具构建、真机扫码/授权/支付验收。
+- 生产：配置启动校验、备份恢复、HTTPS、回调验签、监控告警和回滚演练。
+
+测试报告必须写明 commit SHA、环境、命令、通过/失败/跳过数量。历史测试结果不可冒充当前 main 的结果。
+
+## 安全底线
+
+- 不提交 .env、真实密码、API Secret、商户私钥、平台证书或人脸数据。
+- 不在文档中写可用默认管理员密码或有效访问 token；首次管理员密码通过安全流程初始化。
+- 生产关闭所有 Mock/debug/reload，使用最小权限数据库账号、Redis ACL/强认证和安全网络绑定。
+- 生产公网仅开放必要 HTTPS 入口；MySQL、Redis、RTSP 和内部管理端口不直接暴露公网。
+- 支付回调必须验签、校验金额和商户身份、幂等落库；退款和库存变更必须可审计。
+- 多门店每个查询、缓存键、后台任务、WebSocket 和导出均实施服务端门店隔离。
+- 人脸数据遵循主动授权、目的限制、最少采集、加密、审计、保留期限和删除机制。
+
+## 当前验证证据（2026-11-08，本机 Windows）
+
+以下为项目维护者提供的本机执行输出，不等同于 GitHub CI 或生产验收：
+- Node.js 24.14.0；npm 已对齐到 11.19.1。
+- frontend npm ci 成功；npm audit 报告 0 vulnerabilities。
+- 重复导入检查扫描 195 个 JS/TS/Vue 文件，通过。
+- 依赖使用审计扫描 94 个源码/配置文件，通过（13 个直接依赖）。
+- 前端 Vitest：3 个测试文件、14 项测试全部通过。
+- vue-tsc + Vite 生产构建成功；仍有一个约 892 KB 的入口 JS chunk 超过 500 KB warning，需要后续做拆包与体积优化；这是 warning，不是构建失败。
+- Rust cargo metadata --locked 成功；7 项单元测试通过；benchmark target 成功；Windows release DLL 构建成功，文件大小 282,624 bytes。
+- 上述结果尚不能替代 Python 全量测试、真实 MySQL/Redis 集成、双端小程序平台构建、第三方沙箱和生产部署验收。
+
+## 发布状态
+
+本仓库仍需以 main 最新 commit 的 CI、真实数据库/Redis 测试、第三方平台沙箱和生产配置验收为准。任何未执行项目都应明确列为待验证或外部阻塞，不能写成“已上线”。
