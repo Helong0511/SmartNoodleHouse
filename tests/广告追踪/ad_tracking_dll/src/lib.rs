@@ -4,6 +4,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use once_cell::sync::Lazy;
+use rand::TryRng;
 use serde_json::{Map, Value};
 use std::{
     cell::RefCell,
@@ -354,8 +355,8 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    // AES-GCM nonce 必须来自操作系统 CSPRNG；随机源异常时直接失败，禁止降级到时间戳或普通 PRNG。
-    getrandom::fill(&mut nonce_bytes).map_err(|_| {
+    // AES-GCM nonce 使用由操作系统熵源播种并周期重播种的 CSPRNG；失败时禁止降级。
+    rand::rng().try_fill_bytes(&mut nonce_bytes).map_err(|_| {
         set_error("operating system random source unavailable");
         ERR_INTERNAL
     })?;
