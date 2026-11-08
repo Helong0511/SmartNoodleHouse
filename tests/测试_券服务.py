@@ -323,7 +323,7 @@ async def test_milestone_reclaim_locks_customer_before_count(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_milestone_reclaim_handler_locks_order_before_refund():
+async def test_milestone_reclaim_handler_locks_order_before_refund(monkeypatch):
     from app.services.paid_side_effects import _handle_milestone_reclaim
 
     order = SimpleNamespace(id=102, customer_id=17)
@@ -339,10 +339,9 @@ async def test_milestone_reclaim_handler_locks_order_before_refund():
         payload='{"order_id": 102, "refund_id": 9001}',
     )
 
-    with pytest.MonkeyPatch.context() as mp:
-        reclaim = AsyncMock()
-        mp.setattr(CouponService, "reclaim_milestones_after_full_refund", reclaim)
-        await _handle_milestone_reclaim(db, row)
+    reclaim = AsyncMock()
+    monkeypatch.setattr(CouponService, "reclaim_milestones_after_full_refund", reclaim)
+    await _handle_milestone_reclaim(db, row)
 
     assert db.execute.await_count == 2
     order_stmt, refund_stmt = [call.args[0] for call in db.execute.await_args_list]
