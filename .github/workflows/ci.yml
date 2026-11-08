@@ -52,6 +52,7 @@ jobs:
           fi
           pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
+          python -m pip check
       - name: Smoke-test face recognition binary dependency imports
         run: |
           python - <<'PY'
