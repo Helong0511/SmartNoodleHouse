@@ -261,7 +261,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.74.0", "stable"]
+        toolchain: ["1.85.0", "stable"]
     defaults:
       run:
         working-directory: tests/广告追踪/ad_tracking_dll
