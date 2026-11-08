@@ -79,6 +79,18 @@ jobs:
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
+      - name: Detect unawaited DB cursor warnings in marketing serialization
+        env:
+          PYTHONPATH: backend
+          APP_ENV: development
+          APP_DEBUG: "true"
+          JWT_SECRET: "ci-test-jwt-secret-at-least-32-chars!!"
+          FACE_ENCRYPTION_KEY: "ci-test-face-encryption-key-32b!!"
+          ALLOW_PAYMENT_MOCK: "true"
+          ALLOW_AUTH_MOCK: "true"
+          ALLOW_DELIVERY_MOCK: "true"
+          REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+        run: python -m pytest -q tests/测试_营销分群活动.py::test_campaign_payload_for_includes_created_by_name -W error::RuntimeWarning
       - name: Run unit tests with coverage
         env:
           PYTHONPATH: backend
