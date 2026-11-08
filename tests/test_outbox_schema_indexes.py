@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def _canonical_index_columns(index_name: str) -> tuple[str, ...]:
     schema = (ROOT / "sql" / "struct.sql").read_text(encoding="utf-8")
     match = re.search(
-        rf"INDEX\\s+`{re.escape(index_name)}`\\s*\\(([^)]*)\\)",
+        rf"INDEX\s+`{re.escape(index_name)}`\s*\(([^)]*)\)",
         schema,
         flags=re.IGNORECASE,
     )
