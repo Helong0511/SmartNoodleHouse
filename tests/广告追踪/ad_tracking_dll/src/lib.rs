@@ -861,14 +861,17 @@ mod tests {
             keys: HashMap::from([(7, [0xA5; 32])]),
             current_kid: Some(7),
         }));
-        let poison_target = Arc::clone(&state);
+        let poison_target = std::sync::Arc::clone(&state);
         let _ = thread::spawn(move || {
             let _guard = poison_target.write().unwrap();
             panic!("simulate panic while holding the key-state lock");
         })
         .join();
 
-        let mut recovered = state.write().unwrap_err().into_inner();
+        let mut recovered = match state.write() {
+            Ok(_) => panic!("test lock should be poisoned"),
+            Err(poisoned) => poisoned.into_inner(),
+        };
         clear_state_keys(&mut recovered);
         assert!(recovered.keys.is_empty());
         assert_eq!(recovered.current_kid, None);
