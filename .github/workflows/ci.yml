@@ -232,6 +232,27 @@ jobs:
             node --check --input-type=module < "$file"
           done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
 
+  rust-ad-tracking:
+    name: rust-ad-tracking
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: tests/广告追踪/ad_tracking_dll
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Verify locked dependency graph
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null
+          cargo tree --locked -d
+      - name: Build and run Rust tests
+        run: cargo test --locked --all-targets
+
   windows-sapi-dependency:
     name: windows-sapi-dependency
     runs-on: windows-latest
