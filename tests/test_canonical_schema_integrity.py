@@ -136,3 +136,23 @@ def test_alembic_created_tables_pin_mysql_utf8mb4_options():
             f"{relative_path}: missing explicit charset options for "
             f"{sorted(expected_tables - found)}"
         )
+
+
+def test_sqlalchemy_mysql_table_options_compile_utf8mb4_collation():
+    from sqlalchemy import Column, Integer, MetaData, Table
+    from sqlalchemy.dialects.mysql import dialect
+    from sqlalchemy.schema import CreateTable
+
+    table = Table(
+        "charset_compile_probe",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        mysql_engine="InnoDB",
+        mysql_charset="utf8mb4",
+        mysql_collate="utf8mb4_unicode_ci",
+    )
+    ddl = str(CreateTable(table).compile(dialect=dialect()))
+
+    assert "ENGINE=InnoDB" in ddl
+    assert "CHARSET=utf8mb4" in ddl
+    assert "COLLATE=utf8mb4_unicode_ci" in ddl
