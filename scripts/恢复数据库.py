@@ -48,6 +48,21 @@ def parse_url(url: str) -> dict:
     }
 
 
+def _build_mysql_restore_command(mysql: str, info: dict) -> list[str]:
+    """强制 mysql 客户端以 utf8mb4 读取 dump，避免继承本机/服务器 latin1 默认值。"""
+    return [
+        mysql,
+        "--default-character-set=utf8mb4",
+        "-h",
+        info["host"],
+        "-P",
+        info["port"],
+        "-u",
+        info["user"],
+        info["database"],
+    ]
+
+
 def _decompress_backup_to_temp(backup: Path) -> Path:
     """分块解压到权限受限的临时文件，避免大备份一次性读入内存。"""
     tmp_path: Path | None = None
@@ -102,16 +117,7 @@ def main() -> int:
         else:
             sql_path = backup
 
-        cmd = [
-            mysql,
-            "-h",
-            info["host"],
-            "-P",
-            info["port"],
-            "-u",
-            info["user"],
-            info["database"],
-        ]
+        cmd = _build_mysql_restore_command(mysql, info)
         with open(sql_path, "rb") as fh:
             proc = subprocess.run(cmd, stdin=fh, env=env, check=False)
         return int(proc.returncode)

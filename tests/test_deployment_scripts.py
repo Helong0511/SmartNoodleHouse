@@ -115,3 +115,27 @@ def test_restore_decompresses_gzip_backup_to_temporary_file_in_chunks(tmp_path):
         assert restored != source
     finally:
         restored.unlink(missing_ok=True)
+
+
+def test_mysql_restore_command_forces_utf8mb4_client_charset():
+    command = RESTORE_MODULE._build_mysql_restore_command(
+        "mysql",
+        {
+            "host": "db.internal",
+            "port": "3307",
+            "user": "operator",
+            "database": "smart_noodle_house",
+        },
+    )
+
+    assert command == [
+        "mysql",
+        "--default-character-set=utf8mb4",
+        "-h",
+        "db.internal",
+        "-P",
+        "3307",
+        "-u",
+        "operator",
+        "smart_noodle_house",
+    ]

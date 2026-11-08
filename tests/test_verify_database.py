@@ -50,3 +50,38 @@ def test_production_verifier_checks_store_scope_and_outbox_recovery_columns():
         ("outbox_events", "attempt_count"),
         ("outbox_events", "locked_at"),
     } <= required
+
+
+def test_database_charset_verifier_accepts_utf8mb4_everywhere():
+    assert MODULE._charset_issues(
+        {
+            "character_set_client": "utf8mb4",
+            "character_set_connection": "utf8mb4",
+            "character_set_results": "utf8mb4",
+        },
+        "utf8mb4",
+        "utf8mb4_unicode_ci",
+        [("orders", "utf8mb4_unicode_ci"), ("customers", "utf8mb4_unicode_ci")],
+        [("customers", "nickname", "utf8mb4", "utf8mb4_unicode_ci")],
+    ) == []
+
+
+def test_database_charset_verifier_reports_connection_schema_table_and_column_mismatch():
+    issues = MODULE._charset_issues(
+        {
+            "character_set_client": "latin1",
+            "character_set_connection": "utf8mb4",
+            "character_set_results": "utf8mb4",
+        },
+        "latin1",
+        "latin1_swedish_ci",
+        [("orders", "utf8mb4_0900_ai_ci")],
+        [("customers", "nickname", "utf8mb3", "utf8mb3_general_ci")],
+    )
+
+    assert any("character_set_client" in issue for issue in issues)
+    assert any("database default charset" in issue for issue in issues)
+    assert any("database default collation" in issue for issue in issues)
+    assert any("table orders collation" in issue for issue in issues)
+    assert any("customers.nickname charset" in issue for issue in issues)
+    assert any("customers.nickname collation" in issue for issue in issues)

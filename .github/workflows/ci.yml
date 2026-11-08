@@ -49,6 +49,9 @@ jobs:
           fi
           pip install pytest pytest-asyncio httpx pytest-cov aiosqlite
           python scripts/check_requirements_lock.py
+      - name: Verify tracked text encoding and line endings
+        run: |
+          python scripts/check_text_encoding.py
       - name: Compile check
         run: |
           python -m compileall backend/app -q
@@ -110,7 +113,9 @@ jobs:
         env:
           MYSQL_PWD: root
         run: |
-          mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE IF NOT EXISTS smart_noodle_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          # MYSQL_DATABASE pre-creates the schema using the server default collation;
+          # CREATE DATABASE IF NOT EXISTS would not change that existing schema.
+          mysql -h 127.0.0.1 -uroot -e "ALTER DATABASE smart_noodle_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
       - name: Upgrade empty MySQL schema to latest Alembic revision
         working-directory: backend
         env:
@@ -129,6 +134,14 @@ jobs:
         run: |
           alembic downgrade 0047_payment_refund_idem
           alembic upgrade head
+      - name: Verify database charset, schema and migration head
+        working-directory: .
+        env:
+          PYTHONPATH: backend
+          APP_ENV: development
+          APP_DEBUG: "true"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+        run: python scripts/验证数据库.py
       - name: Run MySQL-marked tests
         env:
           PYTHONPATH: backend

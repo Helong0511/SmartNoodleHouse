@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """摄像头迎宾 P0/P1 修复回归：codec 不伪造成功、改密清缓存、冷却回滚。"""
 from __future__ import annotations
 
