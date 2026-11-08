@@ -766,6 +766,8 @@ async def upload_product_image(
     url = await save_upload(file, subdir="products")
     await _set_main_product_image(db, product, url)
     await db.flush()
+    # 主图会直接进入菜单缓存；上传成功前先在同一事务推进缓存代际。
+    await invalidate_store_menu_cache(db, int(product.store_id))
     await db.refresh(product)
     updated_at = serialize_dt(product.updated_at)
     await AuditService.log_staff(
