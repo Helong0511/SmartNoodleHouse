@@ -390,3 +390,21 @@
 3. **生产数据库结构对比**：本地 MySQL schema 与生产差异需运维用 `alembic upgrade head --sql` 离线比对
 4. **生产监控告警接入**：Prometheus/Grafana/异常上报通道需运维确认
 5. **小程序上架审核**：需小程序账号持有人提交审核
+---
+
+## 2026-11-08 基线校正说明
+
+本文件前半部分保留 2026-09-29 的历史目录地图，部分技术栈、目录、行号和配置描述已经过时，不能作为当前实现事实。例如部署采用 systemd + Nginx + Uvicorn 原生多 worker，不应继续按 Gunicorn 描述；当前部署不使用 Docker。实际结构请以 GitHub main 的递归目录树、当前 systemd/nginx 配置、requirements.lock、Cargo.lock、CI workflow 和源代码为准。
+
+当前全量审查基线：main @ 442beb4761b29f5b415830e91e06c97241f74ef3。P0/P1/P2/P3 新发现见 FULL_CODE_REVIEW_2026-11-08.md。当前尤其需要核对：
+- APP_ENV fail-closed 与 create_app 启动校验时机；
+- httpx 日志脱敏和已泄露凭据轮换；
+- 微信/支付宝 release API 配置；
+- 生产 SQL 初始化与 Alembic 升级边界；
+- 资金金额比对、台账、回调幂等、外卖 Webhook 响应；
+- WebSocket 默认拒绝和多门店身份绑定；
+- 双端小程序隐私授权、mock 与价格权威性；
+- Redis OOM/连接故障/锁过期/缓存击穿穿透雪崩故障注入。
+
+历史目录中 deploy/、gunicorn、旧绝对盘符链接等内容如与当前树不一致，应以当前代码为准逐项修订。不得从历史文档复制过期路径或“已通过”状态。
+
