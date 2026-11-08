@@ -11,7 +11,7 @@ from app.core.exceptions import AppException
 @pytest.mark.asyncio
 async def test_stock_source_mutation_is_blocked_while_product_has_active_order():
     db = MagicMock()
-    db.scalar = AsyncMock(return_value=123)
+    result = MagicMock()\n    result.scalar_one_or_none.return_value = 123\n    db.execute = AsyncMock(return_value=result)
 
     with pytest.raises(AppException) as exc:
         await _assert_no_active_orders_for_stock_mutation(
@@ -19,7 +19,7 @@ async def test_stock_source_mutation_is_blocked_while_product_has_active_order()
         )
 
     assert exc.value.code == 40962
-    statement = db.scalar.await_args.args[0]
+    statement = db.execute.await_args.args[0]
     sql = str(statement).upper()
     assert "ORDER_ITEMS" in sql
     assert "JOIN ORDERS" in sql
@@ -39,12 +39,12 @@ async def test_stock_source_mutation_is_blocked_while_product_has_active_order()
 @pytest.mark.asyncio
 async def test_stock_source_mutation_is_allowed_when_no_active_order_references_product():
     db = MagicMock()
-    db.scalar = AsyncMock(return_value=None)
+    result = MagicMock()\n    result.scalar_one_or_none.return_value = None\n    db.execute = AsyncMock(return_value=result)
 
     await _assert_no_active_orders_for_stock_mutation(
         db, store_id=7, product_id=42
     )
-    db.scalar.assert_awaited_once()
+    db.execute.assert_awaited_once()
 
 
 def test_both_stock_override_mutation_routes_apply_active_order_guard():
