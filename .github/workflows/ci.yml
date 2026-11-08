@@ -184,6 +184,8 @@ jobs:
           node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major !== 24 || minor < 12) process.exit(1)"
       - name: Install dependencies
         run: npm ci
+      - name: Verify approved npm install scripts
+        run: npm install-scripts ls
       - name: Unit tests
         run: npm test --if-present
       - name: Type check and build
