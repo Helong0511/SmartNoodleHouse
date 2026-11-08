@@ -4,7 +4,6 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use once_cell::sync::Lazy;
-use rand::TryRngCore;
 use serde_json::{Map, Value};
 use std::{
     cell::RefCell,
@@ -355,7 +354,7 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::rngs::OsRng.try_fill_bytes(&mut nonce_bytes).map_err(|_| {
+    getrandom::fill(&mut nonce_bytes).map_err(|_| {
         set_error("operating system random source unavailable");
         ERR_INTERNAL
     })?;
