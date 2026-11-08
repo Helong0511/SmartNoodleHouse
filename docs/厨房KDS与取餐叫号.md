@@ -1,3 +1,9 @@
+> **安全修订（2026-11-08）**：历史文档曾包含具体叫号屏 token 示例。现已替换为占位说明。若该值曾在公开仓库中可用，必须将其视为已泄漏并轮换服务端 DISPLAY_SCREEN_TOKEN；仅删除文档不能使旧 token 失效。禁止将任何有效 token 放入 URL 示例、截图或日志。
+>
+> 本文的路径、权限和状态说明仍需与当前 frontend 路由、后端 display API/WebSocket 实现核对；生产访问令牌应使用门店级/环境级安全配置并经 HTTPS 传输。
+>
+> ---
+>
 # 厨房 KDS 与取餐叫号屏 — 使用说明文档
 
 > 版本：v1.0  
@@ -115,7 +121,7 @@
 示例（当前开发环境）：
 
 ```
-http://localhost:5173/display?store_id=1&token=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb
+http://localhost:5173/display?store_id=1&token=<请从受保护的环境配置中读取，不要写入文档>
 ```
 
 - **无需员工登录**（`/display` 在公开路径 `publicPaths` 中）
