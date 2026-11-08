@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
