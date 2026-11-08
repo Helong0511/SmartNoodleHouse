@@ -55,3 +55,42 @@ def test_canonical_schema_foreign_key_names_are_unique():
     names = re.findall(r"CONSTRAINT \x60([^\x60]+)\x60 FOREIGN KEY", body, re.IGNORECASE)
     duplicates = [name for name, count in Counter(names).items() if count > 1]
     assert not duplicates, f"duplicate MySQL foreign-key constraint names: {duplicates}"
+
+
+def test_database_and_every_canonical_table_use_utf8mb4_unicode_ci():
+    raw = STRUCT.read_text(encoding="utf-8")
+    assert re.search(
+        r"CREATE DATABASE IF NOT EXISTS .*DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        raw,
+        re.IGNORECASE,
+    )
+    assert re.search(
+        r"SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+        raw,
+        re.IGNORECASE,
+    )
+
+    start = raw.index("-- BEGIN CANONICAL SCHEMA")
+    end = raw.index("-- END CANONICAL SCHEMA")
+    body = raw[start:end]
+    statements = [part.strip() for part in body.split(";") if part.strip()]
+    table_statements = [
+        statement
+        for statement in statements
+        if re.search(r"^CREATE TABLE IF NOT EXISTS", statement, re.IGNORECASE)
+    ]
+    assert table_statements, "canonical schema contains no CREATE TABLE statements"
+
+    for statement in table_statements:
+        table = re.search(r"CREATE TABLE IF NOT EXISTS \x60([^\x60]+)\x60", statement)
+        table_name = table.group(1) if table else "<unknown>"
+        assert re.search(
+            r"(?:CHARACTER SET\s*=\s*utf8mb4|DEFAULT CHARSET\s*=\s*utf8mb4)",
+            statement,
+            re.IGNORECASE,
+        ), f"{table_name} must explicitly use utf8mb4"
+        assert re.search(
+            r"COLLATE\s*=\s*utf8mb4_unicode_ci",
+            statement,
+            re.IGNORECASE,
+        ), f"{table_name} must explicitly use utf8mb4_unicode_ci"
