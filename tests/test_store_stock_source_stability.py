@@ -27,9 +27,12 @@ async def test_stock_source_mutation_is_blocked_while_product_has_active_order()
     assert "PRODUCT_ID" in sql
     assert "NOT IN" in sql
     params = statement.compile().params
-    assert {"CANCELLED", "REFUNDED", "COMPLETED"}.issubset(
-        {str(value) for value in params.values()}
-    )
+    values = []
+    for value in params.values():
+        values.extend(
+            str(item) for item in value
+        ) if isinstance(value, (list, tuple, set)) else values.append(str(value))
+    assert {"CANCELLED", "REFUNDED", "COMPLETED"}.issubset(set(values))
 
 
 @pytest.mark.asyncio
