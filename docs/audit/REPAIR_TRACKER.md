@@ -174,3 +174,24 @@
 - 2026-09-29 全量测试结果：**791 passed, 8 skipped, 0 failed**（8 skipped 为真实 MySQL/Redis/平台凭证依赖，非隐藏失败），见 [TEST_REPORT.md](file:///e:/SmartNoodleHouse/docs/audit/TEST_REPORT.md)。
 - 后续如运行测试发现失败项，将立即新增条目并按优先级修复；不得通过放宽断言/跳过验签宣称通过。
 - 新发现的真实问题（非伪问题）随时纳入台账；外部依赖阻塞项见 BLK-001~005 与 [REMAINING_ISSUES.md](file:///e:/SmartNoodleHouse/docs/audit/REMAINING_ISSUES.md)。
+---
+
+## 阶段三：2026-11-08 全量审查新增问题（当前 main 基线）
+
+> 新审查报告：[FULL_CODE_REVIEW_2026-11-08.md](FULL_CODE_REVIEW_2026-11-08.md)，基线 main @ 442beb4761b29f5b415830e91e06c97241f74ef3。
+> **状态统一为“待代码修复/待复测”**，本次文档更新没有修改业务代码，不得把下表理解为已修复。
+
+| 编号 | 优先级 | 模块 | 问题摘要 | 当前状态 | 关闭证据要求 |
+|---|---|---|---|---|---|
+| 2026-P0-01 | P0 | 环境/启动 | APP_ENV 默认 development、未知环境值和 lifespan 校验路径可使生产安全检查失效 | 待修复 | 未知值/lifespan off/create_app/mock 旁路测试 |
+| 2026-P0-02 | P0 | 凭据/日志 | httpx INFO URL query 明文输出微信 AppSecret，日志中已有暴露样本 | 待修复+凭据轮换 | 日志脱敏测试、历史日志扫描、平台轮换证明 |
+| 2026-P0-03 | P0 | 微信/支付宝小程序 | release API 占位符、环境探测失败回退 HTTP、模块顶层异常白屏 | 待修复 | 双端 release 构建、真机 HTTPS、异常探测测试 |
+| 2026-P0-04 | P0 | 部署/数据库 | README 生产步骤与 DROP DATABASE/TRUNCATE 初始化 SQL 冲突 | 文档已在独立分支修订；脚本保护待修复 | 文档审查、destructive SQL 防护、隔离库演练 |
+| 2026-P1-01~10 | P1 | 资金/订单 | 公益规则绕过、渠道金额校验缺失、回调事件 ID、台账 fail-closed、抹零、关单异常、充值幂等、免费秒杀单、退款身份校验、充值重复结算 | 待逐项修复 | 每项独立回归测试和 MySQL 并发/崩溃测试 |
+| 2026-P1-11~20 | P1 | API/安全 | 外卖回调 2xx 丢事件、WebSocket 默认鉴权、display token、顾客推送、DB commit 边界、JWT 算法不一致、密钥占位符、body/schema 限制、入侵检测边界、Redis 登录限流降级 | 待逐项修复 | API/权限/Redis 故障注入及真实平台契约测试 |
+| 2026-P1-21~22 | P1 | 前端/小程序 | 401 按 URL 猜 token 类型；支付宝隐私 API 可能空操作 | 待逐项修复 | token 类型测试、支付宝官方 API 真机授权测试 |
+| 2026-P2-01~24 | P2 | 全栈 | 代理头、allowlist、异常回显、分页、刷新令牌、支付权限、跨店、幂等碰撞、Redis 降级、同步阻塞、前端 storage/竞态/重试、双端输入校验等 | 待逐项复核/修复 | 按全量报告 §3 对应位置建立测试 |
+| 2026-P3-01~10 | P3 | 工程治理 | TS 严格检查、Vite env、日志、列表 key、token 清理、孤儿页面、空 catch、支付宝手机号授权、双端漂移、BaseException、文档技术栈漂移 | 待逐项治理 | 静态检查、双端 parity、文档链接/命令检查 |
+
+关闭原则：不得一次性把整组编号标记为完成；每个真实问题拆成独立子任务，逐条附 commit、测试命令、原始结果和残余风险。审查报告若复核后降级/误报，必须记录触发前提和复核证据。
+
