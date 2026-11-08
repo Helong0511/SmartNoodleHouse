@@ -3,8 +3,6 @@
 # Python: 3.11+
 # Install: pip install -r backend/requirements.lock
 # 修改依赖后必须同步更新本文件，并运行完整 CI 验证。
-aiofiles==24.1.0
-aiosqlite==0.21.0
 aiomysql==0.3.2
 alembic==1.20.1
 APScheduler==3.11.3
