@@ -140,7 +140,7 @@ def _charset_issues(
     schema_charset: str | None,
     schema_collation: str | None,
     table_collations: list[tuple[str, str | None]],
-    column_charsets: list[tuple[str, str, str | None]],
+    column_charsets: list[tuple[str, str, str | None, str | None]],
 ) -> list[str]:
     """数据库、连接、表和文本列必须统一使用 UTF-8/utf8mb4。"""
     issues: list[str] = []
@@ -159,10 +159,15 @@ def _charset_issues(
             issues.append(
                 f"table {table} collation={collation!r}, expected utf8mb4_unicode_ci"
             )
-    for table, column, charset in column_charsets:
+    for table, column, charset, collation in column_charsets:
         if str(charset or "").lower() != "utf8mb4":
             issues.append(
                 f"column {table}.{column} charset={charset!r}, expected utf8mb4"
+            )
+        if str(collation or "").lower() != "utf8mb4_unicode_ci":
+            issues.append(
+                f"column {table}.{column} collation={collation!r}, "
+                "expected utf8mb4_unicode_ci"
             )
     return issues
 
@@ -202,7 +207,7 @@ async def _read_charset_issues(db) -> list[str]:
         await db.execute(
             text(
                 """
-                SELECT TABLE_NAME, COLUMN_NAME, CHARACTER_SET_NAME
+                SELECT TABLE_NAME, COLUMN_NAME, CHARACTER_SET_NAME, COLLATION_NAME
                 FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE()
                   AND CHARACTER_SET_NAME IS NOT NULL
@@ -219,7 +224,7 @@ async def _read_charset_issues(db) -> list[str]:
         session["schema_charset"],
         session["schema_collation"],
         [(str(row[0]), row[1]) for row in tables],
-        [(str(row[0]), str(row[1]), row[2]) for row in columns],
+        [(str(row[0]), str(row[1]), row[2], row[3]) for row in columns],
     )
 
 
