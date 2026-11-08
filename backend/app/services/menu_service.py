@@ -399,8 +399,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
 
     version = await get_menu_version(sid)
     if version <= 0:
-        # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
-        version = await bump_menu_version(sid)
+        # Redis key 丢失时只能从 MySQL 持久代际恢复，不能自行 INCR 生成分叉版本。
+        version = await ensure_menu_generation(sid, durable_generation) or 0
     if version <= 0:
         invalidate_local_menu_cache(sid)
         if lock_ok and lock_token:
