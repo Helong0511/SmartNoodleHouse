@@ -21,6 +21,7 @@ import warnings
 import wave
 from io import BytesIO
 from threading import Lock, local
+from types import SimpleNamespace
 from urllib.parse import quote, urlparse, urlsplit
 from xml.etree import ElementTree as ET
 
@@ -556,7 +557,8 @@ def _wav_to_pcm8k(wav_data: bytes, *, volume_percent: int = 100) -> bytes:
 
 
 def normalize_g711_codec(raw: str | None) -> str:
-    s = (raw or "").strip().lower().replace(" ", "").replace("_", "").replace(".", "")
+    # 统一去掉点号、空格、连字符等分隔符，兼容设备返回的 "G.711 A-law"。
+    s = re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
     if "alaw" in s or s in ("g711a", "pcma"):
         return "alaw"
     return "ulaw"
