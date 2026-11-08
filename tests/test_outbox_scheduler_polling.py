@@ -30,9 +30,12 @@ def test_outbox_polling_interval_matches_scheduler_catalog() -> None:
     )
     assert isinstance(catalog, ast.List)
     metadata = next(
-        _literal_dict(item)
+        values
         for item in catalog.elts
-        if _literal_dict(item).get("id") == ast.Constant("drain_outbox_events")
+        if isinstance(item, ast.Dict)
+        for values in [_literal_dict(item)]
+        if isinstance(values.get("id"), ast.Constant)
+        and values["id"].value == "drain_outbox_events"
     )
     schedule = _literal_dict(metadata["default_schedule"])
     assert isinstance(schedule["every"], ast.Constant)
