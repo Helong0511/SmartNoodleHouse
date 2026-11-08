@@ -63,7 +63,7 @@ def test_upgrade_extends_only_menu_cache_invalidation_retry_budget(monkeypatch):
             rows = conn.exec_driver_sql(
                 "SELECT id, max_attempts FROM outbox_events ORDER BY id"
             ).all()
-            assert rows == [
+            assert [tuple(row) for row in rows] == [
                 (1, 2_147_483_647),
                 (2, 8),
                 (3, 8),
