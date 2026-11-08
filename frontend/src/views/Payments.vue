@@ -432,7 +432,7 @@ function openRefund(row: any) {
 
 async function submitRefund() {
   if (!refundRow.value) return
-  if (refundAmount.value > refundMax.value + 1e-9) {
+  if (!refundSubmission.value && refundAmount.value > refundMax.value + 1e-9) {
     ElMessage.warning(`退款金额不能超过可退余额 ¥${refundMax.value}`)
     return
   }
@@ -451,9 +451,10 @@ async function submitRefund() {
     }
     refundSubmission.value = attempt
   }
+  const attempt = refundSubmission.value
+  if (!attempt) return
   refunding.value = true
   try {
-    const attempt = refundSubmission.value
     const res = await api.post(`/payments/${paymentNo}/refund`, {
       amount: attempt.amount,
       reason: attempt.reason,
