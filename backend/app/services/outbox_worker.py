@@ -442,6 +442,15 @@ async def process_outbox_item(outbox_id: int) -> bool:
             await _mark_failed(db, row, "payload_invalid_json", wid=wid)
             return True
 
+        # 里程碑发券/回收依赖“锁后读取最新计数”。前面的 processed_messages
+        # 预检是普通 SELECT，可能已经建立 REPEATABLE READ 快照；提交只读预检事务，
+        # 让 handler 在取得 Order/Customer 锁后再建立新的计数快照。
+        if (row.aggregate_type, row.event_kind) in {
+            ("paid_side_effect", "milestone_coupon"),
+            ("refund", "milestone_reclaim"),
+        }:
+            await db.commit()
+
         handler_succeeded = False
         try:
             lease_owned = await _run_handler_with_lease(
