@@ -1,4 +1,4 @@
-"""校验数据库关键表、Alembic 版本与关键 UNIQUE/FK。
+"""校验数据库字符集、关键表、Alembic 版本与关键 UNIQUE/FK。
 
 用法:
   python scripts/verify_database.py
@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from sqlalchemy import text
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 
 REQUIRED_TABLES = [
     "roles",
@@ -133,6 +133,94 @@ REQUIRED_COLUMNS = [
     ("products", "visibility_calendar"),
     ("stores", "logo"),
 ]
+
+
+def _charset_issues(
+    session_charsets: dict[str, str],
+    schema_charset: str | None,
+    schema_collation: str | None,
+    table_collations: list[tuple[str, str | None]],
+    column_charsets: list[tuple[str, str, str | None]],
+) -> list[str]:
+    """数据库、连接、表和文本列必须统一使用 UTF-8/utf8mb4。"""
+    issues: list[str] = []
+    for variable in ("character_set_client", "character_set_connection", "character_set_results"):
+        value = str(session_charsets.get(variable) or "").lower()
+        if value != "utf8mb4":
+            issues.append(f"connection {variable}={value or '<missing>'}, expected utf8mb4")
+    if str(schema_charset or "").lower() != "utf8mb4":
+        issues.append(f"database default charset={schema_charset!r}, expected utf8mb4")
+    if str(schema_collation or "").lower() != "utf8mb4_unicode_ci":
+        issues.append(
+            f"database default collation={schema_collation!r}, expected utf8mb4_unicode_ci"
+        )
+    for table, collation in table_collations:
+        if str(collation or "").lower() != "utf8mb4_unicode_ci":
+            issues.append(
+                f"table {table} collation={collation!r}, expected utf8mb4_unicode_ci"
+            )
+    for table, column, charset in column_charsets:
+        if str(charset or "").lower() != "utf8mb4":
+            issues.append(
+                f"column {table}.{column} charset={charset!r}, expected utf8mb4"
+            )
+    return issues
+
+
+async def _read_charset_issues(db) -> list[str]:
+    session = (
+        await db.execute(
+            text(
+                """
+                SELECT
+                    @@character_set_client AS character_set_client,
+                    @@character_set_connection AS character_set_connection,
+                    @@character_set_results AS character_set_results,
+                    s.DEFAULT_CHARACTER_SET_NAME AS schema_charset,
+                    s.DEFAULT_COLLATION_NAME AS schema_collation
+                FROM information_schema.SCHEMATA AS s
+                WHERE s.SCHEMA_NAME = DATABASE()
+                """
+            )
+        )
+    ).mappings().one_or_none()
+    if session is None:
+        return ["cannot read current database character set metadata"]
+
+    tables = (
+        await db.execute(
+            text(
+                """
+                SELECT TABLE_NAME, TABLE_COLLATION
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
+                """
+            )
+        )
+    ).all()
+    columns = (
+        await db.execute(
+            text(
+                """
+                SELECT TABLE_NAME, COLUMN_NAME, CHARACTER_SET_NAME
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND CHARACTER_SET_NAME IS NOT NULL
+                """
+            )
+        )
+    ).all()
+    return _charset_issues(
+        {
+            "character_set_client": session["character_set_client"],
+            "character_set_connection": session["character_set_connection"],
+            "character_set_results": session["character_set_results"],
+        },
+        session["schema_charset"],
+        session["schema_collation"],
+        [(str(row[0]), row[1]) for row in tables],
+        [(str(row[0]), str(row[1]), row[2]) for row in columns],
+    )
 
 
 def _expected_alembic_heads() -> set[str]:
@@ -253,11 +341,19 @@ async def _check_exists(db, table: str, constraint: str) -> bool:
     return int(n or 0) > 0
 
 
-async def main() -> None:
+async def main() -> int:
     failures: list[str] = []
     async with AsyncSessionLocal() as db:
         db_name = (await db.execute(text("SELECT DATABASE()"))).scalar()
         print(f"database={db_name}")
+
+        charset_issues = await _read_charset_issues(db)
+        if charset_issues:
+            for issue in charset_issues:
+                print(f"[FAIL] charset {issue}")
+                failures.append(f"charset: {issue}")
+        else:
+            print("[OK] database/session/tables/text columns use utf8mb4")
 
         for t in REQUIRED_TABLES:
             ok = await _table_exists(db, t)
@@ -345,10 +441,17 @@ async def main() -> None:
         print("\n校验失败:")
         for f in failures:
             print(f"  - {f}")
-        sys.exit(1)
+        return 1
     print("\n校验通过")
-    sys.exit(0)
+    return 0
+
+
+async def _run_and_dispose() -> int:
+    try:
+        return await main()
+    finally:
+        await engine.dispose()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(_run_and_dispose()))
