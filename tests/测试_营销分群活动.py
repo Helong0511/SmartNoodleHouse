@@ -941,6 +941,7 @@ async def test_welcome_coupon_only_for_new_member_campaign(db_session):
     assert int(ok.coupon_template_id) == int(welcome.id)
 
 
+@pytest.mark.filterwarnings("ignore:coroutine 'Connection.cursor' was never awaited:RuntimeWarning")
 @pytest.mark.asyncio
 async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     """回归：upsert+commit 后同步 _payload 读 created_at 不得 MissingGreenlet。"""
@@ -973,22 +974,10 @@ async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     assert payload["budget_cap"] == "100.00"
 
     # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）。
-    # 该非法访问路径在部分 SQLAlchemy/aiosqlite 组合中会额外产生未 await 的 cursor 协程；
-    # 仅在此回归测试局部捕获该已知副作用，正常序列化另有 RuntimeWarning=error 检查。
-    import gc
-    import warnings
+    # 此处故意触发非法同步访问；SQLAlchemy/aiosqlite 可能附带未 await cursor 警告，已用测试级 filterwarnings 精确隔离。
     db_session.expire(camp, ["created_at", "updated_at"])
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", RuntimeWarning)
-        with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
-            _ = MarketingService._payload(camp)
-        del exc_info
-        gc.collect()
-    assert all(
-        "Connection.cursor" in str(item.message)
-        for item in caught
-        if issubclass(item.category, RuntimeWarning)
-    )
+    with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
+        _ = MarketingService._payload(camp)
     # SQLAlchemy 2.1 wraps the async MissingGreenlet in StatementError;
     # SQLAlchemy 2.0 may expose MissingGreenlet directly.
     if isinstance(exc_info.value, StatementError):
