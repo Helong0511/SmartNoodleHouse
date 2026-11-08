@@ -1,8 +1,8 @@
-# Curated runtime pins — NOT a complete transitive/hash lock.
-# Unlisted transitive dependencies are still resolved by pip at install time; CI runs pip-audit.
-# Python: 3.11+
-# Install: pip install -r backend/requirements.lock
-# Keep aligned with backend/requirements.txt; regenerate after intentional dependency changes.
+# 后端运行环境的精选精确版本；当前不是完整的传递依赖/哈希锁文件。
+# 未列出的传递依赖仍由 pip 安装时解析；CI 会运行 pip-audit。
+# Python：3.11+
+# 安装：pip install -r backend/requirements.lock
+# 修改运行依赖后，必须同步检查 backend/requirements.txt 与本文件。
 aiomysql==0.3.2
 alembic==1.20.1
 APScheduler==3.11.3
