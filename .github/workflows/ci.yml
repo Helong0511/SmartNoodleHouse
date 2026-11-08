@@ -198,8 +198,12 @@ jobs:
           ALLOW_AUTH_MOCK: "true"
           ALLOW_DELIVERY_MOCK: "true"
           REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+          # 跟踪延迟回收的未等待协程，确保完整测试套件不吞掉 DB cursor 警告。
+          PYTHONTRACEMALLOC: "10"
         run: |
           python -m pytest -q --tb=short \
+            -W error::RuntimeWarning \
+            -W error::pytest.PytestUnraisableExceptionWarning \
             --cov=app --cov-report=term-missing --cov-report=xml \
             --cov-fail-under=35
 
