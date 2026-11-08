@@ -301,6 +301,19 @@ jobs:
             throw "Windows DLL was not produced"
           }
 
+  rust-msrv:
+    name: rust-msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tests/广告追踪/ad_tracking_dll
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Verify declared Rust MSRV
+        run: cargo test --locked --all-targets
+
   windows-sapi-dependency:
     name: windows-sapi-dependency
     runs-on: windows-latest
