@@ -3,7 +3,11 @@ from typing import Any
 from uuid import uuid4
 
 import jwt
-from anyio import CapacityLimiter, to_thread
+from asyncio import AbstractEventLoop, Semaphore, get_running_loop
+from threading import Lock
+from weakref import WeakKeyDictionary
+
+from starlette.concurrency import run_in_threadpool
 from argon2.exceptions import InvalidHashError as Argon2InvalidHashError
 from jwt import InvalidTokenError as JWTError
 from pwdlib import PasswordHash
@@ -17,8 +21,20 @@ from app.core.config import get_settings
 # 登录成功后通过 verify_and_update 渐进升级，避免强制全体员工重置密码。
 password_hash = PasswordHash((Argon2Hasher(), BcryptHasher(rounds=12)))
 
-# Argon2 默认约 64 MiB 内存成本；每进程最多并发 2 次，避免登录洪峰放大内存峰值。
-_PASSWORD_HASH_LIMITER = CapacityLimiter(2)
+# Argon2 默认约 64 MiB 内存成本；每个事件循环最多并发 2 次，避免登录洪峰放大内存峰值。
+_PASSWORD_HASH_LIMITERS: WeakKeyDictionary[AbstractEventLoop, Semaphore] = WeakKeyDictionary()
+_PASSWORD_HASH_LIMITERS_LOCK = Lock()
+
+
+def _password_hash_limiter() -> Semaphore:
+    """为每个事件循环独立创建限流器，避免测试/多 loop 之间错误复用。"""
+    loop = get_running_loop()
+    with _PASSWORD_HASH_LIMITERS_LOCK:
+        limiter = _PASSWORD_HASH_LIMITERS.get(loop)
+        if limiter is None:
+            limiter = Semaphore(2)
+            _PASSWORD_HASH_LIMITERS[loop] = limiter
+        return limiter
 
 
 def hash_password(password: str) -> str:
@@ -42,18 +58,16 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 async def hash_password_async(password: str) -> str:
     """在线程池中生成 Argon2id 哈希，避免阻塞 FastAPI 事件循环。"""
-    return await to_thread.run_sync(
-        hash_password, password, limiter=_PASSWORD_HASH_LIMITER
-    )
+    async with _password_hash_limiter():
+        return await run_in_threadpool(hash_password, password)
 
 
 async def verify_password_and_update_async(
     plain: str, hashed: str
 ) -> tuple[bool, str | None]:
     """在线程池中校验/升级哈希，并限制每进程 Argon2 并发。"""
-    return await to_thread.run_sync(
-        verify_password_and_update, plain, hashed, limiter=_PASSWORD_HASH_LIMITER
-    )
+    async with _password_hash_limiter():
+        return await run_in_threadpool(verify_password_and_update, plain, hashed)
 
 
 # JWT 标准/内部声明：extra 不得覆盖，防止提权或伪造 typ/sub/exp
