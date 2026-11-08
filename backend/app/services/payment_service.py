@@ -2491,47 +2491,53 @@ class PaymentService:
                         order.payment_status = "REFUNDED"
                         # 订单已是终态时 apply_order_status 不会再走 release；幂等补一次
                         from app.services.coupon_service import CouponService
-                        from app.services.paid_side_effects import enqueue_coupon_release
+                        from app.services.outbox_worker import enqueue_outbox
 
                         try:
-                            await CouponService.release_for_order(db, order)
+                            # SAVEPOINT 隔离单项副作用失败，保证外层退款事务仍可写入补偿事件。
+                            async with db.begin_nested():
+                                await CouponService.release_for_order(db, order)
                         except Exception:
                             logger.exception(
                                 "终态订单补回滚优惠券失败，已入队补偿 order_id=%s refund_no=%s",
                                 order.id,
                                 row.refund_no,
                             )
-                            await enqueue_coupon_release(db, int(order.id))
+                            # 补偿入队失败必须向外抛出，不能提交“退款成功但无补偿”的状态。
+                            await enqueue_outbox(
+                                db,
+                                aggregate_type="order",
+                                aggregate_id=int(order.id),
+                                event_kind="coupon_release",
+                                payload={"order_id": int(order.id)},
+                            )
                     # 全额退：回收因该单计入而超出阈值的未用里程碑券
                     if order.customer_id:
                         from app.services.coupon_service import CouponService
                         from app.services.outbox_worker import enqueue_outbox
 
                         try:
-                            await CouponService.reclaim_milestones_after_full_refund(
-                                db, order, refund_id=int(row.id)
-                            )
+                            async with db.begin_nested():
+                                await CouponService.reclaim_milestones_after_full_refund(
+                                    db, order, refund_id=int(row.id)
+                                )
                         except Exception:
                             logger.exception(
                                 "里程碑券回收失败，已入队 outbox order_id=%s refund_no=%s",
                                 order.id,
                                 row.refund_no,
                             )
-                            try:
-                                await enqueue_outbox(
-                                    db,
-                                    aggregate_type="refund",
-                                    aggregate_id=int(row.id),
-                                    event_kind="milestone_reclaim",
-                                    payload={
-                                        "order_id": int(order.id),
-                                        "refund_id": int(row.id),
-                                    },
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "入队 milestone_reclaim 失败 refund_id=%s", row.id
-                                )
+                            # Outbox 必须与退款 SUCCESS 同事务持久化；失败时回滚整个确认事务。
+                            await enqueue_outbox(
+                                db,
+                                aggregate_type="refund",
+                                aggregate_id=int(row.id),
+                                event_kind="milestone_reclaim",
+                                payload={
+                                    "order_id": int(order.id),
+                                    "refund_id": int(row.id),
+                                },
+                            )
                 elif net < total:
                     order.payment_status = "PARTIAL_REFUND"
                 else:
@@ -2545,34 +2551,32 @@ class PaymentService:
                     try:
                         from app.services.customer_service import CustomerService, PreferenceService
 
-                        await CustomerService.deduct_points_for_refund(
-                            db, order, row.amount, refund_id=row.id
-                        )
-                        # 退款后按剩余已付订单重算口味，避免已退订单继续撑着旧偏好
-                        await PreferenceService.recompute_for_customer(db, order.customer_id)
+                        # 两项本地副作用使用同一 SAVEPOINT：任一失败都回滚本次同步尝试，
+                        # 随后由独立幂等 Outbox handler 分别补偿，避免积分已扣而偏好未更新。
+                        async with db.begin_nested():
+                            await CustomerService.deduct_points_for_refund(
+                                db, order, row.amount, refund_id=row.id
+                            )
+                            await PreferenceService.recompute_for_customer(db, order.customer_id)
                     except Exception:
                         logger.exception(
                             "退款扣减积分或口味重算失败，已入队 outbox 补偿 order_id=%s refund_no=%s",
                             order.id,
                             row.refund_no,
                         )
-                        # 补偿事件：aggregate_id=refund_id 保证每笔退款各一条，幂等
+                        # 补偿事件：aggregate_id=refund_id 保证每笔退款各一条，幂等。
+                        # 任何一条无法持久化都必须中止外层事务，不能丢失补偿责任。
                         for kind, payload in (
                             ("points_deduct_refund", {"order_id": int(order.id), "refund_id": int(row.id)}),
                             ("pref_recompute", {"order_id": int(order.id), "refund_id": int(row.id)}),
                         ):
-                            try:
-                                await enqueue_outbox(
-                                    db,
-                                    aggregate_type="refund",
-                                    aggregate_id=int(row.id),
-                                    event_kind=kind,
-                                    payload=payload,
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "入队退款补偿 outbox 失败 refund_id=%s kind=%s", row.id, kind
-                                )
+                            await enqueue_outbox(
+                                db,
+                                aggregate_type="refund",
+                                aggregate_id=int(row.id),
+                                event_kind=kind,
+                                payload=payload,
+                            )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status
             row.fail_reason = row.fail_reason or fail_reason or (
