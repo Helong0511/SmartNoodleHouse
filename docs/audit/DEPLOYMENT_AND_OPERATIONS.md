@@ -15,8 +15,8 @@
                            │ 127.0.0.1:8000
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
-  Uvicorn worker#1   Uvicorn worker#2    （可水平扩 worker）
-  UvicornWorker      UvicornWorker
+  Uvicorn worker#1   Uvicorn worker#2    （可按容量扩 worker）
+  原生 spawn 进程      原生 spawn 进程
    FastAPI app        FastAPI app
         │                  │
         ├──── Redis ◀──────┘   Leader 锁 / 限流 / WS PubSub / 活体 token / 缓存
