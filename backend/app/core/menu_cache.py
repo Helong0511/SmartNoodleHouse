@@ -6,7 +6,10 @@
 - 缓存雪崩：TTL 加 ±20% 随机偏移。
 - 版本 fencing：bundle、version、lock 共用 hash slot，Lua 原子校验 owner 与版本后写入。
 - 大Key防护：bundle JSON 超 256KB 时跳过缓存。
-Redis 全部异常静默降级为未缓存，不阻塞点餐主流程。
+Redis 命令异常在本模块按缓存未命中/锁不可用处理，不向调用方伪造有效版本。
+菜单聚合读服务必须在无法验证远端 generation 且未持有重建锁时 fail-closed
+（HTTP 503），不能直接返回进程内旧 bundle，也不能让每个 Worker 无锁回源。
+这与普通非关键缓存的查库降级策略不同，是为避免跨 Worker 菜单陈旧和 DB 惊群。
 """
 from __future__ import annotations
 
