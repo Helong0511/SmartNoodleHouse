@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use once_cell::sync::Lazy;
-use rand::RngCore;
+use rand::{rngs::SysRng, TryRng};
 use serde_json::{Map, Value};
 use std::{
     cell::RefCell,
@@ -418,7 +418,13 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    // 使用操作系统 CSPRNG 生成 GCM nonce；随机源失败必须拒绝加密，不能回退到弱随机数。
+    if SysRng.try_fill_bytes(&mut nonce_bytes).is_err() {
+        secure_zeroize(&mut key);
+        secure_zeroize(&mut nonce_bytes);
+        set_error("system cryptographic random source failed");
+        return Err(ERR_INTERNAL);
+    }
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
