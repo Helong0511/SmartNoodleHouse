@@ -158,7 +158,7 @@ async def test_hikvision_play_ulaw_open_put_close():
 
     ulaw = b"\xff" * 320
     calls: list[tuple[str, str]] = []
-    ha._SHARED_HTTP.clear()
+    ha._get_loop_state().shared_http.clear()
     ha._SESSION_NEED_CLOSE.clear()
 
     class _Resp:
@@ -211,16 +211,16 @@ async def test_hikvision_play_ulaw_open_put_close():
         out1 = await client.play_ulaw(ulaw)
         assert isinstance(out1, dict) and out1.get("status") == "completed"
         # 第二次应复用同一 Digest Client，不再新建
-        n_clients = len(ha._SHARED_HTTP)
+        n_clients = len(ha._get_loop_state().shared_http)
         out2 = await client.play_ulaw(ulaw)
         assert out2.get("status") == "completed"
-        assert len(ha._SHARED_HTTP) == n_clients == 1
+        assert len(ha._get_loop_state().shared_http) == n_clients == 1
 
     paths = [p for _, p in calls]
     assert paths.count("/System/TwoWayAudio/channels/1/open") == 2
     assert paths.count("/System/TwoWayAudio/channels/1/close") >= 2
     assert streamed and streamed[0] == ulaw
-    ha._SHARED_HTTP.clear()
+    ha._get_loop_state().shared_http.clear()
 
 
 def test_stream_pace_short_clip_slower_than_medium():
