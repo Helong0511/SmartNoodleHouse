@@ -276,6 +276,29 @@ jobs:
       - name: Build and run Rust tests
         run: cargo test --locked --all-targets
 
+  windows-rust-dll:
+    name: windows-rust-dll
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: tests/广告追踪/ad_tracking_dll
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify locked Windows DLL build
+        shell: pwsh
+        run: |
+          rustc --version
+          cargo metadata --locked --format-version 1 | Out-Null
+          cargo test --locked --all-targets
+          cargo build --release --locked
+          if (-not (Test-Path "target/release/ad_tracking_engine.dll")) {
+            throw "Windows DLL was not produced"
+          }
+
   windows-sapi-dependency:
     name: windows-sapi-dependency
     runs-on: windows-latest
