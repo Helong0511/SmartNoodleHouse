@@ -11,7 +11,9 @@ from app.core.exceptions import AppException
 @pytest.mark.asyncio
 async def test_stock_source_mutation_is_blocked_while_product_has_active_order():
     db = MagicMock()
-    result = MagicMock()\n    result.scalar_one_or_none.return_value = 123\n    db.execute = AsyncMock(return_value=result)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = 123
+    db.execute = AsyncMock(return_value=result)
 
     with pytest.raises(AppException) as exc:
         await _assert_no_active_orders_for_stock_mutation(
@@ -39,7 +41,9 @@ async def test_stock_source_mutation_is_blocked_while_product_has_active_order()
 @pytest.mark.asyncio
 async def test_stock_source_mutation_is_allowed_when_no_active_order_references_product():
     db = MagicMock()
-    result = MagicMock()\n    result.scalar_one_or_none.return_value = None\n    db.execute = AsyncMock(return_value=result)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=result)
 
     await _assert_no_active_orders_for_stock_mutation(
         db, store_id=7, product_id=42
