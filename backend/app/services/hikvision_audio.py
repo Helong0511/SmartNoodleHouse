@@ -16,15 +16,17 @@ import os
 import re
 import socket
 import struct
-from threading import Lock
 import time
 import warnings
 import wave
 from io import BytesIO
+from threading import Lock
 from urllib.parse import quote, urlparse, urlsplit
 from xml.etree import ElementTree as ET
 
 import httpx
+
+from app.core.hot_cache import HotCache
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,6 @@ _CHUNK_BYTES = 640  # 80ms/块，减少 syscall；短句可更快出声
 _CHUNK_SLEEP = _CHUNK_BYTES / _G711_RATE
 # 国内海康门口机多数为 alaw；探测未命中时先用此值，避免堵死首播
 _DEFAULT_CODEC = "alaw"
-from app.core.hot_cache import HotCache
 
 
 def tail_hold_seconds(audio_s: float, send_s: float) -> float:
