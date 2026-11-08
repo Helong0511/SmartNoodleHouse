@@ -255,7 +255,7 @@ jobs:
       - name: Audit Rust dependencies against RustSec
         run: |
           cargo install cargo-audit --locked --version 0.22.2
-          cargo audit --locked
+          cargo audit
       - name: Build and run Rust tests
         run: cargo test --locked --all-targets
 
