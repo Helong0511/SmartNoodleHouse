@@ -124,3 +124,33 @@ async def test_menu_cache_publish_refuses_missing_or_zero_version(monkeypatch):
         77125, {"products": []}, owner_token="owner-token", expected_version=1
     ) is False
     assert menu_cache.menu_bundle_key(77125) not in fake.store
+
+
+@pytest.mark.asyncio
+async def test_menu_bundle_fails_closed_when_schedule_generation_cannot_be_verified(monkeypatch):
+    from app.core.exceptions import AppException
+    from app.services import menu_service
+
+    sid = 77126
+    menu_service._BUILD_CACHE.put(
+        sid,
+        {
+            "version": 12,
+            "active_schedule_id": 4,
+            "categories": [],
+            "products": {"items": [], "total": 0},
+        },
+    )
+    monkeypatch.setattr(menu_service, "_active_schedule_id", AsyncMock(return_value=5))
+    version = AsyncMock(return_value=None)
+    cached = AsyncMock()
+    monkeypatch.setattr(menu_service, "get_menu_version", version)
+    monkeypatch.setattr(menu_service, "get_menu_bundle", cached)
+
+    with pytest.raises(AppException) as exc_info:
+        await menu_service.get_or_build_menu_bundle(object(), sid)
+
+    assert exc_info.value.status_code == 503
+    version.assert_awaited_once_with(sid, sync_schedule=True, active_schedule_id=5)
+    cached.assert_not_awaited()
+    assert menu_service._BUILD_CACHE.get(sid) is None

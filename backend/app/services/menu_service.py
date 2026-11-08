@@ -256,12 +256,21 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         sample = items[0] if isinstance(items[0], dict) else {}
         return "visibility_rule" in sample
 
+    # 时段标记独立于短 TTL bundle 持久化；即使所有 Worker 的缓存都过期，
+    # 午/晚市切换仍会原子递增版本并删除旧 bundle，不能依赖“旧缓存还在不在”。
+    remote_version = await get_menu_version(
+        sid, sync_schedule=True, active_schedule_id=expected_sched
+    )
+    if remote_version is None:
+        invalidate_local_menu_cache(sid)
+        raise AppException(
+            50301,
+            "菜单版本协调服务暂不可用，请稍后重试",
+            status_code=503,
+        )
     cached = await get_menu_bundle(sid)
-    # 在读取 Redis bundle 之后读取版本戳。版本键缺失/不可读时，缓存身份无法验证：
-    # Redis 可能只淘汰了 ver key 而保留旧 bundle，绝不能把 unknown 当作 generation 0 命中。
-    remote_version = await get_menu_version(sid)
     if remote_version <= 0:
-        # 同时丢弃本进程缓存；Redis 不可用时也不能用跨 worker 无法失效的旧菜单兜底。
+        # 仅保留首次初始化/版本键缺失的兼容路径；Redis 命令异常已由 None 区分。
         invalidate_local_menu_cache(sid)
     if (
         remote_version > 0
@@ -362,14 +371,32 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                             if cached is not None or (
                                 hit is not None and _bundle_schedule_id(hit) != expected_sched
                             ):
+                                bumped = await bump_menu_version(sid)
+                                if bumped <= 0:
+                                    raise AppException(
+                                        50301,
+                                        "菜单版本更新失败，请稍后重试",
+                                        status_code=503,
+                                    )
                                 invalidate_local_menu_cache(sid)
-                                await bump_menu_version(sid)
                             # 先固定 DB 快照对应的菜单版本。若构建期间写路径 bump 版本，
                             # 后续 Lua 发布会拒绝将旧快照写回 Redis。
                             build_version = await get_menu_version(sid)
                             if build_version <= 0:
                                 build_version = await bump_menu_version(sid)
+                            if build_version <= 0:
+                                raise AppException(
+                                    50301,
+                                    "菜单版本初始化失败，请稍后重试",
+                                    status_code=503,
+                                )
                             bundle = await build_menu_bundle(db, sid)
+                            if _bundle_schedule_id(bundle) != expected_sched:
+                                raise AppException(
+                                    50301,
+                                    "菜单时段刚刚发生变化，请重新获取",
+                                    status_code=503,
+                                )
                     except BaseException:
                         if heartbeat_task is not None:
                             heartbeat_task.cancel()
@@ -382,6 +409,19 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     if version <= 0:
         # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
         version = await bump_menu_version(sid)
+    if version <= 0:
+        invalidate_local_menu_cache(sid)
+        if lock_ok and lock_token:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+            await release_rebuild_lock(sid, owner_token=lock_token)
+            lock_ok = False
+        raise AppException(
+            50301,
+            "菜单版本校验失败，请稍后重试",
+            status_code=503,
+        )
     if build_version is None and _bundle_version(bundle) != version:
         # 缓存命中/等待者路径也可能在读完 bundle 后发生并发失效；
         # 绝不能把旧 bundle 重新标记成新版本返回。

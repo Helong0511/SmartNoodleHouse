@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -69,11 +70,15 @@ def test_blend_partial_weight_between_prior_and_sales():
 
 @pytest.mark.asyncio
 async def test_refresh_schedule_auto_sort_by_slot_sales(db_session, monkeypatch):
-    from unittest.mock import AsyncMock
-
+    enqueue_invalidation = AsyncMock()
+    local_invalidation = MagicMock()
     monkeypatch.setattr(
-        "app.services.category_schedule_auto.invalidate_store_caches",
-        AsyncMock(),
+        "app.services.category_schedule_auto.enqueue_menu_cache_invalidation",
+        enqueue_invalidation,
+    )
+    monkeypatch.setattr(
+        "app.services.category_schedule_auto.invalidate_store_local_caches",
+        local_invalidation,
     )
     db = db_session
     store = await make_store(db)
@@ -156,3 +161,5 @@ async def test_refresh_schedule_auto_sort_by_slot_sales(db_session, monkeypatch)
     ordered = sorted(items, key=lambda x: x.sort_order)
     assert [it.category_id for it in ordered] == [c_noodle.id, c_breakfast.id]
     assert sched.auto_updated_at is not None
+    local_invalidation.assert_called_once_with(store.id)
+    enqueue_invalidation.assert_awaited_once_with(db, store.id)

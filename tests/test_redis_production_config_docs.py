@@ -9,6 +9,6 @@ def test_mixed_redis_production_policy_is_noeviction():
     deployment = (ROOT / "docs" / "部署说明.md").read_text(encoding="utf-8")
 
     assert "maxmemory-policy noeviction" in config
-    assert "maxmemory-policy=noeviction" in deployment
+    assert "maxmemory-policy noeviction" in deployment
     assert "maxmemory-policy=allkeys-lru" not in deployment
     assert "独立 Redis 实例" in deployment

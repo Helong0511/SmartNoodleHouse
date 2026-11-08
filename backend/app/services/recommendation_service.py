@@ -514,20 +514,22 @@ _CF_CACHE: HotCache[int, dict[int, dict[int, int]]] = HotCache(
 )
 
 
-async def invalidate_store_caches(store_id: int) -> bool:
-    """餐品池/共现/菜单聚合缓存失效（产品写路径与 Task 8 主动失效调用）。
-
-    注意：仅清本进程内存缓存。多 worker 部署下其他进程最多 POOL_TTL(60s)/CF_TTL(300s) 后自然过期。
-    如需强一致可走 Redis pubsub 广播失效，当前 TTL 可接受。
-    """
+def invalidate_store_local_caches(store_id: int) -> None:
+    """立即清理当前进程的推荐/菜单缓存；不访问 Redis，适用于事务内写路径。"""
     sid = int(store_id)
     _POOL_CACHE.delete(sid)
     _CF_CACHE.delete(sid)
-    # Task 12：菜单版本戳递增 + 聚合缓存失效 + 进程内兜底失效
-    from app.core.menu_cache import bump_menu_version
     from app.services.menu_service import invalidate_local_menu_cache
 
     invalidate_local_menu_cache(sid)
+
+
+async def invalidate_store_caches(store_id: int) -> bool:
+    """清理本地推荐/菜单缓存并递增共享菜单版本。"""
+    sid = int(store_id)
+    invalidate_store_local_caches(sid)
+    from app.core.menu_cache import bump_menu_version
+
     version = await bump_menu_version(sid)
     return version > 0
 
