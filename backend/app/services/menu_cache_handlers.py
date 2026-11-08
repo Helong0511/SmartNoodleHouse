@@ -27,7 +27,6 @@ async def menu_cache_invalidate_handler(db, row) -> None:
     current_generation = await db.scalar(
         select(Store.menu_generation)
         .where(Store.id == int(store_id))
-        .with_for_update()
     )
     event_generation = payload.get("generation")
     generation = max(
