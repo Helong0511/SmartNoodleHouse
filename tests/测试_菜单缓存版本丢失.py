@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, ANY
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,7 +47,7 @@ async def test_menu_bundle_rebuilds_when_redis_version_key_is_missing(monkeypatc
     monkeypatch.setattr(menu_service, "set_menu_bundle", publish)
     monkeypatch.setattr(menu_service, "release_rebuild_lock", AsyncMock())
 
-    result = await menu_service.get_or_build_menu_bundle(object(), sid)
+    result = await menu_service.get_or_build_menu_bundle(SimpleNamespace(commit=AsyncMock()), sid)
 
     assert result["version"] == generation
     assert result["products"]["items"][0]["id"] == 2
