@@ -23,7 +23,8 @@ python-multipart>=0.0.33,<1.0
 apscheduler>=3.11.3,<4.0
 websockets>=12.0,<14
 opencv-python-headless>=5.0.0.93,<6.0
-numpy>=1.26.0,<3.0
+# 生产仍使用 Python 3.11；NumPy 2.5.x 要求 Python 3.12，故选当前仍提供 3.11 wheel 的 2.2.6 稳定线。
+numpy>=2.2.6,<3.0
 # Pillow 13.0.0（2026-10-16）修复多项 JPEG/TIFF/OpenJPEG/PDF 等关键图像解析漏洞；生产 Python 3.11+
 cryptography>=50.0.2,<51
 Pillow>=13.0.0,<14.0
@@ -33,7 +34,7 @@ pypinyin>=0.55.0,<1.0
 lunar-python>=1.4.9,<2.0
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
-onnxruntime>=1.16.0,<2.0
+onnxruntime>=1.31.1,<2.0
 # Windows 本机/摄像头迎宾 TTS（SAPI）；Linux local 模式用 espeak，勿在 Ubuntu 强装 pywin32
 pywin32>=312; platform_system=="Windows"
 # 神经 TTS（生产 Ubuntu 温柔女声）；需本机 ffmpeg，合成时访问微软 Edge TTS
