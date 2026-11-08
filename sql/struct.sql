@@ -1478,6 +1478,8 @@ CREATE TABLE IF NOT EXISTS `stores` (
   `latitude` decimal(10, 7) NULL DEFAULT NULL COMMENT '纬度（天气口味加权）',
   `longitude` decimal(10, 7) NULL DEFAULT NULL COMMENT '经度（天气口味加权）',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '营业状态：1=营业中 0=停业/禁用',
+  `menu_generation` bigint NOT NULL DEFAULT 1000000000 COMMENT '菜单缓存持久代际，MySQL 为事实源',
+  `menu_schedule_id` bigint NOT NULL DEFAULT -1 COMMENT '当前生效分类时段ID，-1表示无时段',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
