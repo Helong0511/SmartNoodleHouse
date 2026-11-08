@@ -42,7 +42,7 @@
 
 ### 2. 数据库（先区分全新空库与已有库）
 
-<escape>⚠️ 严禁把初始化脚本用于已有生产数据库。sql/struct.sql 含 DROP DATABASE IF EXISTS；sql/data_sys.sql 含多张业务表 TRUNCATE。执行会删除已有数据库及业务数据，不能用于生产升级。</escape>
+⚠️ 严禁把初始化脚本用于已有生产数据库。sql/struct.sql 含 DROP DATABASE IF EXISTS；sql/data_sys.sql 含多张业务表 TRUNCATE。执行会删除已有数据库及业务数据，不能用于生产升级。
 
 **A. 仅全新、确认为空的数据库：**先完成备份策略和目标库名复核，再在隔离环境初始化。生产环境只有在 DBA 确认目标库为空、备份已验证、执行人双重确认后才可走初始化流程。请勿把下面命令当作常规发布命令：
 
@@ -412,17 +412,16 @@ FLUSH PRIVILEGES;
 sudo systemctl enable redis-server && sudo systemctl start redis-server
 ```
 
-**生产**按顺序执行（勿执行 `sql/data_test.sql`）：
+**已有生产数据库禁止执行初始化 SQL。** 已有库只在备份并完成预生产演练后执行 Alembic：
 
 ```bash
-cd /var/www/smart-noodle
-mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
-
-export ADMIN_INITIAL_PASSWORD='超管强密码'
-python3 scripts/初始化管理员.py
+cd /var/www/smart-noodle/backend
+source .venv/bin/activate
+alembic upgrade head
+python ../scripts/验证数据库.py
 ```
+
+仅全新、确认为空的数据库才可按本节之外的“全新空库初始化”流程执行 struct.sql/data_sys.sql；两者分别包含 DROP DATABASE 与 TRUNCATE。不得放入常规生产发布流水线。
 
 ### 三、部署代码与后端 `.env`
 
