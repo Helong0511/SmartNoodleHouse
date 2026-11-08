@@ -128,7 +128,7 @@ TASK_CATALOG: list[dict] = [
         "title": "消费 Outbox 事件",
         "category": "可靠投递",
         "description": "处理支付副作用、退款补偿、推荐缓存失效等事务型 Outbox 事件。",
-        "default_schedule": {"type": "interval", "unit": "seconds", "every": 30},
+        "default_schedule": {"type": "interval", "unit": "seconds", "every": 5},
     },
     {
         "id": "reclaim_stale_outbox",
@@ -710,7 +710,7 @@ def register_tasks(scheduler) -> None:
                 logger.info("File logs maintained: %s", stats)
 
     @scheduler.scheduled_job(
-        "interval", seconds=30, id="drain_outbox_events", name="消费 Outbox 事件"
+        "interval", seconds=5, id="drain_outbox_events", name="消费 Outbox 事件"
     )
     @_leader_job
     async def drain_outbox_events():
