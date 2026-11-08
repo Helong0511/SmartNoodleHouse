@@ -1,10 +1,11 @@
-"""Keep menu cache invalidation Outbox events retryable across Redis outages.
+"""Keep cache invalidation Outbox events retryable across Redis outages.
 
 Revision ID: 0049_menu_cache_outbox_retry
 Revises: 0048_reconcile_store_scope
 
-Menu invalidation is idempotent cache-coherence work. It must not become a
-permanent dead letter after the generic eight-attempt policy is exhausted.
+Menu and personalized recommendation invalidations are idempotent cache-coherence
+work. They must not become permanent dead letters after the generic eight-attempt
+policy is exhausted.
 """
 from __future__ import annotations
 
@@ -25,8 +26,10 @@ def upgrade() -> None:
             """
             UPDATE outbox_events
             SET max_attempts = :max_attempts
-            WHERE aggregate_type = 'menu_cache'
-              AND event_kind = 'invalidate'
+            WHERE (
+                    (aggregate_type = 'menu_cache' AND event_kind = 'invalidate')
+                 OR (aggregate_type = 'reco_cache' AND substr(event_kind, 1, 11) = 'invalidate_')
+              )
               AND (max_attempts IS NULL OR max_attempts < :max_attempts)
             """
         ),
