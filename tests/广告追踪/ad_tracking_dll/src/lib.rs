@@ -47,6 +47,15 @@ fn secure_zeroize(bytes: &mut [u8]) {
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
+// 密钥副本使用 RAII 清理：无论后续校验、初始化或加解密在哪一步失败，离开作用域都会清零。
+struct SecretKey([u8; 32]);
+
+impl Drop for SecretKey {
+    fn drop(&mut self) {
+        secure_zeroize(&mut self.0);
+    }
+}
+
 pub const OK: i32 = 0;
 pub const ERR_NULL_INPUT: i32 = 1;
 pub const ERR_INVALID_ARGUMENT: i32 = 2;
@@ -374,7 +383,8 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let now = now_unix()?;
-    let (kid, mut key) = current_key()?;
+    let (kid, key) = current_key()?;
+    let key = SecretKey(key);
     let exp = now
         .checked_add(i64::try_from(ttl).map_err(|_| ERR_INVALID_ARGUMENT)?)
         .ok_or_else(|| {
@@ -421,7 +431,7 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
         set_error("system cryptographic random source failed");
         return Err(ERR_INTERNAL);
     }
-    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
+    let cipher = Aes256Gcm::new_from_slice(&key.0).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
     })?;
@@ -438,7 +448,6 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
             set_error("AES-GCM encryption failed");
             ERR_INTERNAL
         })?;
-    secure_zeroize(&mut key);
 
     let mut raw = Vec::with_capacity(HEADER_LEN + ciphertext.len());
     raw.push(VERSION);
@@ -474,7 +483,7 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         return Err(ERR_TOKEN_INVALID);
     }
 
-    let mut key = match key_for(kid) {
+    let key = SecretKey(match key_for(kid) {
         Ok(k) => k,
         Err(ERR_KEY_NOT_FOUND) => {
             // Do not expose key-version existence to untrusted callers.
@@ -482,8 +491,8 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
             return Err(ERR_TOKEN_INVALID);
         }
         Err(e) => return Err(e),
-    };
-    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
+    });
+    let cipher = Aes256Gcm::new_from_slice(&key.0).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
     })?;
@@ -503,7 +512,6 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
             set_error("token authentication failed");
             ERR_TOKEN_INVALID
         })?;
-    secure_zeroize(&mut key);
 
     if plaintext.len() > MAX_PAYLOAD_CHARS {
         set_error("decrypted payload too large");
