@@ -206,7 +206,7 @@ ad_tracking_engine_production_v1_cn/
 
 ```text
 Python：3.10+
-Rust：stable
+Rust：1.85+（推荐 stable）
 Cargo：与 stable Rust 配套
 ```
 
