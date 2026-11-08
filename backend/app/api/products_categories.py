@@ -45,7 +45,7 @@ async def _prepare_category_store_move(
     )
     if linked_product_id is not None:
         raise AppException(
-            40041,
+            40001,
             "该分类仍关联餐品，不能直接迁移到其他门店；请先在原门店重新分配或下架餐品",
         )
 
