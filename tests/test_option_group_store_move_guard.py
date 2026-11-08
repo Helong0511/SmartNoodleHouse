@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from app.api.products_options import _ensure_option_group_store_move_safe
@@ -28,7 +30,7 @@ async def test_option_group_move_is_rejected_while_products_are_linked(db_sessio
         category_id=int(category.id),
         product_no="OPT-MOVE-P-01",
         name="绑定规格的餐品",
-        price="10.00",
+        price=Decimal("10.00"),
     )
     group = OptionGroup(
         store_id=int(source.id),
