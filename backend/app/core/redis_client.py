@@ -13,6 +13,8 @@ from time import monotonic
 import uuid
 
 import redis.asyncio as redis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -81,6 +83,12 @@ async def get_redis() -> redis.Redis:
                     socket_connect_timeout=2.0,
                     socket_timeout=3.0,
                     health_check_interval=30,
+                    socket_keepalive=True,
+                    # 显式固定 RESP2，避免 redis-py 8 默认切换协议影响旧脚本/代理。
+                    protocol=2,
+                    legacy_responses=True,
+                    # 禁止客户端隐式重试；重试次数由业务幂等层统一控制，避免超时被放大。
+                    retry=Retry(NoBackoff(), 0),
                 )
                 _redis_pool = pool
                 _redis = redis.Redis(connection_pool=pool)
