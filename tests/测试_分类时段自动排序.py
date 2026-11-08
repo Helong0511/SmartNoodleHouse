@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -69,10 +70,8 @@ def test_blend_partial_weight_between_prior_and_sales():
 
 @pytest.mark.asyncio
 async def test_refresh_schedule_auto_sort_by_slot_sales(db_session, monkeypatch):
-    from unittest.mock import AsyncMock
-
     enqueue_invalidation = AsyncMock()
-    local_invalidation = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+    local_invalidation = MagicMock()
     monkeypatch.setattr(
         "app.services.category_schedule_auto.enqueue_menu_cache_invalidation",
         enqueue_invalidation,
