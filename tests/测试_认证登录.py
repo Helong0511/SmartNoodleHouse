@@ -7,7 +7,7 @@ from app.schemas.common import LoginRequest
 
 
 @pytest.mark.asyncio
-async def test_login_updates_last_login_at():
+async def test_login_updates_last_login_at_and_rehashes_legacy_password():
     role = MagicMock()
     role.code = "SUPER_ADMIN"
     user = MagicMock()
@@ -30,11 +30,12 @@ async def test_login_updates_last_login_at():
     req = MagicMock()
     data = LoginRequest(username="admin", password="secret")
 
-    with patch("app.api.auth.verify_password_and_update", return_value=(True, None)), patch(
+    with patch("app.api.auth.verify_password_and_update", return_value=(True, "$argon2id$upgraded")), patch(
         "app.api.auth.create_access_token", return_value="tok"
     ), patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:read"})):
         resp = await login(data, req, db)
 
     assert resp["code"] == 0
     assert user.last_login_at is not None
+    assert user.password_hash == "$argon2id$upgraded"
     assert db.flush.await_count >= 1
