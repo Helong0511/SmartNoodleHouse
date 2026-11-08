@@ -315,3 +315,19 @@
 | PII/隐私 | 测试_PII清理.py、测试_智能推荐_13隐私合规.py、测试_手机号仅官方授权.py |
 
 **历史测试记录**：`791 passed, 8 skipped, 0 failed`（2026-09-29 本地记录，详见 [TEST_REPORT.md](file:///e:/SmartNoodleHouse/docs/audit/TEST_REPORT.md)；不可作为当前 main 的 CI 结果）。当前 main 的验证结果请查看 GitHub Actions 对应 commit。
+
+---
+
+## 2026-11-08 全量审查补充与评级修正
+
+本文件前文是历史审计快照，不能单独代表当前安全结论。2026-11-08 对 main @ 442beb4761b29f5b415830e91e06c97241f74ef3 进行全量复核，发现 P0 4 组、P1 22 条、P2 24 条、P3 10 条。重点 P0：APP_ENV/lifespan 单点失效、httpx INFO 明文记录 AppSecret、小程序 release 环境配置风险、README 初始化 SQL 可能误删生产数据。
+
+本轮报告特别说明：
+- X-Real-IP 风险在标准 Nginx 覆盖配置下由 P1 降为 P2；后端直接暴露或反代未覆盖时仍有风险。
+- display 空令牌风险在生产启动强制校验前提下由 P1 降为 P2；仍需门店绑定、恒定时间比较和配置 fail-closed。
+- 小程序 release 占位符属于发布阻断，不是传统漏洞；环境探测失败回退 HTTP 和模块顶层抛错是实质缺陷。
+- 日志中的 AppSecret 是实测暴露；代码路径仍可能持续输出，必须先轮换凭据再修复日志。
+- 生产部署 SQL 冲突是文档误操作风险；不能只改 README，脚本还需加防误操作保护。
+
+本轮是静态审查与只读测试，没有进行渗透测试、真实支付沙箱或生产环境验证。完整证据见 [FULL_CODE_REVIEW_2026-11-08.md](FULL_CODE_REVIEW_2026-11-08.md)。不得沿用前文“认证/支付/多租户整体强”的历史评级作为当前上线结论。
+
