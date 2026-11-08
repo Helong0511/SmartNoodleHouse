@@ -430,9 +430,13 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
         ERR_INTERNAL
     })?;
     let aad = aad_for(VERSION, kid);
+    let nonce = Nonce::try_from(nonce_bytes.as_slice()).map_err(|_| {
+        set_error("invalid AES-GCM nonce length");
+        ERR_INTERNAL
+    })?;
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce_bytes),
+            &nonce,
             Payload {
                 msg: &plaintext,
                 aad: &aad,
@@ -494,12 +498,15 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         ERR_INTERNAL
     })?;
 
-    let nonce = &raw[2..HEADER_LEN];
+    let nonce = Nonce::try_from(&raw[2..HEADER_LEN]).map_err(|_| {
+        set_error("invalid AES-GCM nonce length");
+        ERR_TOKEN_INVALID
+    })?;
     let ciphertext = &raw[HEADER_LEN..];
     let aad = aad_for(version, kid);
     let plaintext = cipher
         .decrypt(
-            Nonce::from_slice(nonce),
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad: &aad,
