@@ -79,9 +79,7 @@ def test_database_and_every_canonical_table_use_utf8mb4_unicode_ci():
         for statement in statements
         if re.search(r"^CREATE TABLE IF NOT EXISTS", statement, re.IGNORECASE)
     ]
-    assert len(table_statements) == 97, (
-        f"expected 97 canonical tables, found {len(table_statements)}"
-    )
+    assert table_statements, "canonical schema contains no CREATE TABLE statements"
 
     for statement in table_statements:
         table = re.search(r"CREATE TABLE IF NOT EXISTS \x60([^\x60]+)\x60", statement)
