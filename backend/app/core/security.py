@@ -3,9 +3,8 @@ from typing import Any
 from uuid import uuid4
 
 import jwt
-from asyncio import AbstractEventLoop, Semaphore, get_running_loop
-from threading import Lock
-from weakref import WeakKeyDictionary
+from asyncio import Semaphore, get_running_loop
+from threading import local
 
 from starlette.concurrency import run_in_threadpool
 from argon2.exceptions import InvalidHashError as Argon2InvalidHashError
@@ -22,19 +21,16 @@ from app.core.config import get_settings
 password_hash = PasswordHash((Argon2Hasher(), BcryptHasher(rounds=12)))
 
 # Argon2 默认约 64 MiB 内存成本；每个事件循环最多并发 2 次，避免登录洪峰放大内存峰值。
-_PASSWORD_HASH_LIMITERS: WeakKeyDictionary[AbstractEventLoop, Semaphore] = WeakKeyDictionary()
-_PASSWORD_HASH_LIMITERS_LOCK = Lock()
+_PASSWORD_HASH_LIMITER_STATE = local()
 
 
 def _password_hash_limiter() -> Semaphore:
-    """为每个事件循环独立创建限流器，避免测试/多 loop 之间错误复用。"""
+    """每个事件循环线程独立限流，避免跨 loop 复用已绑定的 Semaphore。"""
     loop = get_running_loop()
-    with _PASSWORD_HASH_LIMITERS_LOCK:
-        limiter = _PASSWORD_HASH_LIMITERS.get(loop)
-        if limiter is None:
-            limiter = Semaphore(2)
-            _PASSWORD_HASH_LIMITERS[loop] = limiter
-        return limiter
+    if getattr(_PASSWORD_HASH_LIMITER_STATE, "loop", None) is not loop:
+        _PASSWORD_HASH_LIMITER_STATE.loop = loop
+        _PASSWORD_HASH_LIMITER_STATE.semaphore = Semaphore(2)
+    return _PASSWORD_HASH_LIMITER_STATE.semaphore
 
 
 def hash_password(password: str) -> str:
