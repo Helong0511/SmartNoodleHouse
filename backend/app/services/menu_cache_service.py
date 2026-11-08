@@ -49,7 +49,14 @@ async def sync_store_menu_schedule_generation(
             menu_schedule_id=schedule_token,
         )
     )
-    return await _read_generation(db, sid)
+    # This helper is used only by the menu read path. Commit the metadata transition
+    # here so the following plain SELECT starts a fresh READ COMMITTED snapshot and
+    # does not hold a store-row FOR UPDATE lock across the whole menu build.
+    await db.commit()
+    value = await db.scalar(select(Store.menu_generation).where(Store.id == sid))
+    if value is None:
+        raise ValueError(f"menu generation store not found: {sid}")
+    return int(value)
 
 
 async def enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None) -> None:
