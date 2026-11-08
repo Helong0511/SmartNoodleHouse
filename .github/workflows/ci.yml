@@ -51,6 +51,7 @@ jobs:
             pip install -r backend/requirements.txt
           fi
           pip install -r tests/requirements.txt
+          python -m pip check
           python scripts/check_requirements_lock.py
       - name: Verify tracked text encoding and line endings
         run: |
