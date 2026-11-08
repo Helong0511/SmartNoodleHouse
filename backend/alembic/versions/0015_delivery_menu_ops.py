@@ -84,6 +84,9 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.UniqueConstraint("store_id", "weekday", "slot_index", name="uk_sbh_store_day_slot"),
+            mysql_engine="InnoDB",
+            mysql_charset="utf8mb4",
+            mysql_collate="utf8mb4_unicode_ci",
         )
 
     if not _table_exists(conn, "platform_category_maps"):
@@ -100,6 +103,9 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.UniqueConstraint("store_id", "platform", "local_category_id", name="uk_pcm_store_platform_cat"),
+            mysql_engine="InnoDB",
+            mysql_charset="utf8mb4",
+            mysql_collate="utf8mb4_unicode_ci",
         )
 
     if not _table_exists(conn, "delivery_sync_alerts"):
@@ -115,6 +121,9 @@ def upgrade() -> None:
             sa.Column("resolved", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
+            mysql_engine="InnoDB",
+            mysql_charset="utf8mb4",
+            mysql_collate="utf8mb4_unicode_ci",
         )
 
 
