@@ -206,6 +206,8 @@ jobs:
         run: node scripts/check_duplicate_imports.mjs
       - name: Audit frontend dependency references
         run: node scripts/check_dependency_usage.mjs
+      - name: Verify complete npm dependency tree
+        run: npm ls --all
       - name: Unit tests
         run: npm test --if-present
       - name: Type check and build
@@ -274,6 +276,14 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - name: Verify locked Rust build and tests
         run: cargo test --locked
+      - name: Report duplicate Rust crate versions
+        run: cargo tree --duplicates
+      - name: Install Rust unused-dependency checker
+        if: matrix.toolchain == 'stable'
+        run: cargo install cargo-machete --locked --version 0.9.2
+      - name: Check unused Rust dependencies
+        if: matrix.toolchain == 'stable'
+        run: cargo machete
       - name: Install Rust dependency auditor
         if: matrix.toolchain == 'stable'
         run: cargo install cargo-audit --locked
