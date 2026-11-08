@@ -206,14 +206,14 @@ async def test_high_concurrency_mixed_read_write(mem_db: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_high_concurrency_separate_sessions():
-    from sqlalchemy.pool import StaticPool
-
+async def test_high_concurrency_separate_sessions(tmp_path):
+    # 使用文件型 SQLite + 独立池化连接；StaticPool 会让并发 Session
+    # 共享同一个 DBAPI connection/cursor，不能模拟真实生产连接池。
     engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
+        f"sqlite+aiosqlite:///{tmp_path / 'high-concurrency-settings.db'}",
         echo=False,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        pool_size=5,
+        max_overflow=0,
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
