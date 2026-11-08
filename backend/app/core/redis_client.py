@@ -83,12 +83,12 @@ async def get_redis() -> redis.Redis:
                     socket_connect_timeout=2.0,
                     socket_timeout=3.0,
                     health_check_interval=30,
-                    # redis-py 8 默认重试次数增加；这里显式关闭内建重试，避免 Redis 故障时
-                    # 把 750ms 池等待和 socket timeout 放大成不可控长尾。业务层按场景重试。
-                    retry=Retry(NoBackoff(), 0),
-                    # 保留 RESP2 线协议和旧响应结构，避免升级客户端时改变业务解析语义。
+                    socket_keepalive=True,
+                    # 显式固定 RESP2，避免 redis-py 8 默认切换协议影响旧脚本/代理。
                     protocol=2,
                     legacy_responses=True,
+                    # 禁止客户端隐式重试；重试次数由业务幂等层统一控制，避免超时被放大。
+                    retry=Retry(NoBackoff(), 0),
                 )
                 _redis_pool = pool
                 _redis = redis.Redis(connection_pool=pool)

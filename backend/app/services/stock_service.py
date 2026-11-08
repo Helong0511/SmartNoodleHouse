@@ -294,6 +294,6 @@ async def deduct_for_order_items(
     for pid in sorted(merged):
         await deduct_stock(db, pid, merged[pid], store_id=store_id)
     if merged:
-        from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+        from app.services.menu_cache_service import invalidate_store_menu_cache
 
-        await enqueue_menu_cache_invalidation(db, store_id)
+        await invalidate_store_menu_cache(db, store_id)

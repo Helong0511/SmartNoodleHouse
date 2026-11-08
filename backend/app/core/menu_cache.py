@@ -141,6 +141,46 @@ async def get_menu_version(
         return 0
 
 
+_ENSURE_MENU_GENERATION_SCRIPT = """
+-- MENU_ENSURE_DURABLE_GENERATION
+local current = redis.call('GET', KEYS[1])
+local desired = tonumber(ARGV[1])
+if not current or tonumber(current) < desired then
+    redis.call('SET', KEYS[1], ARGV[1])
+    redis.call('DEL', KEYS[2])
+    return desired
+end
+if tonumber(current) > desired then
+    return tonumber(current)
+end
+return tonumber(current)
+"""
+
+
+async def ensure_menu_generation(store_id: int, generation: int) -> int | None:
+    """Mirror a durable MySQL generation into Redis without allowing stale regression."""
+    desired = int(generation)
+    if desired <= 0:
+        return None
+    try:
+        r = await get_redis()
+        result = await r.eval(
+            _ENSURE_MENU_GENERATION_SCRIPT,
+            2,
+            menu_version_key(store_id),
+            menu_bundle_key(store_id),
+            str(desired),
+        )
+        value = int(result or 0)
+        return value if value >= desired else None
+    except Exception:
+        logger.warning(
+            "恢复菜单 Redis generation 失败 store=%s generation=%s",
+            store_id, desired, exc_info=True,
+        )
+        return None
+
+
 async def bump_menu_version(store_id: int) -> int:
     """递增持久版本并删除聚合缓存。
 

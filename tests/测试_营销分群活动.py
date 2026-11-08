@@ -1,5 +1,7 @@
 """WP-B2：分群估人、活动发布发券、DRAFT 不发、幂等、暂停停发、频控。"""
 from datetime import timedelta
+import gc
+import warnings
 from decimal import Decimal
 
 import pytest
@@ -941,7 +943,6 @@ async def test_welcome_coupon_only_for_new_member_campaign(db_session):
     assert int(ok.coupon_template_id) == int(welcome.id)
 
 
-@pytest.mark.filterwarnings("ignore:coroutine 'Connection.cursor' was never awaited:RuntimeWarning")
 @pytest.mark.asyncio
 async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     """回归：upsert+commit 后同步 _payload 读 created_at 不得 MissingGreenlet。"""
@@ -973,11 +974,18 @@ async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     assert payload["updated_at"]
     assert payload["budget_cap"] == "100.00"
 
-    # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）。
-    # 此处故意触发非法同步访问；SQLAlchemy/aiosqlite 可能附带未 await cursor 警告，已用测试级 filterwarnings 精确隔离。
+    # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）
     db_session.expire(camp, ["created_at", "updated_at"])
-    with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
-        _ = MarketingService._payload(camp)
+    # 该断言故意触发异步懒加载失败；只屏蔽驱动为此失败路径创建的未 await cursor 协程告警。
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"coroutine 'Connection.cursor' was never awaited",
+            category=RuntimeWarning,
+        )
+        with pytest.raises((MissingGreenlet, StatementError)) as exc_info:
+            _ = MarketingService._payload(camp)
+        gc.collect()
     # SQLAlchemy 2.1 wraps the async MissingGreenlet in StatementError;
     # SQLAlchemy 2.0 may expose MissingGreenlet directly.
     if isinstance(exc_info.value, StatementError):
