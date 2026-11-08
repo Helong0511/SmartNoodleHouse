@@ -75,13 +75,24 @@ def g711_silence_bytes(codec: str, duration_ms: int) -> bytes:
 # 推流尾部静音：close 落在静音上，避免砍掉「肠旺面，总店」
 _G711_TAIL_SILENCE_MS = 1100
 
-# 同摄像头对讲会话互斥（跨 TTSWorker 实例）
-_CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
-_CAMERA_LOCKS_GUARD = asyncio.Lock()
-# 同机复用 Digest 认证状态，避免 open/close 每次新建 Client 再撞 401
-# 键含认证指纹，改密后自然错开；仍须调用 invalidate_hikvision_caches 关掉旧 Client
-_SHARED_HTTP: dict[str, httpx.AsyncClient] = {}
-_SHARED_HTTP_GUARD = asyncio.Lock()
+# AsyncClient / asyncio.Lock 都绑定事件循环；按当前 loop 线程隔离，避免热重载/测试多 loop 复用旧对象。
+_LOOP_STATE = local()
+
+
+def _get_loop_state():
+    loop = asyncio.get_running_loop()
+    state = getattr(_LOOP_STATE, "state", None)
+    if state is None or state.loop is not loop:
+        state = SimpleNamespace(
+            loop=loop,
+            camera_locks={},
+            camera_locks_guard=asyncio.Lock(),
+            shared_http={},
+            shared_http_guard=asyncio.Lock(),
+            codec_detect_pending=set(),
+        )
+        _LOOP_STATE.state = state
+    return state
 # 通道编码热缓存，避免每次试听都多一轮 Digest GET（仅存探测成功的值）
 _CODEC_CACHE: HotCache[str, str] = HotCache("hikvision.codec", max_size=32, ttl_seconds=3600.0)
 # 已写入设备的 speakerVolume，避免每次播报都 PUT
@@ -89,7 +100,6 @@ _SPEAKER_VOL_CACHE: HotCache[str, int] = HotCache(
     "hikvision.speaker_volume", max_size=32, ttl_seconds=3600.0
 )
 # 后台探测进行中，避免 resolve_codec(block=False) 反复 create_task
-_CODEC_DETECT_PENDING: set[str] = set()
 # 上一轮已正常 close 则跳过本轮预 close（省一次 Digest 往返，约 0.5–1s）
 _SESSION_NEED_CLOSE: dict[str, bool] = {}
 # audioData Digest 挑战缓存（同机短时复用，少一次 401 往返）
@@ -113,16 +123,17 @@ async def invalidate_hikvision_caches(*, base_url: str, channel: int | None = No
     if not base:
         return
     prefix = f"{base}|"
+    state = _get_loop_state()
     to_close: list[httpx.AsyncClient] = []
-    async with _SHARED_HTTP_GUARD:
-        for key, client in list(_SHARED_HTTP.items()):
+    async with state.shared_http_guard:
+        for key, client in list(state.shared_http.items()):
             if not key.startswith(prefix):
                 continue
             if channel is not None:
                 parts = key.split("|")
                 if len(parts) < 2 or parts[1] != str(int(channel)):
                     continue
-            _SHARED_HTTP.pop(key, None)
+            state.shared_http.pop(key, None)
             to_close.append(client)
     for client in to_close:
         try:
@@ -147,7 +158,7 @@ async def invalidate_hikvision_caches(*, base_url: str, channel: int | None = No
     for ck in set(codec_keys):
         _CODEC_CACHE.delete(ck)
         _SPEAKER_VOL_CACHE.delete(ck)
-        _CODEC_DETECT_PENDING.discard(str(ck))
+        state.codec_detect_pending.discard(str(ck))
         _SESSION_NEED_CLOSE.pop(str(ck), None)
 
     # Digest challenge/nonce 缓存按 host:port 前缀清理；密码变更后不复用旧 nonce 计数。
@@ -992,11 +1003,12 @@ class HikvisionTwoWayAudio:
 
     async def _lock_for(self) -> asyncio.Lock:
         key = _device_lock_key(self.base_url, self.channel)
-        async with _CAMERA_LOCKS_GUARD:
-            lock = _CAMERA_LOCKS.get(key)
+        state = _get_loop_state()
+        async with state.camera_locks_guard:
+            lock = state.camera_locks.get(key)
             if lock is None:
                 lock = asyncio.Lock()
-                _CAMERA_LOCKS[key] = lock
+                state.camera_locks[key] = lock
             return lock
 
     def _url(self, suffix: str = "") -> str:
@@ -1014,15 +1026,16 @@ class HikvisionTwoWayAudio:
     async def _shared_client(self, timeout: httpx.Timeout) -> httpx.AsyncClient:
         """按摄像头+凭证复用 AsyncClient，保留 Digest 协商结果，缩短 open 首包。"""
         key = self._client_key()
-        async with _SHARED_HTTP_GUARD:
-            client = _SHARED_HTTP.get(key)
+        state = _get_loop_state()
+        async with state.shared_http_guard:
+            client = state.shared_http.get(key)
             if client is None or getattr(client, "is_closed", False):
                 client = httpx.AsyncClient(
                     auth=httpx.DigestAuth(self.username, self.password),
                     timeout=timeout,
                     follow_redirects=False,
                 )
-                _SHARED_HTTP[key] = client
+                state.shared_http[key] = client
             else:
                 try:
                     client.timeout = timeout
@@ -1093,8 +1106,9 @@ class HikvisionTwoWayAudio:
             logger.debug("redis hikvision codec read failed", exc_info=True)
 
         if not block:
-            if key not in _CODEC_DETECT_PENDING:
-                _CODEC_DETECT_PENDING.add(key)
+            state = _get_loop_state()
+            if key not in state.codec_detect_pending:
+                state.codec_detect_pending.add(key)
 
                 async def _bg() -> None:
                     try:
@@ -1104,12 +1118,12 @@ class HikvisionTwoWayAudio:
                     except Exception:
                         logger.debug("bg hikvision codec detect failed", exc_info=True)
                     finally:
-                        _CODEC_DETECT_PENDING.discard(key)
+                        state.codec_detect_pending.discard(key)
 
                 try:
                     asyncio.get_running_loop().create_task(_bg())
                 except RuntimeError:
-                    _CODEC_DETECT_PENDING.discard(key)
+                    state.codec_detect_pending.discard(key)
             return _DEFAULT_CODEC
 
         timeout = httpx.Timeout(8.0, connect=3.0)
