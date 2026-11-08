@@ -293,7 +293,7 @@ jobs:
         run: |
           rustc --version
           cargo metadata --locked --format-version 1 | Out-Null
-          cargo test --locked --all-targets
+          cargo test --locked
           cargo build --release --locked
           if (-not (Test-Path "target/release/ad_tracking_engine.dll")) {
             throw "Windows DLL was not produced"
