@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.models import OutboxEvent
 from app.services import reco_cache
+from app.services.outbox_policy import CACHE_INVALIDATION_MAX_ATTEMPTS
 from app.services.outbox_worker import OUTBOX_HANDLERS, _resolve_outbox_handler
 from reco_factories import make_customer
 
@@ -43,6 +44,7 @@ async def test_reco_invalidation_outbox_is_durable_and_unique_per_update(db_sess
     assert len({row.event_kind for row in pending}) == 2
     assert all(row.event_kind.startswith("invalidate_") for row in pending)
     assert all(row.status == "PENDING" for row in pending)
+    assert all(row.max_attempts == CACHE_INVALIDATION_MAX_ATTEMPTS for row in pending)
     assert all(json.loads(row.payload or "{}") == {"customer_id": customer.id} for row in pending)
 
     await db_session.commit()
