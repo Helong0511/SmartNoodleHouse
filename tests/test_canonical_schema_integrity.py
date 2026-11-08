@@ -1,6 +1,7 @@
 """Static integrity checks for the canonical MySQL schema source."""
 from __future__ import annotations
 
+import ast
 import re
 from collections import Counter
 from pathlib import Path
@@ -94,3 +95,47 @@ def test_database_and_every_canonical_table_use_utf8mb4_unicode_ci():
             statement,
             re.IGNORECASE,
         ), f"{table_name} must explicitly use utf8mb4_unicode_ci"
+
+
+def test_alembic_created_tables_pin_mysql_utf8mb4_options():
+    expected = {
+        "backend/alembic/versions/0015_delivery_menu_ops.py": {
+            "store_business_hours",
+            "platform_category_maps",
+            "delivery_sync_alerts",
+        },
+        "backend/alembic/versions/0045_leader_fencing_epoch.py": {
+            "leader_fencing_state",
+        },
+    }
+    for relative_path, expected_tables in expected.items():
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        module = ast.parse(source, filename=relative_path)
+        found = set()
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "create_table"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                continue
+            table_name = node.args[0].value
+            if table_name not in expected_tables:
+                continue
+            options = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in node.keywords
+                if keyword.arg is not None
+            }
+            assert options.get("mysql_engine") == "InnoDB", table_name
+            assert options.get("mysql_charset") == "utf8mb4", table_name
+            assert options.get("mysql_collate") == "utf8mb4_unicode_ci", table_name
+            found.add(table_name)
+        assert found == expected_tables, (
+            f"{relative_path}: missing explicit charset options for "
+            f"{sorted(expected_tables - found)}"
+        )
