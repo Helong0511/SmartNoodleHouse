@@ -13,7 +13,7 @@ from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.orm_safe import orm_attr_loaded
 from app.core.response import calc_pages, success, serialize_dt
-from app.core.security import hash_password
+from app.core.security import hash_password_async
 from app.models import Permission, Role, RoleDelegation, RolePermission, Store, User
 from app.services.audit_service import AuditService
 from app.services.role_delegation_service import RoleDelegationService
@@ -510,7 +510,7 @@ async def create_user(data: UserCreate, request: Request, db: DbSession, user: C
 
     u = User(
         username=username,
-        password_hash=hash_password(data.password),
+        password_hash=await hash_password_async(data.password),
         display_name=data.display_name.strip(),
         role_id=role.id,
         store_id=sid,
@@ -639,7 +639,7 @@ async def reset_password(
         assert_store_access(user, target.store_id)
     elif user.role.code != "SUPER_ADMIN":
         raise AppException(40311, "无权管理该员工")
-    target.password_hash = hash_password(data.password)
+    target.password_hash = await hash_password_async(data.password)
     target.token_version = int(target.token_version or 0) + 1
     await db.flush()
     await AuditService.log(

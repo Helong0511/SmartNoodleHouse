@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.response import error, now_local, success
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, verify_password_and_update_async
 from app.models import User
 from app.schemas.common import LoginRequest
 from pydantic import BaseModel, Field
@@ -16,6 +16,12 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 _LOGIN_FAIL_LIMIT = 3
 _LOGIN_LOCK_SECONDS = 5 * 60
 _LOGIN_FAIL_WINDOW = 5 * 60
+# Redis Lua 原子递增并刷新滑动窗口 TTL，避免 INCR 成功而 EXPIRE 未执行时留下永久计数。
+_LOGIN_FAILURE_INCR_LUA = """
+local count = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+return count
+"""
 
 
 class VerifyPasswordRequest(BaseModel):
@@ -68,8 +74,10 @@ async def _record_login_failure(username: str, ip: str = "unknown") -> None:
 
         r = await get_redis()
         fail_key = _login_fail_key(username, ip)
-        count = await r.incr(fail_key)
-        await r.expire(fail_key, _LOGIN_FAIL_WINDOW)
+        # 单条 Lua 脚本原子执行 INCR + EXPIRE，避免进程/网络中断留下无 TTL 的失败计数。
+        count = await r.eval(
+            _LOGIN_FAILURE_INCR_LUA, 1, fail_key, _LOGIN_FAIL_WINDOW
+        )
         if int(count) >= _LOGIN_FAIL_LIMIT:
             await r.set(_login_lock_key(username, ip), "1", ex=_LOGIN_LOCK_SECONDS)
             await r.delete(fail_key)
@@ -105,7 +113,12 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
         select(User).options(selectinload(User.role)).where(User.username == username, User.status == 1)
     )
     user = result.scalar_one_or_none()
-    if not user or not verify_password(data.password, user.password_hash):
+    password_valid, upgraded_hash = (
+        await verify_password_and_update_async(data.password, user.password_hash)
+        if user
+        else (False, None)
+    )
+    if not user or not password_valid:
         await _record_login_failure(username, ip)
         if user:
             await AuditService.log_login(
@@ -129,6 +142,9 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
         )
 
     await _clear_login_failures(username, ip)
+    # 用户本次密码校验成功后，若仍是历史 bcrypt 哈希，则在当前事务内升级为 Argon2id。
+    if upgraded_hash:
+        user.password_hash = upgraded_hash
     user.last_login_at = now_local()
     await AuditService.log_login(
         db, user_id=user.id, username=user.username, success=True, request=request,
@@ -191,13 +207,21 @@ async def verify_password_api(data: VerifyPasswordRequest, request: Request, db:
             content=error(42901, "密码错误次数过多，请 5 分钟后再试", request),
         )
     row = await db.get(User, user.id)
-    if not row or not verify_password(data.password, row.password_hash):
+    password_valid, upgraded_hash = (
+        await verify_password_and_update_async(data.password, row.password_hash)
+        if row
+        else (False, None)
+    )
+    if not row or not password_valid:
         await _record_login_failure(lock_name)
         return JSONResponse(
             status_code=401,
             content=error(40101, "密码错误", request),
         )
     await _clear_login_failures(lock_name)
+    if upgraded_hash:
+        # 锁屏解锁同样是一次成功认证，顺带完成历史密码哈希升级。
+        row.password_hash = upgraded_hash
     return success({"ok": True}, request=request)
 
 

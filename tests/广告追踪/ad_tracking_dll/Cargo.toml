@@ -10,24 +10,24 @@ name = "ad_tracking_engine"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-aes-gcm = { version = "0.11.1", features = ["aes"] }
-base64 = "0.23.1"
-hex = "0.4"
-rand = "0.10.3"
-serde_json = "1.0.151"
-uuid = { version = "1.26.1", features = ["v7"] }
-once_cell = "1.21.4"
+aes-gcm = { version = "=0.11.1", features = ["aes"] }
+base64 = "=0.23.1"
+hex = "=0.4.3"
+rand = "=0.10.3"
+serde_json = "=1.0.154"
+uuid = { version = "=1.29.1", features = ["v7"] }
+once_cell = "=1.21.4"
 
 [dev-dependencies]
-proptest = "1.12.0"
-criterion = "0.8.2"
+proptest = "=1.12.0"
+criterion = "=0.8.2"
 
 [[bench]]
 name = "benchmark"
 harness = false
 
 [build-dependencies]
-winres = "0.1.12"
+winres = "=0.1.12"
 
 # 商业发布版加固：优化、LTO、去符号、无增量、无调试信息
 [profile.release]

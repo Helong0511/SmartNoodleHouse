@@ -9,7 +9,6 @@ import pytest
 from app.core.response import naive_local_now
 from app.models import Order, OrderItem, Product, ProductCategory, Store
 from app.services.dining_session_service import DiningSessionService
-from app.core.response import naive_local_now
 from app.services.order_service import OrderReorderService
 
 

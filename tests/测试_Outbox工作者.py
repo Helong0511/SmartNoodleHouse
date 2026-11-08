@@ -903,6 +903,50 @@ async def test_outbox_heartbeat_fails_closed_after_sustained_database_errors(mon
 
 
 @pytest.mark.asyncio
+async def test_handler_is_cancelled_and_joined_when_worker_task_is_cancelled(monkeypatch):
+    """Worker 被取消时，handler 与心跳都必须结束，不能遗留后台任务。"""
+    from app.services import outbox_worker
+
+    handler_started = asyncio.Event()
+    handler_cancelled = asyncio.Event()
+    heartbeat_started = asyncio.Event()
+    heartbeat_cancelled = asyncio.Event()
+
+    async def slow_handler(db, row):
+        handler_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            handler_cancelled.set()
+            raise
+
+    async def heartbeat(*args, **kwargs):
+        heartbeat_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            heartbeat_cancelled.set()
+            raise
+
+    monkeypatch.setattr(outbox_worker, "_heartbeat_outbox_lease", heartbeat)
+    task = asyncio.create_task(
+        outbox_worker._run_handler_with_lease(
+            slow_handler, MagicMock(), MagicMock(), outbox_id=10, wid="owner-b"
+        )
+    )
+    await handler_started.wait()
+    await heartbeat_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert handler_cancelled.is_set()
+    assert heartbeat_cancelled.is_set()
+    assert task.done()
+
+
+@pytest.mark.asyncio
 async def test_handler_is_cancelled_when_lease_is_lost(monkeypatch):
     """租约 owner 已变更时，旧 handler 必须被取消，不能继续写 DONE。"""
     started = asyncio.Event()

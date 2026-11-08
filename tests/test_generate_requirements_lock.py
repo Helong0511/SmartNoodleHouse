@@ -86,3 +86,19 @@ def test_missing_active_dependency_is_an_error_not_a_silent_omission():
             "",
             "",
         )
+
+
+def test_build_lock_pins_all_installed_transitive_dependencies_and_prefers_fresh_resolution():
+    result = GENERATOR.build_lock_text(
+        "redis>=5,<9\n",
+        'redis==5.3.1\nurllib3==2.5.0\npywin32==312; platform_system == "Windows"\n',
+        "redis==8.1.0\nurllib3==2.6.0\nidna==3.10\npip==26.3\n",
+        environment=_env("Linux"),
+    )
+
+    assert "redis==8.1.0" in result
+    assert "urllib3==2.6.0" in result
+    assert "idna==3.10" in result
+    assert "urllib3==2.5.0" not in result
+    assert "pip==26.3" not in result
+    assert 'pywin32==312; platform_system == "Windows"' in result

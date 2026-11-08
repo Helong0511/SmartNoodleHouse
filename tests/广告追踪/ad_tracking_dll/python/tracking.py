@@ -111,6 +111,8 @@ class TrackingEngine:
         self.lib.tracking_set_key.restype = ctypes.c_int32
         self.lib.tracking_remove_key.argtypes = [ctypes.c_ubyte]
         self.lib.tracking_remove_key.restype = ctypes.c_int32
+        self.lib.tracking_clear_keys.argtypes = []
+        self.lib.tracking_clear_keys.restype = ctypes.c_int32
         self.lib.tracking_set_current_kid.argtypes = [ctypes.c_ubyte]
         self.lib.tracking_set_current_kid.restype = ctypes.c_int32
         self.lib.tracking_generate.argtypes = [c_char_p, ctypes.c_uint64, c_char_pp]
@@ -148,6 +150,10 @@ class TrackingEngine:
 
     def remove_key(self, kid: int) -> None:
         self._check(self.lib.tracking_remove_key(kid))
+
+    def clear_keys(self) -> None:
+        """清除 DLL 内全部密钥；在卸载原生库前调用。"""
+        self._check(self.lib.tracking_clear_keys())
 
     def set_current_kid(self, kid: int) -> None:
         self._check(self.lib.tracking_set_current_kid(kid))

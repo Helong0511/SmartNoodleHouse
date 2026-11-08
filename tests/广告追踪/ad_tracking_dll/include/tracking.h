@@ -32,6 +32,8 @@ extern "C" {
 
 AD_TRACKING_API int32_t tracking_set_key(uint8_t kid, const char *key_hex);
 AD_TRACKING_API int32_t tracking_remove_key(uint8_t kid);
+/* Clear all in-memory keys and current KID before unloading the DLL. */
+AD_TRACKING_API int32_t tracking_clear_keys(void);
 AD_TRACKING_API int32_t tracking_set_current_kid(uint8_t kid);
 
 AD_TRACKING_API int32_t tracking_generate(const char *payload_json, uint64_t ttl_seconds, char **out_token);

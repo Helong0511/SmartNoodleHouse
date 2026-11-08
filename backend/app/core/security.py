@@ -1,24 +1,68 @@
+from asyncio import Semaphore, get_running_loop
 from datetime import datetime, timedelta, timezone
+from threading import local
 from typing import Any
 from uuid import uuid4
 
-# 统一使用 PyJWT；摄像头票据、员工登录和顾客令牌共用同一套校验异常与算法配置。
-# 不要再混入 python-jose，避免两套 JWT 实现造成算法、声明和错误处理差异。
 import jwt
+from argon2.exceptions import InvalidHashError as Argon2InvalidHashError
 from jwt import InvalidTokenError as JWTError
-from passlib.context import CryptContext
+from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
+from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.hashers.bcrypt import BcryptHasher
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 新密码使用 Argon2id；BcryptHasher 只负责兼容历史 Passlib/bcrypt 哈希。
+# 登录成功后通过 verify_and_update 渐进升级，避免强制全体员工重置密码。
+password_hash = PasswordHash((Argon2Hasher(), BcryptHasher(rounds=12)))
+
+# Argon2 默认约 64 MiB 内存成本；每个事件循环最多并发 2 次，避免登录洪峰放大内存峰值。
+_PASSWORD_HASH_LIMITER_STATE = local()
+
+
+def _password_hash_limiter() -> Semaphore:
+    """每个事件循环线程独立限流，避免跨 loop 复用已绑定的 Semaphore。"""
+    loop = get_running_loop()
+    if getattr(_PASSWORD_HASH_LIMITER_STATE, "loop", None) is not loop:
+        _PASSWORD_HASH_LIMITER_STATE.loop = loop
+        _PASSWORD_HASH_LIMITER_STATE.semaphore = Semaphore(2)
+    return _PASSWORD_HASH_LIMITER_STATE.semaphore
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    """新密码统一使用 Argon2id，不再生成新的 bcrypt 哈希。"""
+    return password_hash.hash(password)
+
+
+def verify_password_and_update(plain: str, hashed: str) -> tuple[bool, str | None]:
+    """校验历史哈希；算法过旧时返回新哈希，由调用方在当前事务内保存。"""
+    try:
+        return password_hash.verify_and_update(plain, hashed)
+    except (UnknownHashError, Argon2InvalidHashError, ValueError, TypeError):
+        # 数据库哈希格式异常时必须拒绝登录，不能因异常哈希导致 500。
+        return False, None
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    verified, _ = verify_password_and_update(plain, hashed)
+    return verified
+
+
+async def hash_password_async(password: str) -> str:
+    """在线程池中生成 Argon2id 哈希，避免阻塞 FastAPI 事件循环。"""
+    async with _password_hash_limiter():
+        return await run_in_threadpool(hash_password, password)
+
+
+async def verify_password_and_update_async(
+    plain: str, hashed: str
+) -> tuple[bool, str | None]:
+    """在线程池中校验/升级哈希，并限制每进程 Argon2 并发。"""
+    async with _password_hash_limiter():
+        return await run_in_threadpool(verify_password_and_update, plain, hashed)
 
 
 # JWT 标准/内部声明：extra 不得覆盖，防止提权或伪造 typ/sub/exp

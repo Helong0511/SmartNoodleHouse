@@ -206,7 +206,7 @@ ad_tracking_engine_production_v1_cn/
 
 ```text
 Python：3.10+
-Rust：stable
+Rust：1.85+（推荐 stable）
 Cargo：与 stable Rust 配套
 ```
 
@@ -1090,6 +1090,23 @@ KID 用于标识密钥版本。
 ```
 
 不要在新 Key 上线的同时立即删除旧 Key。
+
+## 17.3 卸载 DLL 前显式清理内存密钥
+
+Rust 的全局 `static` 状态不能被假定会在 DLL 卸载时自动执行析构。因此，宿主程序必须在停止所有并发调用、准备卸载动态库之前调用：
+
+- C/C++：`tracking_clear_keys()`
+- Python：`engine.clear_keys()`
+
+该接口会覆写并清除所有已配置密钥，同时将当前 KID 设为空。清理后必须重新调用 `tracking_set_key` 和 `tracking_set_current_kid` 才能继续生成 Token。
+
+**生命周期要求：**
+1. 先停止接收新的 Token 生成/验证请求。
+2. 等待所有正在执行的 FFI 调用结束。
+3. 调用 `tracking_clear_keys()`。
+4. 再释放宿主侧资源并卸载动态库。
+
+不要在仍有并发调用时清理密钥；调用方必须负责协调关闭流程。该接口不能保证清除操作系统、编译器、调用方输入缓冲区或密码管理器中的其他副本，因此长期密钥仍应由 KMS/Vault 管理。
 
 ---
 

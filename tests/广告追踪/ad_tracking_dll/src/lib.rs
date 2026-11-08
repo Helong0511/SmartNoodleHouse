@@ -47,6 +47,27 @@ fn secure_zeroize(bytes: &mut [u8]) {
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
+// 密钥副本使用 RAII 清理：无论后续校验、初始化或加解密在哪一步失败，离开作用域都会清零。
+struct SecretKey([u8; 32]);
+
+impl Drop for SecretKey {
+    fn drop(&mut self) {
+        secure_zeroize(&mut self.0);
+    }
+}
+
+// C ABI 输入的本地密钥文本副本也必须清零，不能只清理解码后的字节数组。
+struct SecretString(String);
+
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        // String 的 UTF-8 字节长度不变，仅将其内容原地覆写后再释放。
+        unsafe {
+            secure_zeroize(self.0.as_mut_vec());
+        }
+    }
+}
+
 pub const OK: i32 = 0;
 pub const ERR_NULL_INPUT: i32 = 1;
 pub const ERR_INVALID_ARGUMENT: i32 = 2;
@@ -66,8 +87,9 @@ struct State {
     current_kid: Option<u8>,
 }
 
-// 商业发布加固：DLL 卸载时主动清零密钥内存。
-// 注意：客户端 DLL 内的密钥仍然不能视为绝对保密，核心长期密钥应放服务端/KMS。
+// 防御性析构：若 State 被显式销毁则清零；全局 static 不保证在 DLL 卸载时运行析构。
+// 宿主程序必须在卸载动态库前调用 tracking_clear_keys()。
+// 客户端 DLL 内的密钥仍不能视为绝对保密，核心长期密钥应放服务端/KMS。
 impl Drop for State {
     fn drop(&mut self) {
         for key in self.keys.values_mut() {
@@ -186,12 +208,13 @@ fn decode_hex_key(s: &str) -> Result<[u8; 32], i32> {
         set_error("AES-256 key must be exactly 64 hex characters");
         return Err(ERR_KEY_INVALID);
     }
-    let bytes = hex::decode(s).map_err(|_| {
+    let mut bytes = hex::decode(s).map_err(|_| {
         set_error("AES-256 key is not valid hexadecimal");
         ERR_KEY_INVALID
     })?;
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
+    secure_zeroize(&mut bytes);
     Ok(key)
 }
 
@@ -367,8 +390,6 @@ fn aad_for(version: u8, kid: u8) -> [u8; 23] {
     aad
 }
 
-// 生成端统一补齐版本、KID、签发/过期时间和 click_id，再进行 AES-256-GCM 加密。
-// AAD 绑定协议版本与 KID，避免攻击者只改外层头部就把密文解释成另一把密钥。
 fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     if ttl == 0 || ttl > MAX_TTL_SECONDS {
         set_error("ttl_seconds out of allowed range");
@@ -376,7 +397,8 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let now = now_unix()?;
-    let (kid, mut key) = current_key()?;
+    let (kid, key) = current_key()?;
+    let key = SecretKey(key);
     let exp = now
         .checked_add(i64::try_from(ttl).map_err(|_| ERR_INVALID_ARGUMENT)?)
         .ok_or_else(|| {
@@ -418,25 +440,19 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    // 使用操作系统 CSPRNG 生成 GCM nonce；随机源失败必须拒绝加密，不能回退到弱随机数。
+    // AES-GCM nonce 直接使用操作系统 CSPRNG；随机源异常时立即失败，禁止降级。
     if SysRng.try_fill_bytes(&mut nonce_bytes).is_err() {
-        secure_zeroize(&mut key);
-        secure_zeroize(&mut nonce_bytes);
         set_error("system cryptographic random source failed");
         return Err(ERR_INTERNAL);
     }
-    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
+    let cipher = Aes256Gcm::new_from_slice(&key.0).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
     })?;
     let aad = aad_for(VERSION, kid);
-    let nonce = Nonce::try_from(nonce_bytes.as_slice()).map_err(|_| {
-        set_error("invalid AES-GCM nonce length");
-        ERR_INTERNAL
-    })?;
     let ciphertext = cipher
         .encrypt(
-            &nonce,
+            Nonce::from_slice(&nonce_bytes),
             Payload {
                 msg: &plaintext,
                 aad: &aad,
@@ -446,7 +462,6 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
             set_error("AES-GCM encryption failed");
             ERR_INTERNAL
         })?;
-    secure_zeroize(&mut key);
 
     let mut raw = Vec::with_capacity(HEADER_LEN + ciphertext.len());
     raw.push(VERSION);
@@ -456,8 +471,6 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     Ok(URL_SAFE_NO_PAD.encode(raw))
 }
 
-// 验证顺序必须保持：长度/编码 -> 头部 -> KID -> GCM 认证 -> JSON/业务字段。
-// 未知 KID 对外统一返回令牌无效，不能泄露服务端当前配置了哪些密钥。
 fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
     if token.is_empty() {
         set_error("token is empty");
@@ -484,7 +497,7 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         return Err(ERR_TOKEN_INVALID);
     }
 
-    let mut key = match key_for(kid) {
+    let key = SecretKey(match key_for(kid) {
         Ok(k) => k,
         Err(ERR_KEY_NOT_FOUND) => {
             // Do not expose key-version existence to untrusted callers.
@@ -492,21 +505,18 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
             return Err(ERR_TOKEN_INVALID);
         }
         Err(e) => return Err(e),
-    };
-    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| {
+    });
+    let cipher = Aes256Gcm::new_from_slice(&key.0).map_err(|_| {
         set_error("failed to initialize AES-256-GCM");
         ERR_INTERNAL
     })?;
 
-    let nonce = Nonce::try_from(&raw[2..HEADER_LEN]).map_err(|_| {
-        set_error("invalid AES-GCM nonce length");
-        ERR_TOKEN_INVALID
-    })?;
+    let nonce = &raw[2..HEADER_LEN];
     let ciphertext = &raw[HEADER_LEN..];
     let aad = aad_for(version, kid);
     let plaintext = cipher
         .decrypt(
-            &nonce,
+            Nonce::from_slice(nonce),
             Payload {
                 msg: ciphertext,
                 aad: &aad,
@@ -516,7 +526,6 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
             set_error("token authentication failed");
             ERR_TOKEN_INVALID
         })?;
-    secure_zeroize(&mut key);
 
     if plaintext.len() > MAX_PAYLOAD_CHARS {
         set_error("decrypted payload too large");
@@ -542,8 +551,6 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
     Ok(payload)
 }
 
-// Rust panic 不能跨越 C ABI 边界；所有导出函数都必须经过此保护层。
-// 发生 panic 时返回稳定错误码，避免把异常传播到 Python/C 调用方导致进程崩溃。
 fn ffi_guard<F: FnOnce() -> i32 + std::panic::UnwindSafe>(f: F) -> i32 {
     clear_error();
     match catch_unwind(AssertUnwindSafe(f)) {
@@ -594,14 +601,14 @@ pub extern "C" fn tracking_set_key(kid: c_uchar, key_hex: *const c_char) -> i32 
             set_error("kid=0 is reserved");
             return ERR_INVALID_ARGUMENT;
         }
-        let s = match cstr_string(key_hex, 64, "key") {
+        let s = SecretString(match cstr_string(key_hex, 64, "key") {
             Ok(v) => v,
             Err(e) => return e,
-        };
-        let key = match decode_hex_key(&s) {
+        });
+        let key = SecretKey(match decode_hex_key(&s.0) {
             Ok(v) => v,
             Err(e) => return e,
-        };
+        });
         let mut state = match STATE.write() {
             Ok(v) => v,
             Err(_) => {
@@ -613,7 +620,7 @@ pub extern "C" fn tracking_set_key(kid: c_uchar, key_hex: *const c_char) -> i32 
             set_error("maximum number of keys reached");
             return ERR_INVALID_ARGUMENT;
         }
-        if let Some(mut old_key) = state.keys.insert(kid, key) {
+        if let Some(mut old_key) = state.keys.insert(kid, key.0) {
             secure_zeroize(&mut old_key);
         }
         OK
@@ -641,6 +648,34 @@ pub extern "C" fn tracking_remove_key(kid: c_uchar) -> i32 {
             set_error("KID not found");
             ERR_KEY_NOT_FOUND
         }
+    })
+}
+
+/// 清除 State 中的全部密钥。独立成函数，确保锁正常或中毒时走相同清理逻辑。
+fn clear_state_keys(state: &mut State) {
+    for key in state.keys.values_mut() {
+        secure_zeroize(key);
+    }
+    state.keys.clear();
+    state.current_kid = None;
+}
+
+/// 显式清理全部密钥。即使锁已中毒，也必须恢复内部守卫并尽力清除密钥。
+/// 宿主必须在卸载 DLL 前调用，不能依赖 static 析构。
+#[no_mangle]
+pub extern "C" fn tracking_clear_keys() -> i32 {
+    ffi_guard(|| {
+        let mut state = match STATE.write() {
+            Ok(v) => v,
+            Err(poisoned) => {
+                // 密钥清理是关闭流程的最后一道防线；锁中毒不能成为跳过清理的理由。
+                let state = poisoned.into_inner();
+                STATE.clear_poison();
+                state
+            }
+        };
+        clear_state_keys(&mut state);
+        OK
     })
 }
 
@@ -818,6 +853,31 @@ mod tests {
             "offer_id": 10001, "campaign_id": 20001, "publisher_id": 30001, "advertiser_id": 40001,
             "source": "facebook"
         }), 3600).unwrap()
+    }
+
+    #[test]
+    fn clear_keys_recovers_poisoned_lock_and_zeroes_state() {
+        let state = std::sync::Arc::new(RwLock::new(State {
+            keys: HashMap::from([(7, [0xA5; 32])]),
+            current_kid: Some(7),
+        }));
+        let poison_target = std::sync::Arc::clone(&state);
+        let _ = thread::spawn(move || {
+            let _guard = poison_target.write().unwrap();
+            panic!("simulate panic while holding the key-state lock");
+        })
+        .join();
+
+        let mut recovered = match state.write() {
+            Ok(_) => panic!("test lock should be poisoned"),
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        clear_state_keys(&mut recovered);
+        assert!(recovered.keys.is_empty());
+        assert_eq!(recovered.current_kid, None);
+        drop(recovered);
+        state.clear_poison();
+        assert!(state.read().unwrap().keys.is_empty());
     }
 
     #[test]

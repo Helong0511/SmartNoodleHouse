@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, distributions, version
 from pathlib import Path
 
 from packaging.markers import default_environment
@@ -93,6 +93,21 @@ def main() -> int:
             continue
         if installed != pinned:
             errors.append(f"{req.name}: installed {installed} differs from lock pin {pinned}")
+
+    # 生产锁必须覆盖当前 Linux 环境中安装的全部运行时分发包，而不只是直接依赖。
+    # checker 所需的 packaging 和 Python 安装工具链不属于应用运行时依赖。
+    locked_names = set(by_name)
+    bootstrap_tools = {"pip", "setuptools", "wheel", "packaging"}
+    for dist in distributions():
+        raw_name = dist.metadata.get("Name")
+        if not raw_name:
+            continue
+        installed_name = canonicalize_name(raw_name)
+        if installed_name in bootstrap_tools or installed_name in locked_names:
+            continue
+        errors.append(
+            f"{raw_name}: installed runtime distribution is missing from requirements.lock"
+        )
 
     if errors:
         print("requirements.lock consistency check FAILED:", file=sys.stderr)

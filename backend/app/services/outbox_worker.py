@@ -306,9 +306,15 @@ async def _run_handler_with_lease(
         await handler_task
         return True
     finally:
+        # 无论是调用方取消、handler 异常还是心跳异常退出，都不能遗留后台 handler。
+        # 必须先请求 handler 取消并等待其收尾，再关闭续租任务和数据库 Session。
+        if not handler_task.done():
+            handler_task.cancel()
         if not heartbeat_task.done():
             heartbeat_task.cancel()
-        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        await asyncio.gather(
+            handler_task, heartbeat_task, return_exceptions=True
+        )
 
 
 async def _mark_uncertain(db: AsyncSession, outbox_id: int, err: str, *, wid: str) -> None:

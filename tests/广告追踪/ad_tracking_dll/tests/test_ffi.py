@@ -112,3 +112,15 @@ def test_ffi_output_parameter_type_and_native_error_propagation(engine):
     assert engine.lib.tracking_generate.argtypes[2] == __import__('ctypes').POINTER(__import__('ctypes').c_char_p)
     with pytest.raises(TrackingError):
         engine.verify("!!!!")
+
+
+def test_clear_keys_revokes_current_kid_and_allows_explicit_reconfiguration(engine):
+    token = engine.generate(payload(), 3600)
+    engine.clear_keys()
+    with pytest.raises(TrackingError):
+        engine.verify(token)
+    with pytest.raises(TrackingError):
+        engine.generate(payload(), 3600)
+    engine.set_key(1, KEY1)
+    engine.set_current_kid(1)
+    assert engine.verify(engine.generate(payload(), 3600))["kid"] == 1

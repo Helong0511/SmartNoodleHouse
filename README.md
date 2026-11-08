@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x, MySQL 8, Redis 7, APScheduler
+- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x, MySQL 8, Redis 7.2+（官方 Redis APT 源）, APScheduler
 - 后台前端: Vue 3, TypeScript, Vite, Element Plus
 - 微信小程序: `miniprogram-wechat/`
 - 支付宝小程序: `miniprogram-alipay/`
@@ -34,9 +34,10 @@
 ### 1. 准备环境
 
 - Python 3.11+
-- Node.js 22.20+ 或 24.12+ LTS（推荐 24 LTS；Node 20 已于 2026-04-30 EOL，不再接收安全修复）
+- Node.js 22.20+、24.12+ 或 26+（推荐 26 Active LTS；24 为 Maintenance LTS；Node 20 已于 2026-04-30 EOL）
+- Rust 1.89+（仅在本机编译 `ad_tracking_engine` DLL/so 时需要）
 - MySQL 8
-- Redis 7
+- Redis Server 7.2+（生产环境使用 Redis 官方 APT 仓库）
 - 微信 / 支付宝小程序开发者工具（可选）
 
 ### 2. 数据库

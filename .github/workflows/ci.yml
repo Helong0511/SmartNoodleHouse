@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 30
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine
         ports:
           - 6379:6379
         options: >-
@@ -50,21 +50,59 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
+          python -m pip install packaging
+          python scripts/check_requirements_lock.py
           pip install -r tests/requirements.txt
           python -m pip check
-          python scripts/check_requirements_lock.py
+      - name: Smoke-test face recognition binary dependency imports
+        run: |
+          python - <<'PY'
+          import cv2
+          import numpy
+          import onnxruntime
+          import websockets
+          from insightface.app import FaceAnalysis
+          from uvicorn.protocols.websockets.websockets_sansio_impl import WebSocketsSansIOProtocol
+
+          assert numpy.__version__ == "2.4.6", numpy.__version__
+          assert onnxruntime.__version__ == "1.31.1", onnxruntime.__version__
+          assert websockets.__version__ == "17.4", websockets.__version__
+          assert WebSocketsSansIOProtocol is not None
+          print("OpenCV", cv2.__version__, "NumPy", numpy.__version__, "ONNX Runtime", onnxruntime.__version__)
+          print("websockets", websockets.__version__, "Uvicorn SansIO: OK")
+          print("InsightFace FaceAnalysis import: OK")
+          PY
+      - name: Verify real Redis 7.4 Lua, lock and cache behavior
+        env:
+          REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+          PYTHONPATH: backend
+          APP_ENV: development
+        run: python -m pytest -q tests/测试_Redis真实服务集成.py
       - name: Verify tracked text encoding and line endings
         run: |
           python scripts/check_text_encoding.py
+      - name: Check duplicate Python imports
+        run: python scripts/check_duplicate_imports.py
+      - name: Audit backend dependency references
+        run: python scripts/check_python_dependency_usage.py
       - name: Compile check
         run: |
           python -m compileall backend/app -q
-      - name: Audit dependency declarations and import references
-        run: |
-          python scripts/audit_dependency_references.py
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
+      - name: Detect unawaited DB cursor warnings in marketing serialization
+        env:
+          PYTHONPATH: backend
+          APP_ENV: development
+          APP_DEBUG: "true"
+          JWT_SECRET: "ci-test-jwt-secret-at-least-32-chars!!"
+          FACE_ENCRYPTION_KEY: "ci-test-face-encryption-key-32b!!"
+          ALLOW_PAYMENT_MOCK: "true"
+          ALLOW_AUTH_MOCK: "true"
+          ALLOW_DELIVERY_MOCK: "true"
+          REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
+        run: python -m pytest -q tests/测试_营销分群活动.py::test_campaign_payload_for_includes_created_by_name -W error::RuntimeWarning
       - name: Run unit tests with coverage
         env:
           PYTHONPATH: backend
@@ -80,6 +118,36 @@ jobs:
           python -m pytest -q --tb=short \
             --cov=app --cov-report=term-missing --cov-report=xml \
             --cov-fail-under=35
+
+
+  dependency-lock-consistency:
+    name: dependency-lock-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install production dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.lock
+          python -m pip install packaging
+      - name: Regenerate and validate the full runtime lock
+        run: |
+          python scripts/生成依赖锁定文件.py
+          python scripts/check_requirements_lock.py
+      - name: Publish regenerated runtime lock for review
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: backend-requirements-lock
+          path: backend/requirements.lock
+          if-no-files-found: error
+          retention-days: 3
+      - name: Require committed runtime lock to match the resolved closure
+        run: git diff --exit-code -- backend/requirements.lock
 
   backend-mysql:
     runs-on: ubuntu-latest
@@ -114,8 +182,9 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install -r tests/requirements.txt
+          python -m pip install packaging
           python scripts/check_requirements_lock.py
+          pip install -r tests/requirements.txt
       - name: Prepare database
         env:
           MYSQL_PWD: root
@@ -166,7 +235,44 @@ jobs:
 
   frontend-build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["24", "26"]
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm to packageManager version
+        run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
+          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (![24, 26].includes(major) || (major === 24 && minor < 12)) process.exit(1)"
+      - name: Install dependencies
+        run: npm ci
+      - name: Check duplicate frontend and mini-program imports
+        run: node scripts/check_duplicate_imports.mjs
+      - name: Audit frontend dependency references
+        run: node scripts/check_dependency_usage.mjs
+      - name: Verify complete npm dependency tree
+        run: npm ls --all
+      - name: Unit tests
+        run: npm test --if-present
+      - name: Type check and build
+        run: npm run build
+
+
+  frontend-lockfile-consistency:
+    name: frontend-lockfile-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -177,19 +283,27 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Pin npm to packageManager version
+      - name: Pin npm lockfile writer
         run: |
           npm install --global npm@11.19.1
           test "$(npm --version)" = "11.19.1"
-          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major !== 24 || minor < 12) process.exit(1)"
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify approved npm install scripts
-        run: npm install-scripts ls
-      - name: Unit tests
-        run: npm test --if-present
-      - name: Type check and build
-        run: npm run build
+      - name: Verify lockfile is up to date with compatible stable releases
+        run: npm update --package-lock-only --ignore-scripts
+      - name: Install and verify refreshed dependency graph
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm run build
+      - name: Publish generated lockfile for review
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-package-lock
+          path: frontend/package-lock.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Require committed npm lockfile to match compatible graph
+        run: git diff --exit-code -- package-lock.json
 
   dependency-security-audit:
     name: dependency-security-audit
@@ -204,6 +318,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip pip-audit
           pip-audit --strict -r backend/requirements.lock
+          # 测试依赖同样进入 CI 执行环境，避免开发/测试工具链漏洞被漏审。
           pip-audit --strict -r tests/requirements.txt
       - uses: actions/setup-node@v7
         with:
@@ -217,8 +332,6 @@ jobs:
           test "$(npm --version)" = "11.19.1"
           npm ci
           npm audit --audit-level=high
-      - name: Audit frontend dependency references and duplicate lock entries
-        run: python scripts/audit_frontend_dependency_references.py
 
   miniprogram-static-check:
     name: miniprogram-static-check
@@ -251,7 +364,7 @@ jobs:
         working-directory: tests/广告追踪/ad_tracking_dll
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy

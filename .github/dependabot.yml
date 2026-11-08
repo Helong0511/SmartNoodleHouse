@@ -6,7 +6,7 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     ignore:
-      # These major updates require manual platform/licensing or runtime compatibility review.
+      # 这些主版本升级涉及平台、许可证或运行时兼容性，必须先人工评估。
       - dependency-name: "insightface"
         update-types: ["version-update:semver-major"]
       - dependency-name: "redis"
@@ -34,7 +34,8 @@ updates:
     directory: "/tests/广告追踪/ad_tracking_dll"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

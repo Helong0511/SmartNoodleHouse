@@ -1,3 +1,4 @@
+"""数据库引擎、连接池与请求级事务会话入口。"""
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -54,8 +55,8 @@ class Base(DeclarativeBase):
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
-        # Request-scoped sessions drain recommendation invalidations asynchronously only
-        # after the DB commit has completed; do not schedule a background race in after_commit.
+        # 请求级会话只在数据库事务提交成功后，才异步清理推荐缓存失效事件；
+        # 不要在 after_commit 回调里提前启动后台任务，否则可能与事务提交产生竞态。
         session.sync_session.info["_reco_cache_async_commit_owner"] = True
         try:
             yield session

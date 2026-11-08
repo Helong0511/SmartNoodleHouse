@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 async def test_real_redis_menu_cache_lock_fencing_and_version_invalidation(monkeypatch):
     from app.core import menu_cache
 
-    redis_client = Redis.from_url(REDIS_TEST_URL, decode_responses=True)
+    redis_client = Redis.from_url(REDIS_TEST_URL, decode_responses=True, protocol=2)
     store_id = secrets.randbelow(2_000_000_000) + 1
     keys = (
         menu_cache.menu_rebuild_lock_key(store_id),
@@ -39,6 +39,8 @@ async def test_real_redis_menu_cache_lock_fencing_and_version_invalidation(monke
     monkeypatch.setattr(menu_cache, "get_redis", get_live_redis)
     try:
         assert await redis_client.ping() is True
+        server_info = await redis_client.info("server")
+        assert str(server_info["redis_version"]).startswith("7.4."), server_info["redis_version"]
 
         # 多 worker 同时重建时，SET NX EX 必须只有一个 owner 成功。
         tokens = await asyncio.gather(

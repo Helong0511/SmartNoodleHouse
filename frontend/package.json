@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "^22.20.0 || ^24.12.0"
+    "node": "^22.20.0 || ^24.12.0 || ^26.0.0"
   },
   "scripts": {
     "dev": "vite",
@@ -15,22 +15,20 @@
   },
   "dependencies": {
     "axios": "^1.21.0",
-    "element-plus": "^2.14.7",
-    "pinia": "^2.1.7",
+    "element-plus": "^2.14.8",
+    "pinia": "^4.1.0",
     "qrcode": "^1.5.4",
-    "vue": "^3.5.44",
-    "vue-router": "^4.3.0"
+    "vue": "^3.5.45",
+    "vue-router": "^5.4.0",
+    "@vue/devtools-api": "^8.2.1"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.10",
-    "typescript": "^5.4.2",
-    "vite": "^8.3.4",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vite": "^8.3.6",
     "vitest": "^5.1.0",
     "vue-tsc": "^3.3.14"
   },
-  "packageManager": "npm@11.19.1",
-  "allowScripts": {
-    "vue-demi@0.14.10": true
-  }
+  "packageManager": "npm@11.19.1"
 }
