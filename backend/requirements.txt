@@ -3,7 +3,6 @@ fastapi>=0.162.2,<0.163.0
 starlette>=1.10.0,<2.0
 uvicorn[standard]>=0.54.0,<1.0
 # CVE-2024-1135（请求走私）修复于 23.0.0
-gunicorn>=26.2.0,<27
 sqlalchemy[asyncio]>=2.1.8,<3.0
 aiomysql>=0.3.2,<0.4
 alembic>=1.20.1,<2.0
