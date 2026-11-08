@@ -310,7 +310,7 @@ async def test_finalize_refund_queues_both_compensations_after_savepoint_failure
         await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
 
     assert row.status == "SUCCESS"
-    assert db.begin_nested.await_count == 1
+    assert db.begin_nested.call_count == 1
     assert [call.kwargs["event_kind"] for call in enqueue.await_args_list] == [
         "points_deduct_refund", "pref_recompute",
     ]
