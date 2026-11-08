@@ -1,8 +1,8 @@
-# Curated runtime pins — NOT a complete transitive/hash lock.
-# Unlisted transitive dependencies are still resolved by pip at install time; CI runs pip-audit.
+# 精选运行时精确版本；不是完整传递依赖/哈希锁，未列出的传递依赖仍由 pip 解析。
+# CI 会执行 pip-audit，并通过 check_requirements_lock.py 校验直接依赖与本文件一致。
 # Python: 3.11+
 # Install: pip install -r backend/requirements.lock
-# Keep aligned with backend/requirements.txt; regenerate after intentional dependency changes.
+# 修改依赖后必须同步更新本文件，并运行完整 CI 验证。
 aiofiles==24.1.0
 aiosqlite==0.21.0
 aiomysql==0.3.2
@@ -13,7 +13,7 @@ boto3==1.43.123
 botocore==1.43.123
 cryptography==50.0.2
 edge-tts==7.3.1
-fastapi==0.162.0
+fastapi==0.162.2
 starlette==1.10.0
 gunicorn==26.2.0
 httpx==0.28.1
@@ -23,9 +23,9 @@ onnxruntime==1.20.1
 opencv-python-headless==5.0.0.93
 passlib[bcrypt]==1.7.4
 Pillow==13.0.0
-pydantic==2.14.2
+pydantic==2.14.3
 pydantic-settings==2.16.2
-pydantic_core==2.50.2
+pydantic_core==2.50.4
 pypinyin==0.55.0
 PyMySQL==1.2.3
 python-dotenv==1.2.4
