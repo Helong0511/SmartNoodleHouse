@@ -8,12 +8,12 @@
 #   REPLACE_DEPLOY_ROOT  → 项目根目录，默认 /var/www/smart-noodle
 #
 # 多进程说明：
-#   - 本单元 PROCESS_ROLE=auto（或 worker）：gunicorn 多 worker 争抢 Redis Leader 锁
+#   - 本单元 PROCESS_ROLE=auto（或 worker）：Uvicorn 多 worker 争抢 Redis Leader 锁
 #   - 仅抢到锁的进程启动 scheduler / TTS / 人脸识别，避免重复 Worker
 # =============================================================================
 
 [Unit]
-Description=SmartNoodleHouse API (FastAPI + gunicorn)
+Description=SmartNoodleHouse API (FastAPI + Uvicorn)
 Documentation=file://REPLACE_DEPLOY_ROOT/README.md
 After=network-online.target mysql.service redis-server.service
 Wants=network-online.target
