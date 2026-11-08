@@ -367,6 +367,8 @@ fn aad_for(version: u8, kid: u8) -> [u8; 23] {
     aad
 }
 
+// 生成端统一补齐版本、KID、签发/过期时间和 click_id，再进行 AES-256-GCM 加密。
+// AAD 绑定协议版本与 KID，避免攻击者只改外层头部就把密文解释成另一把密钥。
 fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     if ttl == 0 || ttl > MAX_TTL_SECONDS {
         set_error("ttl_seconds out of allowed range");
@@ -444,6 +446,8 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     Ok(URL_SAFE_NO_PAD.encode(raw))
 }
 
+// 验证顺序必须保持：长度/编码 -> 头部 -> KID -> GCM 认证 -> JSON/业务字段。
+// 未知 KID 对外统一返回令牌无效，不能泄露服务端当前配置了哪些密钥。
 fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
     if token.is_empty() {
         set_error("token is empty");
@@ -525,6 +529,8 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
     Ok(payload)
 }
 
+// Rust panic 不能跨越 C ABI 边界；所有导出函数都必须经过此保护层。
+// 发生 panic 时返回稳定错误码，避免把异常传播到 Python/C 调用方导致进程崩溃。
 fn ffi_guard<F: FnOnce() -> i32 + std::panic::UnwindSafe>(f: F) -> i32 {
     clear_error();
     match catch_unwind(AssertUnwindSafe(f)) {
