@@ -50,7 +50,7 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx pytest-cov aiosqlite
+          pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
       - name: Verify tracked text encoding and line endings
         run: |
@@ -110,7 +110,7 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx
+          pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
       - name: Prepare database
         env:
