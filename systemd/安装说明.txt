@@ -55,3 +55,11 @@ sudo systemctl reload nginx
 # 数据库连不上           → 检查 DATABASE_URL、mysql 是否 listen 127.0.0.1
 # 生产 mock 被拒绝       → .env 中 ALLOW_*_MOCK 须全部为 false
 # 密钥生成               → python scripts/gen_secrets.py
+
+
+# ── 2026-11-08 安全核对 ──
+# - systemd 使用 Uvicorn 原生多 worker；不要改回 Gunicorn worker 插件。
+# - 生产启动校验必须不依赖 lifespan；即使 ASGI lifespan 被关闭也不能绕过安全门禁。
+# - 进程以非 root 运行；.env、证书、uploads、logs 权限最小化。
+# - 进程重启/多 worker 必须验证 Redis Leader 锁、fencing epoch、Outbox/定时任务不重复。
+# - 发布升级前备份数据库；已有库只执行 Alembic，不运行 struct.sql/data_sys.sql。
