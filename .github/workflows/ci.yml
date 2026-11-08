@@ -241,6 +241,31 @@ jobs:
             node --check --input-type=module < "$file"
           done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
 
+  rust-dll-check:
+    name: rust-dll-check (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.74.0", "stable"]
+    defaults:
+      run:
+        working-directory: tests/广告追踪/ad_tracking_dll
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: Verify locked Rust build and tests
+        run: cargo test --locked
+      - name: Install Rust dependency auditor
+        if: matrix.toolchain == 'stable'
+        run: cargo install cargo-audit --locked
+      - name: Audit Rust dependencies
+        if: matrix.toolchain == 'stable'
+        run: cargo audit --deny warnings
   windows-sapi-dependency:
     name: windows-sapi-dependency
     runs-on: windows-latest
