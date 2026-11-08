@@ -6,10 +6,8 @@ import pytest
 from sqlalchemy import select
 
 from app.models import OutboxEvent
-from app.services.menu_cache_service import (
-    MENU_CACHE_INVALIDATION_MAX_ATTEMPTS,
-    enqueue_menu_cache_invalidation,
-)
+from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+from app.services.outbox_policy import CACHE_INVALIDATION_MAX_ATTEMPTS
 
 
 @pytest.mark.asyncio
@@ -37,5 +35,5 @@ async def test_menu_cache_invalidation_outbox_does_not_dead_letter_on_transient_
     )
 
     assert row.status == "PENDING"
-    assert row.max_attempts == MENU_CACHE_INVALIDATION_MAX_ATTEMPTS
+    assert row.max_attempts == CACHE_INVALIDATION_MAX_ATTEMPTS
     assert row.max_attempts == 2_147_483_647
