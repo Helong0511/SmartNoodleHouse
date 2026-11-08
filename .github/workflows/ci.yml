@@ -214,6 +214,8 @@ jobs:
           test "$(npm --version)" = "11.19.1"
           npm ci
           npm audit --audit-level=high
+      - name: Audit frontend dependency references and duplicate lock entries
+        run: python scripts/audit_frontend_dependency_references.py
 
   miniprogram-static-check:
     name: miniprogram-static-check
