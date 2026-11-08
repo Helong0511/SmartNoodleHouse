@@ -450,9 +450,11 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
         ERR_INTERNAL
     })?;
     let aad = aad_for(VERSION, kid);
+    // 使用定长数组构造 nonce，避免已弃用的 hybrid-array from_slice。
+    let nonce = Nonce::from(nonce_bytes);
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce_bytes),
+            &nonce,
             Payload {
                 msg: &plaintext,
                 aad: &aad,
@@ -511,12 +513,17 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         ERR_INTERNAL
     })?;
 
-    let nonce = &raw[2..HEADER_LEN];
+    let nonce_bytes: [u8; NONCE_LEN] = raw[2..HEADER_LEN].try_into().map_err(|_| {
+        set_error("token nonce length invalid");
+        ERR_TOKEN_INVALID
+    })?;
+    // 解析阶段显式校验 nonce 长度，不依赖 from_slice 的 panic 行为。
+    let nonce = Nonce::from(nonce_bytes);
     let ciphertext = &raw[HEADER_LEN..];
     let aad = aad_for(version, kid);
     let plaintext = cipher
         .decrypt(
-            Nonce::from_slice(nonce),
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad: &aad,
