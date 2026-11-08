@@ -126,9 +126,9 @@ http://localhost:5173/display?store_id=1&token=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb
 
 | 项目 | 说明 |
 |------|------|
-| Token 类型 | 短 opaque 字符串（**不是 JWT**），若用 JWT 后端会返回 4401 拒绝 |
+| Token 类型 | 短 opaque 字符串（不是 JWT）；不得将长期令牌视为可公开信息 |
 | 配置位置 | `.env` 的 `DISPLAY_SCREEN_TOKEN`，或门店级 `store_settings.display_screen_token` |
-| 传递方式 | URL query 参数 `?token=xxx`（短 token 可安全出现在 URL 中） |
+| 传递方式 | 当前实现存在 URL query 传递；URL 会进入浏览器历史、代理/访问日志、截图与 Referer 风险，不能认为 query token 安全 |
 | 门店级优先 | 优先读取门店级 setting，降级到全局 `.env` 值 |
 
 #### Token 校验逻辑（后端 `_verify_display_token`）
@@ -286,3 +286,4 @@ A：
 
 **Q：生产环境后端启动失败，提示缺少 DISPLAY_SCREEN_TOKEN？**
 A：在 `.env` 中配置 `DISPLAY_SCREEN_TOKEN` 后重启后端。
+\n\n## 2026-11-08 安全与可靠性复核\n\n- display 令牌不得为空放行；必须与 store_id 绑定，比较使用恒定时间函数。\n- 当前 query token 方案存在历史记录和访问日志暴露风险；后续应迁移到更安全的 header/短时签发票据，并为现有令牌制定轮换计划。不要把生产令牌写入文档、二维码示例或工单。\n- WebSocket 应默认拒绝未知频道；KDS 与顾客显示屏必须分别校验主体、门店和配额。\n- 页面卸载时必须禁止 onclose 触发自动重连，确保 WS、轮询和音频资源都清理。\n- 顾客订单推送需要可验证的 customer/order/store 关联；连接成功但没有投递不是可接受状态。\n- 上述为审查风险和目标要求，具体关闭状态见全量审查报告。\n
