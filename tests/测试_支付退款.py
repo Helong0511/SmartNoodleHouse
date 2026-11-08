@@ -324,6 +324,74 @@ async def test_finalize_refund_queues_both_compensations_after_savepoint_failure
 
 
 @pytest.mark.asyncio
+async def test_full_refund_always_enqueues_milestone_reclaim_after_commit():
+    from contextlib import asynccontextmanager
+
+    from app.services.payment_service import PaymentService
+
+    @asynccontextmanager
+    async def nested_transaction():
+        yield
+
+    payment = MagicMock(id=1, order_id=9, amount=Decimal("100.00"), status="PAID")
+    order = MagicMock(
+        id=9, store_id=1, total_amount=Decimal("100.00"),
+        channel="WECHAT_MINIPROGRAM", status="PAID",
+        payment_status="PAID", customer_id=42,
+    )
+    row = MagicMock(
+        id=902, status="PROCESSING", payment_id=1, order_id=9,
+        refund_no="RF902", amount=Decimal("100.00"), fail_reason=None,
+        callback_raw=None, provider_refund_no=None, succeeded_at=None,
+    )
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=Decimal("100.00"))
+    db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = order
+    payment_result = MagicMock()
+    payment_result.scalar_one_or_none.return_value = payment
+    db.execute = AsyncMock(side_effect=[order_result, payment_result])
+    db.flush = AsyncMock()
+    enqueue = AsyncMock(return_value=(None, True))
+
+    with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
+        "app.services.payment_service.apply_order_status", new_callable=AsyncMock
+    ), patch(
+        "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.payment_service.PaymentService.order_net_collected",
+        new_callable=AsyncMock, return_value=Decimal("0.00"),
+    ), patch(
+        "app.services.outbox_worker.enqueue_outbox", enqueue
+    ), patch(
+        "app.services.customer_service.CustomerService.deduct_points_for_refund",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.customer_service.PreferenceService.recompute_for_customer",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.coupon_service.CouponService.reclaim_milestones_after_full_refund",
+        new_callable=AsyncMock,
+    ) as reclaim:
+        await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
+
+    assert row.status == "SUCCESS"
+    reclaim.assert_not_awaited()
+    events = [call.kwargs["event_kind"] for call in enqueue.await_args_list]
+    assert "milestone_reclaim" in events
+    reclaim_event = next(
+        call for call in enqueue.await_args_list
+        if call.kwargs["event_kind"] == "milestone_reclaim"
+    )
+    assert reclaim_event.kwargs["payload"] == {"order_id": 9, "refund_id": 902}
+
+
+@pytest.mark.asyncio
 async def test_async_refund_success_updates_pos_request_once_by_refund_id():
     from types import SimpleNamespace
 
