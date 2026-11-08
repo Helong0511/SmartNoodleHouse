@@ -3,8 +3,6 @@
 # Python: 3.11+
 # Install: pip install -r backend/requirements.lock
 # Keep aligned with backend/requirements.txt; regenerate after intentional dependency changes.
-aiofiles==24.1.0
-aiosqlite==0.21.0
 aiomysql==0.3.2
 alembic==1.20.1
 APScheduler==3.11.3
