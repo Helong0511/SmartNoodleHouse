@@ -72,7 +72,7 @@ async def test_shared_client_key_changes_with_password_and_invalidate():
     assert c1 is not c2
     assert len(ha._get_loop_state().shared_http) == 2
     await invalidate_hikvision_caches(base_url="http://192.168.1.64", channel=1)
-    assert len(ha._SHARED_HTTP) == 0
+    assert len(ha._get_loop_state().shared_http) == 0
 
 
 @pytest.mark.asyncio
