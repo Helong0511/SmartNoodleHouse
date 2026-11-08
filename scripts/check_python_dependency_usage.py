@@ -30,7 +30,6 @@ DEPENDENCY_MAP = {
     "redis": {"modules": {"redis"}},
     "httpx": {"modules": {"httpx"}},
     "python-multipart": {"reason": "FastAPI/Starlette 解析 multipart/form-data 时动态检测"},
-    "aiofiles": {"modules": {"aiofiles"}},
     "apscheduler": {"modules": {"apscheduler"}},
     "websockets": {"reason": "由 Uvicorn standard extra 用于 WebSocket 协议处理"},
     "opencv-python-headless": {"modules": {"cv2"}},
