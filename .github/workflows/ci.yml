@@ -249,6 +249,44 @@ jobs:
       - name: Type check and build
         run: npm run build
 
+
+  frontend-lockfile-consistency:
+    name: frontend-lockfile-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm lockfile writer
+        run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
+      - name: Resolve latest stable versions allowed by package.json
+        run: npm update --package-lock-only --ignore-scripts
+      - name: Install refreshed dependency graph
+        run: npm ci
+      - name: Verify audit and production build on refreshed lock
+        run: |
+          npm audit --audit-level=high
+          npm run build
+      - name: Publish generated lockfile for review
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-package-lock
+          path: frontend/package-lock.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Require committed lockfile to match the latest compatible graph
+        run: git diff --exit-code -- package-lock.json
+
   dependency-security-audit:
     name: dependency-security-audit
     runs-on: ubuntu-latest
