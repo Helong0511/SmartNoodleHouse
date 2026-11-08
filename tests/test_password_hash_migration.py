@@ -7,9 +7,9 @@ import pytest
 
 from app.core.security import (
     hash_password,
+    hash_password_async,
     verify_password,
     verify_password_and_update,
-    hash_password_async,
     verify_password_and_update_async,
 )
 
@@ -88,7 +88,6 @@ def test_wrong_password_does_not_produce_an_upgrade_hash():
     assert upgraded is None
 
 
-
 def test_malformed_argon2_hash_fails_closed():
     # 前缀可识别但编码体损坏时，底层 argon2-cffi 会抛 InvalidHashError。
     valid, upgraded = verify_password_and_update(
@@ -98,6 +97,7 @@ def test_malformed_argon2_hash_fails_closed():
 
     assert valid is False
     assert upgraded is None
+
 
 def test_malformed_or_unknown_hash_fails_closed():
     valid, upgraded = verify_password_and_update("any-password", "not-a-valid-password-hash")
