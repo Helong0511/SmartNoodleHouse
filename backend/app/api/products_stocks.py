@@ -25,16 +25,18 @@ async def _assert_no_active_orders_for_stock_mutation(
     OrderItem 未记录扣减来源；在订单仍可取消/退款回库期间修改覆盖记录，
     会让 restore_stock 按新的覆盖状态把库存加回错误的库存池。
     """
-    active_item_id = await db.scalar(
-        select(OrderItem.id)
-        .join(Order, Order.id == OrderItem.order_id)
-        .where(
-            Order.store_id == int(store_id),
-            OrderItem.product_id == int(product_id),
-            Order.status.notin_(("CANCELLED", "REFUNDED", "COMPLETED")),
+    active_item_id = (
+        await db.execute(
+            select(OrderItem.id)
+            .join(Order, Order.id == OrderItem.order_id)
+            .where(
+                Order.store_id == int(store_id),
+                OrderItem.product_id == int(product_id),
+                Order.status.notin_(("CANCELLED", "REFUNDED", "COMPLETED")),
+            )
+            .limit(1)
         )
-        .limit(1)
-    )
+    ).scalar_one_or_none()
     if active_item_id is not None:
         raise AppException(
             40962,
@@ -217,6 +219,9 @@ async def delete_store_stock(
         raise AppException(40401, "餐品不存在")
     if int(product.store_id) != int(sid):
         raise AppException(40301, "餐品不属于该门店")
+    await _assert_no_active_orders_for_stock_mutation(
+        db, store_id=int(sid), product_id=int(product_id)
+    )
     row = (
         await db.execute(
             select(StoreProductStock)
