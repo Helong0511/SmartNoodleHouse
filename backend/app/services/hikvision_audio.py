@@ -795,8 +795,14 @@ def _stream_audio_data_content_length_zero(
         ipaddress.ip_address(host)
     except ValueError as exc:
         raise ValueError("audioData raw TCP host must be a pinned IP literal") from exc
-    if not (1 <= int(port) <= 65535):
+    try:
+        port = int(port)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid audioData TCP port") from exc
+    if not (1 <= port <= 65535):
         raise ValueError("invalid audioData TCP port")
+    if not isinstance(g711_data, (bytes, bytearray, memoryview)):
+        raise ValueError("audioData payload must be bytes-like")
     if (
         not isinstance(path, str)
         or not path.startswith("/ISAPI/System/TwoWayAudio/channels/")
@@ -810,22 +816,29 @@ def _stream_audio_data_content_length_zero(
 
     def _one_shot(auth_header: str | None) -> tuple[socket.socket, int, dict[str, str]]:
         sock = socket.create_connection((host, port), timeout=5.0)
-        sock.settimeout(5.0)
-        host_literal = f"[{host}]" if ":" in host else host
-        host_header = host_literal if port in (80, 443) else f"{host_literal}:{port}"
-        lines = [
-            f"PUT {path} HTTP/1.1",
-            f"Host: {host_header}",
-            "Content-Type: application/octet-stream",
-            "Content-Length: 0",
-            "Connection: keep-alive",
-        ]
-        if auth_header:
-            lines.append(f"Authorization: {auth_header}")
-        payload = ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
-        sock.sendall(payload)
-        status, hdrs, _ = _read_http_response(sock)
-        return sock, status, hdrs
+        try:
+            sock.settimeout(5.0)
+            host_literal = f"[{host}]" if ":" in host else host
+            host_header = host_literal if port in (80, 443) else f"{host_literal}:{port}"
+            lines = [
+                f"PUT {path} HTTP/1.1",
+                f"Host: {host_header}",
+                "Content-Type: application/octet-stream",
+                "Content-Length: 0",
+                "Connection: keep-alive",
+            ]
+            if auth_header:
+                lines.append(f"Authorization: {auth_header}")
+            payload = ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
+            sock.sendall(payload)
+            status, hdrs, _ = _read_http_response(sock)
+            return sock, status, hdrs
+        except Exception:
+            try:
+                sock.close()
+            except OSError:
+                pass
+            raise
 
     t_start = time.perf_counter()
     dur = len(g711_data) / float(_G711_RATE)
