@@ -27,7 +27,7 @@ function collectFiles(dir) {
 }
 
 function scriptBlocks(source, file) {
-  if (path.extname(file) !== ".vue") return [{ text: source, kind: ts.ScriptKind.TS }];
+  if (path.extname(file) !== ".vue") return [{ text: source, kind: null }];
   const blocks = [];
   const pattern = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
   for (const match of source.matchAll(pattern)) {
