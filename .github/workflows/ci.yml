@@ -88,6 +88,16 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall backend/app -q
+      - name: Verify production ASGI worker launch configuration
+        run: |
+          grep -F 'REPLACE_DEPLOY_ROOT/backend/.venv/bin/uvicorn app.main:app' systemd/smart-noodle.service
+          grep -F -- '--workers 2' systemd/smart-noodle.service
+          grep -F -- '--timeout-graceful-shutdown 30' systemd/smart-noodle.service
+          if grep -Eq 'gunicorn|uvicorn\\.workers\\.UvicornWorker' systemd/smart-noodle.service; then
+            echo "Deprecated or removed ASGI worker launch path found" >&2
+            exit 1
+          fi
+          python -m uvicorn --help | grep -F -- '--workers'
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
