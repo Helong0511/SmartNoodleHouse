@@ -4,14 +4,14 @@
 
 ## 技术栈
 
-- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x, MySQL 8, Redis 7.2+（官方 Redis APT 源）, APScheduler
+- 后端: Python 3.11+, FastAPI, SQLAlchemy 2.x async, MySQL 8, Redis 7.2+（官方 Redis APT 源）, APScheduler；生产由 Uvicorn 原生多 worker 启动（不使用 Gunicorn）
 - 后台前端: Vue 3, TypeScript, Vite, Element Plus
 - 微信小程序: `miniprogram-wechat/`
 - 支付宝小程序: `miniprogram-alipay/`
 - 摄像头: OpenCV（海康 RTSP）
 - 实时: WebSocket（厨房 / 订单 / 顾客叫号屏）
 
-> **不使用 Docker**。请在本机安装 MySQL、Redis、Python、Node.js 后按下方步骤启动。
+> **不使用 Docker**。请在本机安装 MySQL、Redis、Python、Node.js 后按下方步骤启动。生产启动必须 fail-closed；未知 APP_ENV 不得按开发环境处理。真实凭据不得进入代码、文档、日志或工单。
 
 ## 功能概览
 
@@ -40,38 +40,36 @@
 - Redis Server 7.2+（生产环境使用 Redis 官方 APT 仓库）
 - 微信 / 支付宝小程序开发者工具（可选）
 
-### 2. 数据库
+### 2. 数据库（先区分全新空库与已有库）
 
-**全新环境**按结构 + 生产种子初始化（会删除并重建同名库，已有业务数据勿执行 `struct.sql`）：
+<escape>⚠️ 严禁把初始化脚本用于已有生产数据库。sql/struct.sql 含 DROP DATABASE IF EXISTS；sql/data_sys.sql 含多张业务表 TRUNCATE。执行会删除已有数据库及业务数据，不能用于生产升级。</escape>
+
+**A. 仅全新、确认为空的数据库：**先完成备份策略和目标库名复核，再在隔离环境初始化。生产环境只有在 DBA 确认目标库为空、备份已验证、执行人双重确认后才可走初始化流程。请勿把下面命令当作常规发布命令：
 
 ```bash
+# 仅全新空库初始化；会破坏同名数据库及其中数据
 mysql -u root -p < sql/struct.sql
 mysql -u root -p < sql/data_sys.sql
 mysql -u root -p < sql/data_custom.sql
 python scripts/初始化管理员.py
 ```
 
-生产部署前必须修改 `sql/struct.sql` 内数据库账号密码占位符，并设置管理员强密码：
+**B. 已有数据库（包括任何已有业务数据的生产库）：**禁止执行 struct.sql、data_sys.sql、data_test.sql；仅使用迁移系统，先备份并在预生产环境演练：
 
 ```bash
-# 先把 struct.sql 中 REPLACE_WITH_STRONG_DB_PASSWORD 换成强密码
-mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
-set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
-python scripts/初始化管理员.py
+cd backend
+alembic upgrade head
+python ../scripts/验证数据库.py
 ```
 
-| 脚本 | 说明 |
+| 脚本 | 用途与风险 |
 |------|------|
-| `sql/struct.sql` | **结构真源**：建库授权、完整 DDL（含 Alembic baseline 的 CANONICAL SCHEMA 段） |
-| `sql/data_sys.sql` | **系统必要种子**：角色权限、全局系统参数、默认会员等级、平台券模板等（含全表 TRUNCATE） |
-| `sql/data_custom.sql` | **门店经营种子**：SH01 菜单/规格/桌台 + SH01/SH02 门店壳与里程碑等（幂等，无 TRUNCATE） |
-| `sql/data_test.sql` | **仅本地测试**：补齐 SH02 分类/菜品/桌台/员工/摄像头/人脸样例（禁止写入生产） |
+| sql/struct.sql | 全新空库初始化结构；含 DROP DATABASE，破坏性操作 |
+| sql/data_sys.sql | 系统种子初始化；含 TRUNCATE，破坏性操作 |
+| sql/data_custom.sql | 门店经营种子；是否可重复执行以脚本当前实现为准，先在隔离库验证 |
+| sql/data_test.sql | 仅本地/测试环境，禁止生产 |
 
-已有库升级请用 Alembic：`cd backend && alembic upgrade head`（`0001_baseline` 只执行 `struct.sql` 的 CANONICAL SCHEMA，不删库）。
-
-开发种子默认管理员: `admin` / `admin123`（生产请用 `初始化管理员.py` 设置强密码）
+数据库唯一结构基线、迁移和备份恢复规则见 [docs/数据库设计.md](docs/数据库设计.md)、[docs/部署说明.md](docs/部署说明.md)。生产升级不以手工 SQL 替代 Alembic。
 
 ### 3. 后端
 
@@ -83,7 +81,7 @@ copy ..\.env.development.example ..\.env   # Windows 本地开发
 uvicorn app.main:app --reload --app-dir .
 ```
 
-API 文档: http://127.0.0.1:8000/docs
+API 文档: http://127.0.0.1:8000/docs（仅开发环境开放；生产不得公开 Swagger/OpenAPI）
 
 ### 4. 后台管理前端
 
@@ -313,6 +311,8 @@ python -m compileall backend
 数据库脚本在 `sql/`，测试程序在 `tests/`。
 
 ## 生产部署
+
+**发布阻断提示（2026-11-08 审查）**：当前代码审查报告发现配置 fail-open、httpx 请求日志可能泄露微信 AppSecret、双端小程序正式 API 环境配置风险、部署 SQL 命令存在误删数据风险等 P0 项。本文已先纠正数据库操作说明，但这不代表相关业务代码已修复。请在这些 P0 项完成代码修复、凭据轮换、真机/沙箱验证及 CI 验收前，不得宣称可上线。详见 [全量审查报告](docs/audit/FULL_CODE_REVIEW_2026-11-08.md) 与 [通用项目审计防错标准](docs/engineering/通用项目审计与上线防错标准.md)。
 
 目标环境：**Ubuntu 22.04 LTS**，不使用 Docker。对外仅暴露 **HTTPS 443**；后端 Uvicorn 多进程监听 `127.0.0.1:8000`，由 Nginx 反代。
 
