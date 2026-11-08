@@ -980,7 +980,11 @@ class HikvisionTwoWayAudio:
             raise ValueError("unsafe Hikvision ISAPI destination")
         self.base_url = f"{pinned_parts.scheme.lower()}://{pinned_parts.netloc}"
         self.username = (username or "admin").strip() or "admin"
+        if len(self.username) > 256 or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in self.username):
+            raise ValueError("invalid Hikvision username")
         self.password = password or ""
+        if len(self.password) > 1024:
+            raise ValueError("Hikvision password exceeds the supported length")
         self.channel = int(channel)
         if not 1 <= self.channel <= 256:
             raise ValueError("Hikvision channel must be between 1 and 256")
