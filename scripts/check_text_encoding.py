@@ -20,7 +20,7 @@ TEXT_SUFFIXES = {
     ".yaml", ".yml",
 }
 TEXT_NAMES = {
-    ".dockerignore", ".gitattributes", ".gitignore", ".gitmodules",
+    ".dockerignore", ".editorconfig", ".gitattributes", ".gitignore", ".gitmodules",
     ".npmrc", ".nvmrc", ".python-version", "Dockerfile", "Makefile",
     "Procfile", "LICENSE",
 }
