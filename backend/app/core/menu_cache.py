@@ -24,6 +24,7 @@ from app.core.cache_keys import (
     MENU_BUNDLE_TTL_SECONDS,
     menu_bundle_key,
     menu_rebuild_lock_key,
+    menu_schedule_key,
     menu_version_key,
     ttl_with_jitter,
 )
@@ -74,9 +75,64 @@ end
 return {bundle, version}
 """
 
+_SYNC_MENU_SCHEDULE_SCRIPT = """
+-- MENU_SYNC_SCHEDULE_GENERATION
+local desired_schedule = ARGV[1]
+local current_schedule = redis.call('GET', KEYS[1])
+local current_version = redis.call('GET', KEYS[2])
+if current_schedule == desired_schedule and current_version then
+    return current_version
+end
+-- INCR 必须先成功，才能提交新的 schedule marker；OOM 时脚本在这里终止，
+-- 保留旧 marker 以便后续请求重试，绝不把新时段伪装成旧版本。
+local version = redis.call('INCR', KEYS[2])
+redis.call('SET', KEYS[1], desired_schedule)
+redis.call('DEL', KEYS[3])
+return version
+"""
 
-async def get_menu_version(store_id: int) -> int:
-    """读取当前门店的持久化菜单版本；新门店从 0 开始。"""
+
+async def sync_menu_schedule_generation(
+    store_id: int, active_schedule_id: int | None
+) -> int | None:
+    """持久化当前时段并在切换时原子递增菜单版本、删除旧 bundle。
+
+    不依赖短 TTL bundle 是否仍存在；因此缓存过期、冷 Worker 首次请求、
+    午/晚市边界都能正确触发客户端版本变化。Redis/OOM 失败返回 None，
+    调用方必须 fail-closed，不能用旧版本继续响应。
+    """
+    schedule_token = str(int(active_schedule_id)) if active_schedule_id is not None else "none"
+    try:
+        r = await get_redis()
+        raw = await r.eval(
+            _SYNC_MENU_SCHEDULE_SCRIPT,
+            3,
+            menu_schedule_key(store_id),
+            menu_version_key(store_id),
+            menu_bundle_key(store_id),
+            schedule_token,
+        )
+        version = int(raw or 0)
+        return version if version > 0 else None
+    except Exception:
+        logger.warning(
+            "同步菜单时段版本失败，拒绝返回未经版本确认的菜单 store=%s schedule=%s",
+            store_id,
+            schedule_token,
+            exc_info=True,
+        )
+        return None
+
+
+async def get_menu_version(
+    store_id: int,
+    *,
+    sync_schedule: bool = False,
+    active_schedule_id: int | None = None,
+) -> int | None:
+    """读取菜单版本；菜单聚合读路径可同时原子同步当前时段代际。"""
+    if sync_schedule:
+        return await sync_menu_schedule_generation(store_id, active_schedule_id)
     try:
         r = await get_redis()
         raw = await r.get(menu_version_key(store_id))

@@ -163,6 +163,10 @@ def menu_bundle_key(store_id: int) -> str:
 def menu_version_key(store_id: int) -> str:
     return f"{MENU_CATALOG_PREFIX}:{{s{int(store_id)}}}:version"
 
+def menu_schedule_key(store_id: int) -> str:
+    """持久化当前门店生效的分类时段 ID；与菜单版本/缓存共用 Cluster hash slot。"""
+    return f"{MENU_CATALOG_PREFIX}:{{s{int(store_id)}}}:schedule"
+
 
 def cart_fingerprint(product_ids) -> str:
     """购物车餐品集合指纹：仅与集合内容有关，与顺序无关。"""

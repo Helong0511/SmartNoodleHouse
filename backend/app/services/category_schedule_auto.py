@@ -23,7 +23,8 @@ from app.models import (
     Store,
 )
 from app.services.category_schedule import time_in_window
-from app.services.recommendation_service import invalidate_store_caches
+from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+from app.services.recommendation_service import invalidate_store_local_caches
 from app.services.system_settings_service import SystemSettingsService
 
 logger = logging.getLogger(__name__)
@@ -211,7 +212,9 @@ async def refresh_schedule_auto_sort(
         )
     schedule.auto_updated_at = now_local()
     await db.flush()
-    await invalidate_store_caches(sid)
+    # 排序数据与失效事件处于同一事务；Redis 暂时不可用时由 Outbox worker 重试。
+    invalidate_store_local_caches(sid)
+    await enqueue_menu_cache_invalidation(db, sid)
 
     return {
         "schedule_id": int(schedule.id),

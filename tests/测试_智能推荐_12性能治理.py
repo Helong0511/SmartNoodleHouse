@@ -105,6 +105,19 @@ class FakeRedis:
             if self.kv.get(keys[0]) == str(argv[0]):
                 return await self.delete(keys[0])
             return 0
+        # 持久化菜单时段代际：模拟 Redis Lua 原子比较、INCR、marker 写入及 bundle 删除。
+        if "MENU_SYNC_SCHEDULE_GENERATION" in script:
+            schedule_key, version_key, bundle_key = keys
+            desired_schedule = str(argv[0])
+            current_schedule = self.kv.get(schedule_key)
+            current_version = self.kv.get(version_key)
+            if current_schedule == desired_schedule and current_version is not None:
+                return current_version
+            next_version = int(current_version or 0) + 1
+            self.kv[version_key] = str(next_version)
+            self.kv[schedule_key] = desired_schedule
+            self.kv.pop(bundle_key, None)
+            return next_version
         # 菜单 bundle + version 原子读取。
         if "MENU_GET_BUNDLE_WITH_VERSION" in script:
             bundle = self.kv.get(keys[0])
