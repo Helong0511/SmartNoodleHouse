@@ -524,15 +524,14 @@ def invalidate_store_local_caches(store_id: int) -> None:
     invalidate_local_menu_cache(sid)
 
 
-async def invalidate_store_caches(store_id: int, *, generation: int | None = None) -> bool:
-    """清理本地推荐/菜单缓存，并将 Redis 镜像推进到 MySQL 持久代际。"""
+async def invalidate_store_caches(store_id: int, *, generation: int) -> bool:
+    """清理本地推荐缓存，并把 Redis 镜像同步到 MySQL 持久代际。
+
+    只允许由已提交的 Outbox 事件调用；禁止在业务写路径直接 bump Redis 版本，
+    避免数据库回滚而 Redis 版本已经前进，造成缓存版本与事实数据永久分叉。
+    """
     sid = int(store_id)
     invalidate_store_local_caches(sid)
-    if generation is None:
-        # Compatibility for non-Outbox callers; menu mutation paths must pass DB generation.
-        from app.core.menu_cache import bump_menu_version
-
-        return (await bump_menu_version(sid)) > 0
     from app.core.menu_cache import ensure_menu_generation
 
     mirrored = await ensure_menu_generation(sid, int(generation))
