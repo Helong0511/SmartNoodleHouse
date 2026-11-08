@@ -16,7 +16,7 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 _LOGIN_FAIL_LIMIT = 3
 _LOGIN_LOCK_SECONDS = 5 * 60
 _LOGIN_FAIL_WINDOW = 5 * 60
-\n# Redis Lua 原子递增并刷新滑动窗口 TTL，避免 INCR 成功而 EXPIRE 未执行时留下永久计数。
+# Redis Lua 原子递增并刷新滑动窗口 TTL，避免 INCR 成功而 EXPIRE 未执行时留下永久计数。
 _LOGIN_FAILURE_INCR_LUA = """
 local count = redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[1])
