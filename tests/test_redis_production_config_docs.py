@@ -14,3 +14,5 @@ def test_mixed_redis_production_policy_is_noeviction():
     assert "独立 Redis 实例" in deployment
     assert "vm.overcommit_memory = 1" in deployment
     assert "sysctl --system" in deployment
+    assert "transparent_hugepage/enabled" in deployment
+    assert "echo never" in deployment
