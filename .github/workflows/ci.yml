@@ -113,7 +113,9 @@ jobs:
         env:
           MYSQL_PWD: root
         run: |
-          mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE IF NOT EXISTS smart_noodle_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          # MYSQL_DATABASE pre-creates the schema using the server default collation;
+          # CREATE DATABASE IF NOT EXISTS would not change that existing schema.
+          mysql -h 127.0.0.1 -uroot -e "ALTER DATABASE smart_noodle_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
       - name: Upgrade empty MySQL schema to latest Alembic revision
         working-directory: backend
         env:
