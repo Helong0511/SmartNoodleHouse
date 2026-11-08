@@ -18,7 +18,7 @@ from app.schemas.product import CategoryCreate, CategoryUpdate
 from app.services.audit_service import AuditService
 from app.services.category_require import normalize_require_category_ids
 from app.services.category_schedule import apply_category_schedule_sort, parse_hhmm
-from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+from app.services.menu_cache_service import invalidate_store_menu_cache
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
@@ -26,11 +26,8 @@ router = APIRouter(tags=["餐品"])
 
 async def _invalidate_category_menu(db: DbSession, *store_ids: int | None) -> None:
     """分类变更同时清理本地推荐/菜单缓存，并在业务事务内持久化代际与 Outbox。"""
-    from app.services.recommendation_service import invalidate_store_local_caches
-
     for sid in sorted({int(value) for value in store_ids if value is not None}):
-        invalidate_store_local_caches(sid)
-        await enqueue_menu_cache_invalidation(db, sid)
+        await invalidate_store_menu_cache(db, sid)
 
 
 async def _prepare_category_store_move(
