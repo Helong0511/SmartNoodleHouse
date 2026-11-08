@@ -535,7 +535,8 @@ async def invalidate_store_caches(store_id: int, *, generation: int | None = Non
         return (await bump_menu_version(sid)) > 0
     from app.core.menu_cache import ensure_menu_generation
 
-    return await ensure_menu_generation(sid, int(generation)) == int(generation)
+    mirrored = await ensure_menu_generation(sid, int(generation))
+    return mirrored is not None and mirrored >= int(generation)
 
 
 class RecommendationService:
