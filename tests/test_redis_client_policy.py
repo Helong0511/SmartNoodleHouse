@@ -32,6 +32,6 @@ async def test_redis_client_keeps_resp2_and_fail_fast_pool_policy(monkeypatch):
         assert pool.connection_kwargs["protocol"] == 2
         assert pool.connection_kwargs["retry"].get_retries() == 0
         assert client.connection_pool.connection_kwargs["health_check_interval"] == 30
-        # redis-py 8.x 默认保留旧响应结构；线协议由连接池显式固定为 RESP2。
+        assert pool.connection_kwargs["legacy_responses"] is True
     finally:
         await redis_client.close_redis()
