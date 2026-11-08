@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {
     ".acss", ".axml", ".bat", ".c", ".cfg", ".conf", ".css", ".csv",
     ".editorconfig", ".env", ".example", ".go", ".h", ".html", ".ini",
-    ".java", ".js", ".json", ".jsx", ".lock", ".md", ".mdc", ".mjs",
-    ".mts", ".py", ".rst", ".rs", ".scss", ".sh", ".sql", ".svg",
-    ".toml", ".ts", ".tsx", ".txt", ".vue", ".wxml", ".wxss", ".xml",
+    ".java", ".js", ".json", ".jsx", ".lock", ".md", ".mdc", ".mako", ".mjs",
+    ".mts", ".ps1", ".py", ".rc", ".rst", ".rs", ".sjs", ".scss", ".service", ".sh", ".sql", ".svg",
+    ".toml", ".ts", ".tsx", ".txt", ".vue", ".wxml", ".wxss", ".xml", ".gitkeep",
     ".yaml", ".yml",
 }
 TEXT_NAMES = {
