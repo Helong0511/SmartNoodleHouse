@@ -16,7 +16,7 @@ from app.services.outbox_worker import enqueue_outbox
 
 
 async def _read_generation(db: AsyncSession, store_id: int) -> int:
-    value = await db.scalar(select(Store.menu_generation).where(Store.id == int(store_id)))
+    value = await db.scalar(select(Store.menu_generation).where(Store.id == int(store_id)).with_for_update())
     if value is None:
         raise ValueError(f"menu generation store not found: {store_id}")
     return int(value)
