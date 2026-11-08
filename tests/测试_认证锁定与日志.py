@@ -7,7 +7,7 @@ import pytest
 def test_client_log_strips_newlines():
     from app.api.client_logs import _strip_ctrl
 
-    assert "\\n" not in _strip_ctrl("a\\nb\\rc")
+    assert "\n" not in _strip_ctrl("a\nb\rc")
     assert _strip_ctrl("ok") == "ok"
 
 
