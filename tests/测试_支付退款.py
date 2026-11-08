@@ -146,8 +146,15 @@ async def test_finalize_refund_marks_partial():
     row.provider_refund_no = None
     row.succeeded_at = None
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def nested_transaction():
+        yield
+
     db = AsyncMock()
     db.scalar = AsyncMock(return_value=Decimal("40.00"))
+    db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
 
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
@@ -172,7 +179,9 @@ async def test_finalize_refund_marks_partial():
         "app.services.outbox_worker.enqueue_outbox", new_callable=AsyncMock, return_value=(None, True)
     ), patch(
         "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
-    ) as deduct:
+    ) as deduct, patch(
+        "app.services.customer_service.PreferenceService.recompute_for_customer", new_callable=AsyncMock
+    ):
         await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
 
     assert row.status == "SUCCESS"
