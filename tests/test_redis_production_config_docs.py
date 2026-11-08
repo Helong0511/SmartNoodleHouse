@@ -12,3 +12,5 @@ def test_mixed_redis_production_policy_is_noeviction():
     assert "maxmemory-policy noeviction" in deployment
     assert "maxmemory-policy=allkeys-lru" not in deployment
     assert "独立 Redis 实例" in deployment
+    assert "vm.overcommit_memory = 1" in deployment
+    assert "sysctl --system" in deployment
