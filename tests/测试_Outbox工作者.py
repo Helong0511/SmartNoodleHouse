@@ -933,8 +933,10 @@ async def test_stock_menu_invalidation_outbox_is_enqueued_in_business_transactio
     from app.services import stock_service, menu_cache_service
 
     enqueue = AsyncMock(return_value=(MagicMock(), True))
+    advance = AsyncMock(return_value=1_000_000_007)
     deduct = AsyncMock()
     monkeypatch.setattr(menu_cache_service, "enqueue_outbox", enqueue)
+    monkeypatch.setattr(menu_cache_service, "advance_store_menu_generation", advance)
     monkeypatch.setattr(stock_service, "deduct_stock", deduct)
 
     await stock_service.deduct_for_order_items(
@@ -961,11 +963,13 @@ async def test_menu_cache_invalidation_outbox_handler_retries_when_redis_unavail
 
     invalidate = AsyncMock(return_value=False)
     monkeypatch.setattr(recommendation_service, "invalidate_store_caches", invalidate)
-    row = SimpleNamespace(payload=json.dumps({"store_id": 7}), aggregate_id=123)
+    row = SimpleNamespace(payload=json.dumps({"store_id": 7, "generation": 1_000_000_008}), aggregate_id=123)
+    db = MagicMock()
+    db.scalar = AsyncMock(return_value=1_000_000_009)
 
-    with pytest.raises(RuntimeError, match="菜单缓存失效失败"):
-        await menu_cache_handlers.menu_cache_invalidate_handler(MagicMock(), row)
-    invalidate.assert_awaited_once_with(7)
+    with pytest.raises(RuntimeError, match="菜单缓存代际同步失败"):
+        await menu_cache_handlers.menu_cache_invalidate_handler(db, row)
+    invalidate.assert_awaited_once_with(7, generation=1_000_000_009)
 
 
 @pytest.mark.asyncio
@@ -977,10 +981,12 @@ async def test_menu_cache_invalidation_outbox_handler_invalidates_after_commit_w
 
     invalidate = AsyncMock(return_value=True)
     monkeypatch.setattr(recommendation_service, "invalidate_store_caches", invalidate)
-    row = SimpleNamespace(payload=json.dumps({"store_id": 8}), aggregate_id=124)
+    row = SimpleNamespace(payload=json.dumps({"store_id": 8, "generation": 1_000_000_010}), aggregate_id=124)
+    db = MagicMock()
+    db.scalar = AsyncMock(return_value=1_000_000_010)
 
-    await menu_cache_handlers.menu_cache_invalidate_handler(MagicMock(), row)
-    invalidate.assert_awaited_once_with(8)
+    await menu_cache_handlers.menu_cache_invalidate_handler(db, row)
+    invalidate.assert_awaited_once_with(8, generation=1_000_000_010)
 
 
 @pytest.mark.asyncio
