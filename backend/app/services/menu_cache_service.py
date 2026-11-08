@@ -8,6 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.outbox_worker import enqueue_outbox
 
 
+# Redis outage/OOM is transient infrastructure failure, not a reason to permanently
+# abandon menu invalidation. Outbox max_attempts is a signed MySQL INT; this value
+# makes retries effectively unbounded while preserving the worker's capped backoff.
+MENU_CACHE_INVALIDATION_MAX_ATTEMPTS = 2_147_483_647
+
+
 async def enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None) -> None:
     """在业务事务内写入失效事件；Redis 失效由提交后的 Outbox worker 执行。"""
     if not store_id:
@@ -20,4 +26,5 @@ async def enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None
         aggregate_id=event_id,
         event_kind="invalidate",
         payload={"store_id": int(store_id)},
+        max_attempts=MENU_CACHE_INVALIDATION_MAX_ATTEMPTS,
     )
