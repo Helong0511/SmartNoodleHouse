@@ -81,7 +81,7 @@ python-dotenv==1.2.4
 python-multipart==0.0.33
 pywin32==312; platform_system == "Windows"
 pyyaml==6.0.3
-redis==5.3.1
+redis==8.1.0
 requests==2.34.2
 s3transfer==0.19.3
 scikit-image==0.26.0
