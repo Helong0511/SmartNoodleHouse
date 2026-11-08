@@ -165,6 +165,23 @@ def test_converged_baseline_migrations_never_drop_preexisting_objects_on_downgra
         ROOT / "backend" / "alembic" / "versions" / "0015_delivery_menu_ops.py",
         ROOT / "backend" / "alembic" / "versions" / "0045_leader_fencing_epoch.py",
     ]
+    # These objects are already present in the canonical bootstrap schema.
+    canonical = STRUCT.read_text(encoding="utf-8")
+    for table in (
+        "store_business_hours",
+        "platform_category_maps",
+        "delivery_sync_alerts",
+        "leader_fencing_state",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS `{table}`" in canonical
+    binding_start = canonical.index(
+        "CREATE TABLE IF NOT EXISTS `platform_store_bindings`"
+    )
+    binding_end = canonical.find(";", binding_start)
+    binding_ddl = canonical[binding_start:binding_end]
+    for column in ("auto_sync_open", "platform_open_status", "last_sync_at"):
+        assert f"`{column}`" in binding_ddl
+
     for path in migration_paths:
         module = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         downgrade = next(
