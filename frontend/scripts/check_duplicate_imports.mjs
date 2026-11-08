@@ -54,7 +54,17 @@ for (const rootName of SCAN_ROOTS) {
       const kind = block.kind || ([ ".js", ".mjs", ".cjs" ].includes(extension) ? ts.ScriptKind.JS : extension === ".jsx" ? ts.ScriptKind.JSX : ts.ScriptKind.TS);
       const sf = ts.createSourceFile(file, block.text, ts.ScriptTarget.Latest, true, kind);
       const seen = new Map();
+      const scopeStack = ["module"];
       function visit(node) {
+        const isFunctionScope = ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)
+          || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)
+          || ts.isConstructorDeclaration(node) || ts.isGetAccessorDeclaration(node)
+          || ts.isSetAccessorDeclaration(node);
+        const isBlockScope = ts.isBlock(node);
+        if (isFunctionScope || isBlockScope) {
+          const pos = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+          scopeStack.push((isFunctionScope ? "function@" : "block@") + (pos.line + 1));
+        }
         let specifier = null;
         let typeOnly = false;
         if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -63,13 +73,14 @@ for (const rootName of SCAN_ROOTS) {
         } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
           specifier = node.moduleSpecifier.text;
           typeOnly = !!node.isTypeOnly;
-        } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.Identifier
-          && node.expression.text === "require" && node.arguments.length === 1
-          && ts.isStringLiteral(node.arguments[0])) {
-          specifier = `require:${node.arguments[0].text}`;
+        } else if (ts.isCallExpression(node) && node.arguments.length === 1
+          && ts.isStringLiteral(node.arguments[0])
+          && ((node.expression.kind === ts.SyntaxKind.Identifier && node.expression.text === "require")
+            || node.expression.kind === ts.SyntaxKind.ImportKeyword)) {
+          specifier = "dynamic:" + node.arguments[0].text;
         }
         if (specifier !== null) {
-          const key = `${typeOnly ? "type" : "value"}:${specifier}`;
+          const key = scopeStack.join("/") + "/" + (typeOnly ? "type" : "value") + ":" + specifier;
           const previous = seen.get(key);
           if (previous !== undefined) {
             const pos = sf.getLineAndCharacterOfPosition(node.getStart(sf));
@@ -80,6 +91,7 @@ for (const rootName of SCAN_ROOTS) {
           }
         }
         ts.forEachChild(node, visit);
+        if (isFunctionScope || isBlockScope) scopeStack.pop();
       }
       visit(sf);
       for (const diagnostic of sf.parseDiagnostics) {
