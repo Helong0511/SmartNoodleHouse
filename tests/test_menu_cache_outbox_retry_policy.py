@@ -119,3 +119,74 @@ async def test_reco_invalidation_outbox_uses_durable_retry_budget(db_session, mo
 
     for coroutine in spawned:
         coroutine.close()
+
+
+@pytest.mark.asyncio
+async def test_reco_profile_change_and_outbox_roll_back_together(db_session):
+    from app.services import reco_cache
+
+    customer = await make_customer(db_session)
+    customer_id = customer.id
+    # Keep the pre-existing customer outside the transaction under test.
+    await db_session.commit()
+
+    customer.recommend_opt_in = 0
+    reco_cache.defer_invalidate_customer(db_session, customer_id)
+    await db_session.flush()
+    await db_session.rollback()
+
+    restored_customer = await db_session.get(type(customer), customer_id)
+    assert restored_customer is not None
+    assert restored_customer.recommend_opt_in == 1
+
+    persisted = list(
+        (
+            await db_session.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.aggregate_type == "reco_cache",
+                    OutboxEvent.aggregate_id == customer_id,
+                )
+            )
+        ).scalars().all()
+    )
+    assert persisted == []
+
+
+@pytest.mark.asyncio
+async def test_reco_invalidation_outbox_handler_raises_when_redis_is_unavailable(
+    db_session, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from app.services import reco_cache
+
+    customer = await make_customer(db_session)
+
+    async def redis_unavailable():
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(reco_cache, "get_redis", redis_unavailable)
+
+    key = ("reco_cache", "invalidate")
+    previous = reco_cache.OUTBOX_HANDLERS.get(key) if hasattr(reco_cache, "OUTBOX_HANDLERS") else None
+    from app.services.outbox_worker import OUTBOX_HANDLERS, _resolve_outbox_handler
+
+    previous = OUTBOX_HANDLERS.get(key)
+    reco_cache.register_reco_cache_outbox_handler()
+    try:
+        row = SimpleNamespace(
+            aggregate_type="reco_cache",
+            aggregate_id=customer.id,
+            event_kind="invalidate_test-event",
+            payload=json.dumps({"customer_id": customer.id}),
+        )
+        handler = _resolve_outbox_handler(row)
+        assert handler is not None
+
+        with pytest.raises(ConnectionError, match="redis unavailable"):
+            await handler(db_session, row)
+    finally:
+        if previous is None:
+            OUTBOX_HANDLERS.pop(key, None)
+        else:
+            OUTBOX_HANDLERS[key] = previous
