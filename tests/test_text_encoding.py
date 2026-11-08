@@ -37,7 +37,7 @@ def test_replacement_character_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setattr(MODULE, "ROOT", tmp_path)
     path = tmp_path / "example.py"
 
-    assert "U+FFFD" in MODULE.validate_bytes(path, "乱码�".encode("utf-8"))[0]
+    assert "U+FFFD" in MODULE.validate_bytes(path, ("乱码" + chr(0xFFFD)).encode("utf-8"))[0]
 
 
 def test_crlf_is_rejected(monkeypatch, tmp_path):
