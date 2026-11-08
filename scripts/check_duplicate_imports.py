@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCAN_ROOTS = ("backend/app", "backend/alembic", "scripts", "tests")
-SKIP_PARTS = {".venv", "venv", "__pycache__", "node_modules", "target", "dist"}
+SCAN_ROOTS = ("backend", "scripts", "tests")
+SKIP_PARTS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules", "target", "dist"}
 
 
 class ImportDuplicateVisitor(ast.NodeVisitor):
@@ -39,6 +39,61 @@ class ImportDuplicateVisitor(ast.NodeVisitor):
         for child in (*node.decorator_list, *node.bases, *node.keywords):
             self.visit(child)
         self._scope(node, node.name)
+
+    def _visit_branch(self, node: ast.AST, label: str, body: list[ast.stmt]) -> None:
+        """不同条件分支拥有独立作用域，避免把合法的懒加载/回退导入误判为重复。"""
+        self.scope_stack.append(f"{label}@{getattr(node, 'lineno', 0)}")
+        for child in body:
+            self.visit(child)
+        self.scope_stack.pop()
+
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        self._visit_branch(node, "if", node.body)
+        if node.orelse:
+            self._visit_branch(node, "else", node.orelse)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_branch(node, "try", node.body)
+        for handler in node.handlers:
+            self._visit_branch(handler, "except", handler.body)
+        if node.orelse:
+            self._visit_branch(node, "try-else", node.orelse)
+        if node.finalbody:
+            self._visit_branch(node, "finally", node.finalbody)
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.target)
+        self.visit(node.iter)
+        self._visit_branch(node, "for", node.body)
+        if node.orelse:
+            self._visit_branch(node, "for-else", node.orelse)
+
+    visit_AsyncFor = visit_For
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        self._visit_branch(node, "while", node.body)
+        if node.orelse:
+            self._visit_branch(node, "while-else", node.orelse)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item)
+        self._visit_branch(node, "with", node.body)
+
+    visit_AsyncWith = visit_With
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for case in node.cases:
+            self.scope_stack.append(f"match-case@{case.pattern.lineno}")
+            self.visit(case.pattern)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for child in case.body:
+                self.visit(child)
+            self.scope_stack.pop()
 
     def _record(self, node: ast.AST) -> None:
         signature = ast.dump(node, include_attributes=False)
