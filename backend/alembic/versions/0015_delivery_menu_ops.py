@@ -128,9 +128,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("delivery_sync_alerts")
-    op.drop_table("platform_category_maps")
-    op.drop_table("store_business_hours")
-    op.drop_column("platform_store_bindings", "last_sync_at")
-    op.drop_column("platform_store_bindings", "platform_open_status")
-    op.drop_column("platform_store_bindings", "auto_sync_open")
+    """Preserve converged baseline objects; destructive rollback is unsafe.
+
+    The canonical schema (sql/struct.sql) already contains these tables and
+    columns. Upgrade intentionally supports both canonical installs and older
+    databases by creating only missing objects. The migration does not persist
+    ownership metadata, so downgrade cannot distinguish objects it created
+    from pre-existing production data. Keep the superset schema rather than
+    risk deleting customer/store configuration or operational history.
+    """
+    return
