@@ -49,6 +49,9 @@ jobs:
           fi
           pip install pytest pytest-asyncio httpx pytest-cov aiosqlite
           python scripts/check_requirements_lock.py
+      - name: Verify tracked text encoding and line endings
+        run: |
+          python scripts/check_text_encoding.py
       - name: Compile check
         run: |
           python -m compileall backend/app -q
