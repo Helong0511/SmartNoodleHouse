@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,3 +46,13 @@ def test_crlf_is_rejected(monkeypatch, tmp_path):
     path = tmp_path / "example.py"
 
     assert "CR/CRLF" in MODULE.validate_bytes(path, b"line1\r\nline2\r\n")[0]
+
+
+def test_json_serialization_preserves_chinese_and_four_byte_unicode():
+    from app.core.response import dumps_json
+
+    payload = {"dish": "牛肉面", "emoji": "🍜"}
+    encoded = dumps_json(payload)
+
+    assert encoded == '{"dish": "牛肉面", "emoji": "🍜"}'
+    assert json.loads(encoded) == payload
