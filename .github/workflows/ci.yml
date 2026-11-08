@@ -50,11 +50,14 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx pytest-cov aiosqlite
+          pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
       - name: Verify tracked text encoding and line endings
         run: |
           python scripts/check_text_encoding.py
+      - name: Verify critical native and ML dependency imports
+        run: |
+          python -c "import numpy, cv2, onnxruntime, insightface, websockets; print('NumPy', numpy.__version__, 'OpenCV', cv2.__version__, 'ONNX Runtime', onnxruntime.__version__, 'websockets', websockets.__version__)"
       - name: Compile check
         run: |
           python -m compileall backend/app -q
@@ -110,7 +113,7 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx
+          pip install -r tests/requirements.txt
           python scripts/check_requirements_lock.py
       - name: Prepare database
         env:
@@ -261,7 +264,7 @@ jobs:
       - name: Verify Rust formatting
         run: cargo fmt --all -- --check
       - name: Compile and test the DLL core with the committed lockfile
-        run: cargo test --locked --all-targets
+        run: cargo test --locked
       - name: Lint all Rust targets
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Find unused Rust dependencies
