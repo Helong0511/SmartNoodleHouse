@@ -246,10 +246,10 @@ if DISPLAY_SCREEN_TOKEN 已配置 AND 传入 token 不匹配:
 
 ### 3.4 当前环境快速验证
 
-当前 `.env` 已配置 `DISPLAY_SCREEN_TOKEN=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb`：
+当前环境是否配置 DISPLAY_SCREEN_TOKEN 应在服务器受保护的环境中核验；不要在文档、截图、命令历史或工单中展示令牌。
 
 - ✅ **KDS**：登录后台后访问 `/kitchen` 或 `/kds`
-- ✅ **取餐叫号屏**：访问 `/display?store_id=1&token=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb`
+- ✅ **取餐叫号屏**：访问 `/display?store_id=1&token=<请从受保护的环境配置中读取，不要写入文档>`
 
 > 若想在开发环境免 token 打开叫号屏，将 `.env` 中 `DISPLAY_SCREEN_TOKEN` 清空即可。
 
