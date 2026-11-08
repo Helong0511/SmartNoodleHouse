@@ -943,8 +943,7 @@ async def test_welcome_coupon_only_for_new_member_campaign(db_session):
 
 @pytest.mark.asyncio
 async def test_campaign_payload_after_commit_reads_timestamps(db_session):
-    """回归：upsert+commit 后同步 _payload 读 created_at 不得 MissingGreenlet。"""
-    from sqlalchemy.exc import MissingGreenlet, StatementError
+    """回归：同步序列化前刷新异步 ORM 时间戳，避免 MissingGreenlet。"""
 
     seed = await _seed(db_session)
     seg = await SegmentService.upsert(
