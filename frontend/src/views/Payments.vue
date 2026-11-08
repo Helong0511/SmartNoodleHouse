@@ -130,15 +130,20 @@
         }}</el-form-item>
         <el-form-item label="可退余额">¥{{ refundMax }}</el-form-item>
         <el-form-item label="退款金额">
-          <el-input-number v-model="refundAmount" :min="0.01" :max="refundMax" :precision="2" style="width:100%" />
+          <el-input-number v-model="refundAmount" :min="0.01" :max="refundMax" :precision="2" style="width:100%"
+            :disabled="!!refundSubmission" />
         </el-form-item>
         <el-form-item label="原因">
-          <el-input v-model="refundReason" />
+          <el-input v-model="refundReason" :disabled="!!refundSubmission" />
         </el-form-item>
+        <el-alert v-if="refundSubmission" type="warning" :closable="false" show-icon
+          title="该退款请求结果尚未确认。重试将使用相同幂等键，不会创建第二笔退款；请勿修改金额或原因。" />
       </el-form>
       <template #footer>
-        <el-button @click="refundDialog = false">取消</el-button>
-        <el-button type="danger" :loading="refunding" @click="submitRefund">确认退款</el-button>
+        <el-button :disabled="!!refundSubmission || refunding" @click="refundDialog = false">取消</el-button>
+        <el-button type="danger" :loading="refunding" @click="submitRefund">
+          {{ refundSubmission ? '安全重试原退款请求' : '确认退款' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -250,6 +255,49 @@ const refundRow = ref<any>(null)
 const refundAmount = ref(0)
 const refundReason = ref('商家退款')
 const refunding = ref(false)
+type RefundAttempt = { idempotencyKey: string; amount: number; reason: string }
+const refundSubmission = ref<RefundAttempt | null>(null)
+
+function refundAttemptStorageKey(paymentNo: string) {
+  return `smart-noodle-house:refund-attempt:${paymentNo}`
+}
+
+function readRefundAttempt(paymentNo: string): RefundAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(refundAttemptStorageKey(paymentNo))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (
+      typeof parsed?.idempotencyKey !== 'string' ||
+      parsed.idempotencyKey.length < 16 ||
+      parsed.idempotencyKey.length > 64 ||
+      !Number.isFinite(Number(parsed.amount)) ||
+      Number(parsed.amount) <= 0 ||
+      typeof parsed.reason !== 'string'
+    ) return null
+    return {
+      idempotencyKey: parsed.idempotencyKey,
+      amount: Number(parsed.amount),
+      reason: parsed.reason,
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistRefundAttempt(paymentNo: string, attempt: RefundAttempt) {
+  // Persist before sending the request so a page reload after a lost response
+  // can safely retry the exact same operation with the same idempotency key.
+  sessionStorage.setItem(refundAttemptStorageKey(paymentNo), JSON.stringify(attempt))
+}
+
+function clearRefundAttempt(paymentNo: string) {
+  try {
+    sessionStorage.removeItem(refundAttemptStorageKey(paymentNo))
+  } catch {
+    // A stale session entry is harmless: the next retry remains idempotent.
+  }
+}
 
 const refundDrawer = ref(false)
 const refundDrawerMode = ref<'payment' | 'inflight'>('payment')
@@ -368,29 +416,58 @@ async function load() {
 
 function openRefund(row: any) {
   refundRow.value = row
-  const max = parseFloat(row.refundable_amount ?? row.amount)
-  refundAmount.value = Number.isFinite(max) && max > 0 ? max : parseFloat(row.amount)
-  refundReason.value = '商家退款'
+  const savedAttempt = readRefundAttempt(String(row.payment_no))
+  if (savedAttempt) {
+    refundSubmission.value = savedAttempt
+    refundAmount.value = savedAttempt.amount
+    refundReason.value = savedAttempt.reason
+  } else {
+    refundSubmission.value = null
+    const max = parseFloat(row.refundable_amount ?? row.amount)
+    refundAmount.value = Number.isFinite(max) && max > 0 ? max : parseFloat(row.amount)
+    refundReason.value = '商家退款'
+  }
   refundDialog.value = true
 }
 
 async function submitRefund() {
   if (!refundRow.value) return
-  if (refundAmount.value > refundMax.value + 1e-9) {
+  if (!refundSubmission.value && refundAmount.value > refundMax.value + 1e-9) {
     ElMessage.warning(`退款金额不能超过可退余额 ¥${refundMax.value}`)
     return
   }
+  const paymentNo = String(refundRow.value.payment_no)
+  if (!refundSubmission.value) {
+    const attempt: RefundAttempt = {
+      idempotencyKey: crypto.randomUUID(),
+      amount: Number(refundAmount.value),
+      reason: String(refundReason.value),
+    }
+    try {
+      persistRefundAttempt(paymentNo, attempt)
+    } catch {
+      ElMessage.error('无法安全保存退款请求标识，请检查浏览器存储权限后重试；本次未发送退款请求')
+      return
+    }
+    refundSubmission.value = attempt
+  }
+  const attempt = refundSubmission.value
+  if (!attempt) return
   refunding.value = true
   try {
-    const res = await api.post(`/payments/${refundRow.value.payment_no}/refund`, {
-      amount: refundAmount.value,
-      reason: refundReason.value,
+    const res = await api.post(`/payments/${paymentNo}/refund`, {
+      amount: attempt.amount,
+      reason: attempt.reason,
+    }, {
+      headers: { 'Idempotency-Key': attempt.idempotencyKey },
     })
+    clearRefundAttempt(paymentNo)
+    refundSubmission.value = null
     ElMessage.success(res.data?.message || '退款已提交')
     refundDialog.value = false
     load()
   } catch (e: any) {
-    ElMessage.error(e.message || '退款失败')
+    ElMessage.error(e.message || '退款结果可能尚未确认。请保持当前请求并重试，系统会使用同一幂等键，不会重复创建退款。')
   } finally {
     refunding.value = false
   }

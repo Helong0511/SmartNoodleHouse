@@ -439,7 +439,7 @@ async def refund_payment(
     request: Request,
     db: DbSession,
     user: CurrentUser,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=64),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=16, max_length=64),
 ):
     """管理端直接退款（仅店长/超管）。
 
