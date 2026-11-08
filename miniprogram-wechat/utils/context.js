@@ -166,8 +166,10 @@ function applyContext(table, store, options) {
     if (newStoreId && Number(newStoreId) !== Number(prevStoreId)) {
       reconcileCartWithStore(newStoreId)
       try {
-        require('./clientConfig').invalidateClientConfig()
-        require('./clientConfig').loadClientConfig(true, newStoreId).catch(() => {})
+        // 门店切换时只加载一次配置模块，避免重复 require 分散失效与重载逻辑。
+        const clientConfig = require('./clientConfig')
+        clientConfig.invalidateClientConfig()
+        clientConfig.loadClientConfig(true, newStoreId).catch(() => {})
       } catch (_) {
         /* ignore */
       }
