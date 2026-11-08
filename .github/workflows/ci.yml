@@ -217,6 +217,30 @@ jobs:
           npm audit --audit-level=high
 
 
+
+  dependency-lock-consistency:
+    name: dependency-lock-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install committed runtime pins
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.lock
+          python -m pip install packaging
+      - name: Resolve and print the complete runtime dependency closure
+        run: |
+          python scripts/生成依赖锁定文件.py
+          cat backend/requirements.lock
+      - name: Verify direct dependency ranges and installed versions
+        run: python scripts/check_requirements_lock.py
+      - name: Require the generated transitive lock to be committed
+        run: git diff --exit-code -- backend/requirements.lock
+
   dependency-usage-audit:
     name: dependency-usage-audit
     runs-on: ubuntu-latest
