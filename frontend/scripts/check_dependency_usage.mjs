@@ -55,6 +55,7 @@ for (const file of sourceFiles) {
 const scriptsText = Object.values(packageJson.scripts || {}).join("\n");
 const allowlist = {
   "@types/qrcode": "为 qrcode 提供 TypeScript 声明；由 TS 类型解析器自动加载，不直接 import",
+  "@vue/devtools-api": "Pinia 4 的显式 peer dependency；Pinia 在运行时集成 Vue DevTools，不由业务源码直接 import",
 };
 const all = { ...(packageJson.dependencies || {}), ...(packageJson.devDependencies || {}) };
 const unused = [];
