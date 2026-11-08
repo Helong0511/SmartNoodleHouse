@@ -358,7 +358,7 @@ async def main() -> int:
                 print(f"[FAIL] charset {issue}")
                 failures.append(f"charset: {issue}")
         else:
-            print("[OK] database/session/tables/text columns use utf8mb4")
+            print("[OK] database/session charset=utf8mb4; schema/tables/text columns=utf8mb4_unicode_ci")
 
         for t in REQUIRED_TABLES:
             ok = await _table_exists(db, t)
