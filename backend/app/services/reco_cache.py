@@ -37,6 +37,7 @@ from app.core.redis_client import (
     stop_redis_lock_heartbeat,
 )
 from app.core.response import dumps_json
+from app.services.outbox_policy import CACHE_INVALIDATION_MAX_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +250,7 @@ def defer_invalidate_customer(db, customer_id: int) -> None:
             event_kind=event_kind,
             payload=json.dumps({"customer_id": cid}, separators=(",", ":")),
             status="PENDING",
-            max_attempts=8,
+            max_attempts=CACHE_INVALIDATION_MAX_ATTEMPTS,
         )
     )
     if info.get("_reco_cache_invalidation_listener"):

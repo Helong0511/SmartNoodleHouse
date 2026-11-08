@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.outbox_policy import CACHE_INVALIDATION_MAX_ATTEMPTS
 from app.services.outbox_worker import enqueue_outbox
 
 
@@ -20,4 +21,5 @@ async def enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None
         aggregate_id=event_id,
         event_kind="invalidate",
         payload={"store_id": int(store_id)},
+        max_attempts=CACHE_INVALIDATION_MAX_ATTEMPTS,
     )

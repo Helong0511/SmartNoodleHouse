@@ -15,8 +15,10 @@ SPEC.loader.exec_module(MODULE)
 
 def test_current_migration_head_is_detected_without_revision_prefix_assumptions():
     heads = MODULE._expected_alembic_heads()
-    assert "0048_reconcile_store_scope" in heads
-    assert MODULE._alembic_heads_match({"0048_reconcile_store_scope"}, heads)
+    assert heads
+    assert MODULE._alembic_heads_match(heads, heads)
+    # The previous known revision must not be accepted after a newer migration is added.
+    assert not MODULE._alembic_heads_match({"0048_reconcile_store_scope"}, heads)
 
 
 def test_old_or_partial_database_revision_is_not_reported_as_current():
