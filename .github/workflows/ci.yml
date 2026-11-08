@@ -124,22 +124,23 @@ jobs:
                   port = sock.getsockname()[1]
               env = os.environ.copy()
               env["PYTHONPATH"] = os.pathsep.join(filter(None, [tmp, env.get("PYTHONPATH", "")]))
-              process = subprocess.Popen(
-                  [
-                      sys.executable, "-m", "uvicorn", "uvicorn_smoke:app",
-                      "--host", "127.0.0.1", "--port", str(port), "--workers", "2",
-                      "--timeout-graceful-shutdown", "5",
-                  ],
-                  env=env,
-                  stdout=subprocess.DEVNULL,
-                  stderr=subprocess.PIPE,
-                  text=True,
-              )
+              log_path = Path(tmp) / "uvicorn-smoke.log"
+              with log_path.open("w", encoding="utf-8") as log_file:
+                  process = subprocess.Popen(
+                      [
+                          sys.executable, "-m", "uvicorn", "uvicorn_smoke:app",
+                          "--host", "127.0.0.1", "--port", str(port), "--workers", "2",
+                          "--timeout-graceful-shutdown", "5",
+                      ],
+                      env=env,
+                      stdout=log_file,
+                      stderr=subprocess.STDOUT,
+                      text=True,
+                  )
               try:
                   for _ in range(40):
                       if process.poll() is not None:
-                          _, stderr = process.communicate()
-                          raise RuntimeError(f"Uvicorn worker manager exited early: {stderr}")
+                          raise RuntimeError(f"Uvicorn worker manager exited early: {log_path.read_text(encoding='utf-8')}")
                       try:
                           with urlopen(f"http://127.0.0.1:{port}/", timeout=0.5) as response:
                               body = response.read()
@@ -159,8 +160,7 @@ jobs:
                           process.kill()
                           process.wait(timeout=5)
               if process.returncode not in (0, -15):
-                  _, stderr = process.communicate()
-                  raise RuntimeError(f"Uvicorn worker manager shutdown failed: {stderr}")
+                  raise RuntimeError(f"Uvicorn worker manager shutdown failed: {log_path.read_text(encoding='utf-8')}")
           print("Uvicorn native two-worker startup, HTTP response and shutdown: OK")
           PY
       - name: Store isolation guard check
