@@ -122,3 +122,22 @@ async def test_schedule_generation_oom_fails_closed_without_advancing_marker(mon
     assert fake.store[version_key] == "31"
     assert fake.store[schedule_key] == "5"
     assert fake.store[bundle_key] == '{"version":31}'
+
+
+def test_local_store_cache_invalidation_does_not_require_redis(monkeypatch):
+    from app.services import menu_service, recommendation_service
+    from unittest.mock import MagicMock
+
+    store_id = 77134
+    pool_delete = MagicMock()
+    cf_delete = MagicMock()
+    menu_delete = MagicMock()
+    monkeypatch.setattr(recommendation_service._POOL_CACHE, "delete", pool_delete)
+    monkeypatch.setattr(recommendation_service._CF_CACHE, "delete", cf_delete)
+    monkeypatch.setattr(menu_service, "invalidate_local_menu_cache", menu_delete)
+
+    recommendation_service.invalidate_store_local_caches(store_id)
+
+    pool_delete.assert_called_once_with(store_id)
+    cf_delete.assert_called_once_with(store_id)
+    menu_delete.assert_called_once_with(store_id)
