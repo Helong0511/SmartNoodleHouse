@@ -15,7 +15,7 @@ SCAN_ROOTS = (ROOT / "backend" / "app", ROOT / "backend" / "alembic")
 # 无静态 import 的依赖必须写明用途，避免“看起来没用”就误删数据库驱动或 CLI。
 DEPENDENCY_MAP = {
     "fastapi": {"modules": {"fastapi"}},
-    "starlette": {"modules": {"starlette"}},
+    "starlette": {"modules": {"starlette"}, "reason": "FastAPI 的核心运行时依赖；单独固定安全修复版本"},
     "uvicorn": {"reason": "ASGI 启动命令，不由业务模块 import"},
     "gunicorn": {"reason": "生产进程管理 CLI，不由业务模块 import"},
     "sqlalchemy": {"modules": {"sqlalchemy"}},
