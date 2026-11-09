@@ -200,21 +200,27 @@ async def websocket_endpoint(
             await websocket.close(code=4403, reason="本店未开通大厅叫号屏")
             return
         global_token = (settings.display_screen_token or "").strip()
-        # P2-2 优先使用门店级 display token（store_settings），降级到全局 token
-        expected = global_token
+        # 生产环境必须使用本门店独立令牌；不允许用一个全局 token 订阅任意门店。
+        expected = ""
         try:
-            from app.services.system_settings_service import SystemSettingsService
+            from app.models import StoreSetting
 
             async with AsyncSessionLocal() as db:
-                store_tok = await SystemSettingsService.effective_setting(
-                    db, "display_screen_token", store_id=int(store_id), fallback=global_token
+                store_tok = await db.scalar(
+                    select(StoreSetting.setting_value).where(
+                        StoreSetting.store_id == int(store_id),
+                        StoreSetting.setting_key == "display_screen_token",
+                    )
                 )
-                expected = (store_tok or "").strip() or global_token
+            expected = (store_tok or "").strip()
         except Exception:
-            pass
-        # 生产强制（与 startup_checks 一致）；开发可空
+            # 数据库不可用时生产必须拒绝；不能降级为全局令牌或匿名连接。
+            expected = ""
+        if not expected and settings.is_development:
+            # 全局环境变量仅作为本地开发便利回退，不用于生产门店鉴权。
+            expected = global_token
         if settings.is_production and not expected:
-            await websocket.close(code=4401, reason="未配置 DISPLAY_SCREEN_TOKEN")
+            await websocket.close(code=4401, reason="本门店未配置独立叫号屏令牌")
             return
         if expected:
             supplied = (auth_token or "").strip()
