@@ -75,6 +75,7 @@ class OrderCreateService:
         customer_coupon_id: int | None = None,
         customer_voucher_id: int | None = None,
         scheduled_pickup_at: str | None = None,
+        skip_promotions: bool = False,
     ) -> None:
         """命中幂等订单后必须再次校验归属，禁止直接 return 他人订单。"""
         ch = (channel or "").strip().upper()
@@ -105,6 +106,11 @@ class OrderCreateService:
             raise AppException(40902, "幂等键冲突：优惠券不一致")
         if getattr(order, "customer_voucher_id", None) != customer_voucher_id:
             raise AppException(40902, "幂等键冲突：代金券不一致")
+        if skip_promotions and any(
+            money(getattr(order, field, 0) or 0) > money(0)
+            for field in ("discount_amount", "coupon_discount", "voucher_discount")
+        ):
+            raise AppException(40902, "幂等键冲突：余额支付优惠策略不一致")
         requested_pickup = None
         if scheduled_pickup_at:
             try:
@@ -279,6 +285,7 @@ class OrderCreateService:
                     customer_coupon_id=customer_coupon_id,
                     customer_voucher_id=customer_voucher_id,
                     scheduled_pickup_at=scheduled_pickup_at,
+                    skip_promotions=skip_promotions,
                 )
                 # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
                 if not OrderCreateService._is_reusable_idempotent_order(order):
@@ -375,6 +382,7 @@ class OrderCreateService:
                         customer_coupon_id=customer_coupon_id,
                         customer_voucher_id=customer_voucher_id,
                         scheduled_pickup_at=scheduled_pickup_at,
+                        skip_promotions=skip_promotions,
                     )
                     if not OrderCreateService._is_reusable_idempotent_order(order):
                         raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
