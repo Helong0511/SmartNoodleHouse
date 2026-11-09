@@ -169,7 +169,7 @@ function isCustomerApiUrl(url: string, clientHint: string): boolean {
 /** 强制顾客 token 的 API（即便后台员工已登录，也不允许员工态抢占） */
 function isForceCustomerUrl(url: string): boolean {
   return (
-    url.includes('/miniprogram') || url.includes('/orders/mine') || url.includes('/payments/orders/') || /\/orders\/\d+\/reorder/.test(url)
+    url.includes('/miniprogram') || url.includes('/orders/mine') || url.includes('/payments/orders/') || url.includes('/payments/orders/') || /\/orders\/\d+\/reorder/.test(url)
   )
 }
 
