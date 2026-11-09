@@ -1260,6 +1260,9 @@ Page({
       this.data.needPack ? '1' : '0',
       this.data.selectedCouponId || 0,
       this.data.selectedVoucherId || 0,
+      this.data.payMethod || 'WECHAT',
+      this.data.useSocialBenefit ? 'SOCIAL' : 'NORMAL',
+      this._composeRemark() || '',
       this._scheduledPickupIso() || '',
       items.join(',')
     ].join('|')
