@@ -350,6 +350,39 @@ async def test_claim_success_and_request_replay(db_session):
 
 
 @pytest.mark.asyncio
+async def test_claim_request_id_cannot_be_reused_for_another_campaign(db_session):
+    """同一 client_request_id 绑定顾客、活动、门店，不能静默复用其他活动资格。"""
+    first_seed = await _seed(db_session, remaining=2, per_customer_limit=1)
+    second_seed = await _seed(db_session, remaining=2, per_customer_limit=1)
+    request_id = "cross-campaign-01"
+
+    first = await FlashSaleService.claim(
+        db_session,
+        campaign_id=first_seed["campaign_id"],
+        store_id=first_seed["store_a_id"],
+        customer_id=first_seed["customer_id"],
+        client_request_id=request_id,
+    )
+    await db_session.commit()
+
+    from app.core.exceptions import AppException
+
+    with pytest.raises(AppException) as exc:
+        await FlashSaleService.claim(
+            db_session,
+            campaign_id=second_seed["campaign_id"],
+            store_id=second_seed["store_a_id"],
+            customer_id=first_seed["customer_id"],
+            client_request_id=request_id,
+        )
+    assert exc.value.code == 40909
+    assert await _remaining(
+        db_session, second_seed["campaign_id"], second_seed["store_a_id"]
+    ) == 2
+    assert first["status"] == "CLAIMED"
+
+
+@pytest.mark.asyncio
 async def test_claim_existing_claimed_returns_already(db_session):
     """同一顾客已有未过期资格：再次抢购直接返回原资格，不重复扣减。"""
     seed = await _seed(db_session, remaining=2, per_customer_limit=1)
