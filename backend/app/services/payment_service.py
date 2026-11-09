@@ -740,6 +740,37 @@ class PaymentService:
         paid = await cls.paid_amount(db, order.id)
         remaining = money(order.total_amount) - paid
         method = await cls._resolve_payment_method(db, order.id)
+
+        # 取消订单后的迟到成功回调：确认渠道实际收款并记 SALE，但绝不能复活订单、
+        # 重新扣库存或重新触发已释放的优惠券/公益权益。将逐笔原路退款写入同事务
+        # Outbox；worker 在事务外调用渠道退款，固定幂等键防止回调/worker 重试重复退款。
+        if str(order.status or "").strip().upper() == "CANCELLED":
+            order.payment_method = method
+            order.payment_status = "PAID" if remaining <= 0 else "PARTIAL_PAID"
+            order.paid_at = order.paid_at or now_local()
+            from app.services.outbox_worker import enqueue_outbox
+
+            await enqueue_outbox(
+                db,
+                aggregate_type="late_payment",
+                aggregate_id=int(payment.id),
+                event_kind="auto_refund",
+                payload={
+                    "payment_id": int(payment.id),
+                    "order_id": int(order.id),
+                    "reason": "订单已取消，支付回调迟到成功，自动原路退款",
+                },
+            )
+            await db.flush()
+            return {
+                "fully_paid": False,
+                "late_payment": True,
+                "refund_queued": True,
+                "paid_amount": str(paid),
+                "remaining_amount": str(money(remaining) if remaining > 0 else Decimal("0.00")),
+                "payment_status": order.payment_status,
+            }
+
         if remaining > 0:
             order.payment_status = "PARTIAL_PAID"
             order.payment_method = method
