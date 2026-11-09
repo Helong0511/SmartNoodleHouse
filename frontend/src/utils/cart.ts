@@ -104,17 +104,49 @@ function itemKey(item: any) {
 export function mergeCartItem(cart: any[], entry: any) {
   const list = [...(cart || [])]
   const key = itemKey(entry)
+  const parsedAdd = Number(entry?.quantity)
+  const add = Number.isFinite(parsedAdd) ? Math.max(1, Math.min(999, Math.floor(parsedAdd))) : 1
   const idx = list.findIndex((x) => itemKey(x) === key)
   if (idx >= 0) {
     const cur = { ...list[idx] }
-    const add = entry.quantity || 1
-    cur.quantity = (cur.quantity || 1) + add
+    const parsedCurrent = Number(cur.quantity)
+    const current = Number.isFinite(parsedCurrent) ? Math.max(1, Math.floor(parsedCurrent)) : 1
+    cur.quantity = Math.min(999, current + add)
     cur.subtotal = fromFen(toFen(cur.unit_price) * cur.quantity)
     list[idx] = cur
   } else {
-    list.push({ ...entry })
+    list.push({ ...entry, quantity: add })
   }
   return list
+}
+
+/** 安全读取 H5 购物车；损坏或非数组数据会清理，避免页面初始化白屏。 */
+export function readCartStorage(): any[] {
+  try {
+    const raw = localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) throw new TypeError('购物车数据格式错误')
+    return parsed
+  } catch {
+    try {
+      localStorage.removeItem('snh_cart')
+      localStorage.removeItem('cart')
+    } catch {
+      /* ignore storage failures */
+    }
+    return []
+  }
+}
+
+/** 退出登录时清理顾客购物车与桌台上下文，避免跨账号残留。 */
+export function clearCartStorage() {
+  for (const key of [
+    'snh_cart', 'cart', 'snh_cart_store_id', 'snh_table_token', 'table_token',
+    'snh_table', 'snh_store_id', 'snh_channel', 'channel', 'member_prompt_done',
+    'h5_login_code', 'nickname',
+  ]) {
+    try { localStorage.removeItem(key) } catch { /* ignore */ }
+  }
 }
 
 export function sortPrefsForApply(prefs: any[]) {
