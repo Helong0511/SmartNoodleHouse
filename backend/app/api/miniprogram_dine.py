@@ -5,6 +5,7 @@ import re
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+from typing import Literal
 from sqlalchemy import select
 
 from app.api.deps import CurrentCustomer, DbSession
@@ -319,7 +320,7 @@ async def scan_entry(
     request: Request,
     db: DbSession,
     token: str,
-    channel: str = "wechat",
+    channel: Literal["wechat", "alipay"] = "wechat",
     store_id: int | None = None,
 ):
     from app.services.table_resolve import resolve_dining_table
@@ -336,7 +337,6 @@ async def scan_entry(
                 "table_no": table.table_no,
                 "table_name": table.table_name,
                 "store_id": table.store_id,
-                "qr_token": table.qr_token,
             },
             "store": store,
             "channel": channel,
