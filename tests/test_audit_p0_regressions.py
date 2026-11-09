@@ -251,3 +251,22 @@ def test_explicit_development_with_real_payment_merchant_credentials_is_fail_clo
         wechat_cert_serial_no="CERT-SERIAL",
     )
     assert settings.is_production
+
+
+def test_client_logs_redact_phone_and_identifiers_and_allowlist_extra():
+    from app.api.client_logs import ClientLogEntry
+
+    entry = ClientLogEntry(
+        message="customer_id=123 phone=13800138000 /orders/ORDER-123",
+        extra={
+            "status": 503,
+            "code": "AUTH_STALE",
+            "phone": "13800138000",
+            "order_id": "ORDER-123",
+            "raw_response": {"mobile": "13800138000"},
+        },
+    )
+    assert "13800138000" not in entry.message
+    assert "ORDER-123" not in entry.message
+    assert "123" not in entry.message
+    assert entry.extra == {"status": 503, "code": "AUTH_STALE"}
