@@ -125,7 +125,7 @@
 - Redis 7.4 真实服务测试覆盖 generation、owner 锁、旧 owner 写入拒绝、缓存失效和旧代际读取拒绝。
 - 全局 ASGI RequestBodyLimitMiddleware 已注册，普通请求体 7MiB；支付/外卖 webhook 另有 512KiB 限制；声明长度与 chunked 超限均有测试。
 - 支付主动查单的 Redis 冷却在 Redis 瞬时断连时 fail-closed 返回 503，不再暴露未处理 500。
-- 微信/支付宝充值幂等缓存按顾客/档位/门店保存多组 key，A→B→A 切换复用原 key，成功按本次 key 精确清理；缓存异常时拒绝创建新充值单。
+- 微信/支付宝充值幂等缓存按顾客/档位/门店保存多组 key，A→B→A 切换复用原 key，成功按本次 key 精确清理；已移除本地 24h TTL 自动轮换，避免待确认支付生成第二笔充值单；缓存异常时拒绝创建新充值单。
 - JWT 算法启动校验与实际验签能力一致，支持 HS256 / RS256 / EdDSA。
 - DbSession 使用 Depends(get_db, scope=function)，commit/rollback 在响应发送前执行；隐式提交仍要求路由不得吞写入异常后返回成功。
 
@@ -147,3 +147,9 @@
 10. Playwright 完整 E2E、生产容量基线和外卖平台账单自动拉取仍未闭环。
 
 结论：代码层已完成本轮资金 fencing、Redis 真实集成、充值幂等和请求体限制修复，且代码 CI 通过；正式上线仍受外部凭证、域名、真机合规、备份/监控/压测验收约束。
+
+### 追加复核：退款并发快照一致性（2026-11-09）
+
+- 发现 MySQL `REPEATABLE READ` 下，普通定位查询可能提前建立快照；等待 Order/Payment 锁后再用普通聚合统计退款，会漏掉等待期间刚提交的退款。
+- 已将关键退款判断改为 Order→Payment→PaymentRefund 锁序下的 `FOR UPDATE` 当前读，并刷新 ORM identity map；增加单测覆盖退款当前读、订单净额当前读、锁定 Payment 刷新及在途退款拒绝重复提交。
+- 最新代码 SHA `4a98702eff3205c7685ba0c412ff1def5179efd3` 的 CI 尚在排队/等待，不能沿用旧 SHA 的 CI 结果。
