@@ -312,3 +312,10 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 修复：退款成功事务同步写入独立 `taste_learning_refund` Outbox 事件；偏好重算与推荐学习分离。推荐学习 handler 不吞异常，由 Outbox 退避重试和死信机制负责恢复。
 - `record_full_refund_events` 内部仍以订单 `payment_status=REFUNDED` 为门槛，部分退款事件安全 no-op；其 `order_refund:{order_id}:{product_id}` 事件 ID 保证重试幂等。
 - 回归测试覆盖偏好 handler 不再隐式执行推荐学习，以及退款推荐学习异常必须传播。以该提交对应的 CI 为最终验收依据。
+
+
+### 2026-11-09 POS 退款审批重复请求窗口
+
+- 发现审批流程先提交 `PosRefundRequest=PROCESSING`，随后才创建渠道退款单并绑定 `refund_id`。在两步之间重复审批请求可能读到 `PROCESSING + refund_id=NULL`，旧逻辑会继续分配退款并可能重复调用渠道。
+- 修复：`PROCESSING` 且尚无 `refund_id` 时直接返回当前申请，不再开始第二次执行。渠道请求前，`PaymentService.refund` 会先在同一事务中持久化退款单并绑定申请，因此此保护覆盖了真正的外部副作用窗口。
+- 增加回归测试，确保该状态不触发退款分配或渠道调用。若进程在认领提交后、创建退款单前崩溃，申请会保持处理中并需后续运维恢复；此路径应由后续认领超时恢复任务处理，不能通过并发重试冒险重复退款。
