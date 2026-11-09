@@ -448,3 +448,87 @@ async def test_stale_pos_refund_owner_cannot_overwrite_new_execution_state():
     db.get.assert_not_awaited()
     db.commit.assert_not_awaited()
 
+
+
+@pytest.mark.asyncio
+async def test_mixed_payment_refunds_reuse_one_fencing_claim_and_accumulate_once():
+    """组合支付分两笔渠道退款时，同一审批必须复用 owner epoch，金额只累计一次。"""
+    from types import SimpleNamespace
+
+    cash = SimpleNamespace(
+        id=301, provider="CASH", status="PAID", amount=money("4.00"), order_id=901,
+    )
+    wechat = SimpleNamespace(
+        id=302, provider="WECHAT", status="PAID", amount=money("6.00"), order_id=901,
+    )
+    request = SimpleNamespace(
+        id=303, store_id=1, order_id=901, amount=money("10.00"),
+        executed_amount=money("0.00"), reason="组合支付退款", status="PENDING",
+        reviewed_by=None, reviewed_at=None, review_remark=None,
+        payment_id=301, refund_id=None, fail_reason=None,
+        execution_epoch=4, execution_token=None, execution_lease_until=None,
+    )
+    refunds = [
+        SimpleNamespace(id=401, status="SUCCESS", fail_reason=None),
+        SimpleNamespace(id=402, status="SUCCESS", fail_reason=None),
+    ]
+    db = AsyncMock()
+    request_result = _lock_result(request)
+    refund_results = [_lock_result(refunds[0]), _lock_result(refunds[1])]
+    # 初次锁申请；每笔退款后分别锁退款事实和 POS 申请；最后重新锁申请收敛状态。
+    db.execute = AsyncMock(side_effect=[
+        request_result,
+        refund_results[0], request_result,
+        refund_results[1], request_result,
+        request_result,
+    ])
+    db.get = AsyncMock(side_effect=[cash, wechat])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    observed = []
+
+    async def refund_mock(
+        _db, payment, amount, reason, *, operator_id,
+        pos_refund_request_id, pos_refund_execution_token,
+        pos_refund_execution_epoch,
+    ):
+        observed.append((
+            payment.id, amount, pos_refund_request_id,
+            pos_refund_execution_token, pos_refund_execution_epoch,
+        ))
+        refund = refunds[len(observed) - 1]
+        # 模拟 PaymentService 在退款成功事务内绑定退款单并累计执行金额。
+        request.refund_id = refund.id
+        request.payment_id = payment.id
+        request.executed_amount = money(request.executed_amount + amount)
+        return refund
+
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock, return_value=True,
+    ), patch(
+        "app.services.pos_refund_service.assert_store_access"
+    ), patch.object(
+        PosRefundService, "_refundable_pairs",
+        new_callable=AsyncMock,
+        return_value=(money("10.00"), [
+            (wechat, money("6.00")), (cash, money("4.00")),
+        ]),
+    ), patch(
+        "app.services.pos_refund_service.PaymentService.refund",
+        side_effect=refund_mock,
+    ):
+        result = await PosRefundService.approve_and_execute(
+            db, user=_user("STORE_ADMIN"), request_id=303,
+        )
+
+    assert [item[0] for item in observed] == [301, 302]
+    assert [item[1] for item in observed] == [money("4.00"), money("6.00")]
+    assert all(item[2] == 303 for item in observed)
+    assert observed[0][3] and observed[0][3] == observed[1][3]
+    assert observed[0][4] == observed[1][4] == 5
+    assert request.executed_amount == money("10.00")
+    assert result.status == "SUCCESS"
+    assert db.commit.await_count >= 3
