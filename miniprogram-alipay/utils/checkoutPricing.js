@@ -128,16 +128,19 @@ function pickBestVoucher(vouchers, payable, calcFn) {
 
 function calcCouponDiscount(couponEligible, coupon, memberRate) {
   if (!coupon || !coupon.id) return 0
-  const eligible = couponEligible
-  const minAmt = parseFloat(coupon.min_order_amount || 0)
+  const rawEligible = Number(couponEligible)
+  const eligible = Number.isFinite(rawEligible) ? Math.max(0, rawEligible) : 0
+  const rawMin = Number(coupon.min_order_amount || 0)
+  const minAmt = Number.isFinite(rawMin) ? Math.max(0, rawMin) : 0
   if (eligible < minAmt) return 0
   if (coupon.coupon_type === 'PERCENT') {
     const rate = parseFloat(coupon.discount_value)
     if (!percentBeatsMember(rate, memberRate == null ? 1 : memberRate)) return 0
-    return Math.round(eligible * (1 - rate) * 100) / 100
+    return Math.max(0, Math.round(eligible * (1 - rate) * 100) / 100)
   }
-  const fixed = parseFloat(coupon.discount_value) || 0
-  return Math.min(fixed, eligible)
+  const rawFixed = Number(coupon.discount_value)
+  const fixed = Number.isFinite(rawFixed) ? Math.max(0, rawFixed) : 0
+  return Math.max(0, Math.min(fixed, eligible))
 }
 
 /** 比较总优惠：PERCENT 与会员折互斥取优；FIXED 叠在会员折后 */
@@ -147,7 +150,8 @@ function calcCouponTotalSavings(discountable, memberRate, coupon) {
   const mr = parseFloat(memberRate)
   const memberR = Number.isFinite(mr) && mr > 0 && mr < 1 ? mr : 1
   const memberDisc = memberR < 1 ? Math.round(base * (1 - memberR) * 100) / 100 : 0
-  const minAmt = parseFloat(coupon.min_order_amount || 0)
+  const rawMin = Number(coupon.min_order_amount || 0)
+  const minAmt = Number.isFinite(rawMin) ? Math.max(0, rawMin) : 0
   if (coupon.coupon_type === 'PERCENT') {
     const cr = parseFloat(coupon.discount_value)
     if (!percentBeatsMember(cr, memberR)) return 0
@@ -156,8 +160,9 @@ function calcCouponTotalSavings(discountable, memberRate, coupon) {
   }
   const afterMember = Math.max(0, base - memberDisc)
   if (afterMember < minAmt) return 0
-  const fixed = Math.min(parseFloat(coupon.discount_value) || 0, afterMember)
-  return Math.round((memberDisc + fixed) * 100) / 100
+  const rawFixed = Number(coupon.discount_value)
+  const fixed = Math.min(Number.isFinite(rawFixed) ? Math.max(0, rawFixed) : 0, afterMember)
+  return Math.max(0, Math.round((memberDisc + fixed) * 100) / 100)
 }
 
 module.exports = {
