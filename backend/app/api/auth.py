@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -11,6 +13,7 @@ from app.schemas.common import LoginRequest
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+logger = logging.getLogger(__name__)
 
 # 登录防爆破：按「用户名+客户端 IP」累计，避免跨 IP 锁死合法账号
 _LOGIN_FAIL_LIMIT = 3
@@ -63,9 +66,12 @@ async def _login_is_locked(username: str, ip: str = "unknown") -> bool:
 
         r = await get_redis()
         return bool(await r.get(_login_lock_key(username, ip)))
-    except Exception:
-        # Redis 不可用：不误锁全员；依赖 RateLimitMiddleware 兜底
-        return False
+    except Exception as exc:
+        # 登录锁定是安全边界；Redis 不可用时 fail-closed，不能静默放开爆破保护。
+        logger.warning("登录锁定状态读取失败，拒绝登录", exc_info=True)
+        from app.core.exceptions import AppException
+
+        raise AppException(50301, "登录安全服务暂不可用，请稍后重试", status_code=503) from exc
 
 
 async def _record_login_failure(username: str, ip: str = "unknown") -> None:
@@ -81,8 +87,11 @@ async def _record_login_failure(username: str, ip: str = "unknown") -> None:
         if int(count) >= _LOGIN_FAIL_LIMIT:
             await r.set(_login_lock_key(username, ip), "1", ex=_LOGIN_LOCK_SECONDS)
             await r.delete(fail_key)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("登录失败计数写入失败，拒绝登录", exc_info=True)
+        from app.core.exceptions import AppException
+
+        raise AppException(50301, "登录安全服务暂不可用，请稍后重试", status_code=503) from exc
 
 
 async def _clear_login_failures(username: str, ip: str = "unknown") -> None:
@@ -91,8 +100,11 @@ async def _clear_login_failures(username: str, ip: str = "unknown") -> None:
 
         r = await get_redis()
         await r.delete(_login_fail_key(username, ip), _login_lock_key(username, ip))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("登录成功后清理失败计数失败，拒绝建立会话", exc_info=True)
+        from app.core.exceptions import AppException
+
+        raise AppException(50301, "登录安全服务暂不可用，请稍后重试", status_code=503) from exc
 
 
 @router.post("/login")
