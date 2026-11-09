@@ -676,9 +676,10 @@ async def test_remaining_amount_can_use_current_locked_payment_and_refund_facts(
         id=91, total_amount=Decimal("20.00"), payment_status="PARTIAL_PAID", status="PENDING_PAYMENT"
     )
     paid = AsyncMock(return_value=Decimal("7.00"))
+    db = AsyncMock()
     monkeypatch.setattr(PaymentService, "paid_amount", paid)
 
-    remaining = await PaymentService.remaining_amount(AsyncMock(), order, current_read=True)
+    remaining = await PaymentService.remaining_amount(db, order, current_read=True)
 
     assert remaining == Decimal("13.00")
-    paid.assert_awaited_once_with(paid.await_args.args[0], 91, current_read=True)
+    paid.assert_awaited_once_with(db, 91, current_read=True)
