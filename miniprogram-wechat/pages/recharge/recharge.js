@@ -8,7 +8,8 @@ const RECHARGE_IDEMPOTENCY_KEY = 'recharge_idempotency_v1'
 const RECHARGE_IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000
 
 function getRechargeIdempotencyKey(packageId, storeId) {
-  const signature = `${Number(packageId)}:${Number(storeId || 0)}`
+  const customerId = Number(auth.readStorage('customer_id') || 0)
+  const signature = `${customerId}:${Number(packageId)}:${Number(storeId || 0)}`
   try {
     const saved = wx.getStorageSync(RECHARGE_IDEMPOTENCY_KEY)
     if (saved && saved.signature === signature && Date.now() - saved.createdAt < RECHARGE_IDEMPOTENCY_TTL) return saved.key
@@ -143,7 +144,7 @@ Page({
         channel_type: 'miniprogram',
         idempotency_key: getRechargeIdempotencyKey(packageId, storeId)
       })
-      if (payRes && (payRes.status === 'PAID' || payRes.already_paid || payRes.mock_settled)) {
+      if (payRes && (payRes.status === 'PAID' || payRes.already_paid)) {
         if (payRes.wallet) applyWalletLocal(this, payRes.wallet)
         else await this.bootstrap()
         markMemberWalletDirty(payRes.wallet)
