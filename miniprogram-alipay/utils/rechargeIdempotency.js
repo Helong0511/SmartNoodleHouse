@@ -3,7 +3,6 @@
  * 切换档位/门店后再切回时，仍复用原待支付凭证，避免创建第二笔充值单。
  */
 const STORAGE_KEY = 'recharge_idempotency_v1'
-const TTL_MS = 24 * 60 * 60 * 1000
 const MAX_ENTRIES = 50
 
 function readEntries() {
@@ -43,7 +42,10 @@ function writeEntries(entries) {
   }
 }
 
-function pruneExpired(entries, now) {
+// 只校验凭证，不按本地时间过期删除。
+// 充值单是否仍可支付由服务端状态决定；本地 TTL 到期时渠道支付可能仍在处理中，
+// 若此时轮换幂等键，会创建第二笔充值单并带来重复扣款风险。
+function validateEntries(entries) {
   Object.keys(entries).forEach((signature) => {
     const entry = entries[signature]
     if (
@@ -54,7 +56,6 @@ function pruneExpired(entries, now) {
     ) {
       throw new Error('充值幂等凭证内容异常，已阻止创建新充值单')
     }
-    if (now - Number(entry.createdAt) >= TTL_MS) delete entries[signature]
   })
 }
 
@@ -69,7 +70,7 @@ function getRechargeIdempotencyKey(customerId, packageId, storeId) {
   const signature = `${customer}:${pkg}:${store}`
   const now = Date.now()
   const entries = readEntries()
-  pruneExpired(entries, now)
+  validateEntries(entries)
 
   const existing = entries[signature]
   if (existing) return existing.key
