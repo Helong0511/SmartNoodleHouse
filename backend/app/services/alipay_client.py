@@ -156,6 +156,7 @@ async def trade_bar_pay(
         "amount": f"{amount_yuan:.2f}",
         "immediate_paid": paid,
         "provider_trade_no": body.get("trade_no"),
+        "provider_amount": body.get("total_amount"),
         "raw": body,
     }
 
