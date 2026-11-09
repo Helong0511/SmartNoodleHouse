@@ -24,11 +24,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
-import { calcUnitPrice } from '@/utils/cart'
+import { calcUnitPrice, readCartStorage } from '@/utils/cart'
 import { mediaUrl } from '@/utils/media'
 
 const router = useRouter()
-const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
+const cart = ref<any[]>(readCartStorage())
 
 const canCheckout = computed(() => cart.value.length > 0 && cart.value.every((i) => !i._stockError))
 
