@@ -372,3 +372,70 @@ async def enqueue_coupon_release(db: AsyncSession, order_id: int) -> None:
         )
     except Exception:
         logger.exception("入队 coupon_release 失败 order_id=%s", order_id)
+
+@register_outbox_handler("late_payment", "auto_refund")
+async def _handle_late_payment_auto_refund(db: AsyncSession, row) -> None:
+    """取消订单迟到收款自动原路退款；独立会话执行渠道请求，固定幂等键防重复。"""
+    from sqlalchemy import select
+    from app.core.database import AsyncSessionLocal
+    from app.models import Order, Payment, PaymentRefund
+    from app.services.payment_service import PaymentService
+
+    payment_id = int(row.aggregate_id)
+    payload = json.loads(row.payload) if isinstance(row.payload, str) else (row.payload or {})
+    reason = str((payload or {}).get("reason") or "订单已取消，迟到支付自动退款")[:255]
+    idem_key = f"late-payment-refund:{payment_id}"
+
+    # 退款申请自身会 commit 并访问支付渠道，必须使用独立会话，不能提交/释放
+    # Outbox worker 当前持有的 claim 事务；外层只有在本 handler 正常返回后才标 DONE。
+    async with AsyncSessionLocal() as refund_db:
+        existing = (
+            await refund_db.execute(
+                select(PaymentRefund).where(PaymentRefund.idempotency_key == idem_key)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            status = str(existing.status or "").upper()
+            if status in {"SUCCESS", "PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"}:
+                # SUCCESS 是完成；其余状态交由退款回调/查单补偿，不可另开退款单。
+                return
+            # FAILED/CLOSED 代表渠道明确终止。不能用相同幂等键重新创建另一笔退款，
+            # 也不能把事件伪装成成功；让 Outbox 进入重试/死信告警，等待人工核验。
+            raise RuntimeError(
+                f"迟到支付自动退款已存在终态 {status}，需人工核验 payment_id={payment_id}"
+            )
+
+        payment = await refund_db.get(Payment, payment_id)
+        if not payment:
+            raise RuntimeError(f"迟到支付对应的支付单不存在 payment_id={payment_id}")
+        order = await refund_db.get(Order, int(payment.order_id or 0))
+        if not order:
+            raise RuntimeError(f"迟到支付对应的订单不存在 payment_id={payment_id}")
+        if str(payment.status or "").upper() == "REFUNDED":
+            return
+        if str(payment.status or "").upper() not in {"PAID", "PARTIAL_REFUND"}:
+            raise RuntimeError(
+                f"迟到支付单状态不可退款 status={payment.status} payment_id={payment_id}"
+            )
+
+        inflight = await refund_db.scalar(
+            select(PaymentRefund.id).where(
+                PaymentRefund.payment_id == payment_id,
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
+            ).limit(1)
+        )
+        if inflight is not None:
+            # 可能已有人工退款申请；先等待它由渠道回调/查单收敛，再计算剩余可退金额。
+            raise RuntimeError(f"支付单已有退款处理中，等待收敛 payment_id={payment_id}")
+
+        refundable = await PaymentService.refundable_amount(refund_db, payment)
+        if refundable <= 0:
+            return
+        await PaymentService.refund(
+            refund_db,
+            payment,
+            refundable,
+            reason,
+            idempotency_key=idem_key,
+        )
+
