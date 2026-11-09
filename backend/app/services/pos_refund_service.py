@@ -482,6 +482,8 @@ class PosRefundService:
         row.execution_epoch = claim_epoch
         row.execution_token = claim_token
         row.execution_lease_until = now_local() + timedelta(seconds=120)
+        # 新一轮执行先清除上一轮终态退款关联；新退款单绑定后再写入，确保租约校验覆盖重试。
+        row.refund_id = None
         # 认领后立刻释放申请单行锁（PaymentService.refund 也会 commit）
         row.status = "PROCESSING"
         row.fail_reason = None
