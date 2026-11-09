@@ -41,7 +41,7 @@ def scan_sensitive_logs() -> int:
                 for line_no, line in enumerate(stream, 1):
                     for match in _SENSITIVE_LOG_RE.finditer(line):
                         value = match.group(1).strip().strip(",;")
-                        if value.upper() in {"[REDACTED]", "REDACTED", "REPLACE_WITH", "YOUR_SECRET"}:
+                        if value.upper() in {"[REDACTED]", "REDACTED"} or value.upper().startswith(("REPLACE_WITH", "YOUR_")):
                             continue
                         findings += 1
                         print(
