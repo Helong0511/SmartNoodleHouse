@@ -894,8 +894,18 @@ async def test_api_verify_ignores_client_store_and_idempotent(db_session, monkey
         assert announce.await_count == 1
 
         order = await db_session.get(Order, int(out["order_id"]))
-        assert order.payment_status == "FREE"
+        # 订单 payment_status=PAID 表示结算已完成；FREE 是支付方式/渠道，
+        # 非营业收入由 non_revenue 明确标记，不能把两种状态混为一谈。
+        assert order.payment_status == "PAID"
+        assert order.payment_method == "FREE"
         assert bool(order.non_revenue) is True
+        free_payment = await db_session.scalar(
+            select(Payment).where(Payment.order_id == order.id)
+        )
+        assert free_payment is not None
+        assert free_payment.provider == "FREE"
+        assert free_payment.status == "PAID"
+        assert free_payment.amount == Decimal("0.00")
 
         r2 = await ac.post("/api/marketing/flash-sales/claims/verify", json=payload)
         assert r2.status_code == 200
