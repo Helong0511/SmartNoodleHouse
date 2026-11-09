@@ -90,6 +90,7 @@ async def test_create_order_rejects_idempotent_hit_on_paid_order():
         operator_id=None,
     )
     db = MagicMock()
+    db.get = AsyncMock(return_value=SimpleNamespace(status=1))
     db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=paid)))
 
     with patch.object(OrderCreateService, "_scoped_idempotency_key", return_value="cust:1:k"):
