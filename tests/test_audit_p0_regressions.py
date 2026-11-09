@@ -213,3 +213,41 @@ async def test_staff_payment_access_rejects_orphan_and_cross_store_recharge(monk
     await payments._authorize_staff_payment_access(
         own_db, user, SimpleNamespace(recharge_order_id=99), None
     )
+
+def test_explicit_development_with_remote_dependencies_is_fail_closed():
+    settings = Settings(
+        _env_file=None,
+        app_env="development",
+        database_url="mysql+aiomysql://app:secret@db.example.net:3306/smart_noodle_house",
+        redis_url="redis://127.0.0.1:6379/0",
+        wechat_mch_id="",
+        wechat_api_v3_key="",
+        wechat_cert_serial_no="",
+    )
+    assert settings.is_production
+
+
+def test_local_development_without_production_markers_stays_development():
+    settings = Settings(
+        _env_file=None,
+        app_env="development",
+        database_url="mysql+aiomysql://app:secret@127.0.0.1:3306/smart_noodle_house",
+        redis_url="redis://localhost:6379/0",
+        wechat_mch_id="",
+        wechat_api_v3_key="",
+        wechat_cert_serial_no="",
+    )
+    assert settings.is_development
+
+
+def test_explicit_development_with_real_payment_merchant_credentials_is_fail_closed():
+    settings = Settings(
+        _env_file=None,
+        app_env="development",
+        database_url="mysql+aiomysql://app:secret@127.0.0.1:3306/smart_noodle_house",
+        redis_url="redis://127.0.0.1:6379/0",
+        wechat_mch_id="1900000001",
+        wechat_api_v3_key="A" * 32,
+        wechat_cert_serial_no="CERT-SERIAL",
+    )
+    assert settings.is_production
