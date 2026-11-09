@@ -71,7 +71,7 @@ async def test_enforce_liveness_skipped_when_mode_none():
 
     with patch(
         "app.api.miniprogram_face.get_settings",
-        return_value=SimpleNamespace(face_liveness_mode="none"),
+        return_value=SimpleNamespace(face_liveness_mode="none", is_production=False),
     ):
         mode = await face._enforce_liveness_challenge(1, liveness_token=None, action_completed=False)
     assert mode == "none"
