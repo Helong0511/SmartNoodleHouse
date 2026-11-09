@@ -7,8 +7,14 @@ import sys
 
 
 _SENSITIVE_QUERY_RE = re.compile(
-    r"(?i)([?&](?:secret|access_token|refresh_token|api[_-]?key|key|sign|signature|token)=)[^&\\s]+"
+    r"(?i)([?&](?:secret|access_token|refresh_token|api[_-]?key|key|sign|signature|token)=)[^& ]+"
 )
+
+
+def _redact_sensitive_query(value: str) -> str:
+    return _SENSITIVE_QUERY_RE.sub(
+        lambda match: match.group(1) + "[REDACTED]", value
+    )
 
 
 class SensitiveQueryRedactionFilter(logging.Filter):
