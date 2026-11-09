@@ -383,34 +383,52 @@ async def _handle_late_payment_auto_refund(db: AsyncSession, row) -> None:
 
     payment_id = int(row.aggregate_id)
     payload = json.loads(row.payload) if isinstance(row.payload, str) else (row.payload or {})
-    reason = str((payload or {}).get("reason") or "订单已取消，迟到支付自动退款")[:255]
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"迟到支付 Outbox payload 格式非法 event_id={row.id}")
+    if int(payload.get("payment_id") or 0) != payment_id:
+        raise RuntimeError(f"迟到支付 Outbox payment_id 与 aggregate_id 不一致 event_id={row.id}")
+    expected_order_id = int(payload.get("order_id") or 0)
+    if expected_order_id <= 0:
+        raise RuntimeError(f"迟到支付 Outbox 缺少有效 order_id event_id={row.id}")
+    reason = str(payload.get("reason") or "订单已取消，迟到支付自动退款")[:255]
     idem_key = f"late-payment-refund:{payment_id}"
 
     # 退款申请自身会 commit 并访问支付渠道，必须使用独立会话，不能提交/释放
     # Outbox worker 当前持有的 claim 事务；外层只有在本 handler 正常返回后才标 DONE。
     async with AsyncSessionLocal() as refund_db:
+        payment = await refund_db.get(Payment, payment_id)
+        if not payment:
+            raise RuntimeError(f"迟到支付对应的支付单不存在 payment_id={payment_id}")
+        if int(payment.order_id or 0) != expected_order_id:
+            raise RuntimeError(f"迟到支付 Outbox 与支付单订单归属不一致 payment_id={payment_id}")
+        order = await refund_db.get(Order, expected_order_id)
+        if not order:
+            raise RuntimeError(f"迟到支付对应的订单不存在 payment_id={payment_id}")
+        if str(order.status or "").upper() != "CANCELLED":
+            raise RuntimeError(
+                f"迟到支付自动退款要求订单保持 CANCELLED order_id={expected_order_id}"
+            )
+
         existing = (
             await refund_db.execute(
                 select(PaymentRefund).where(PaymentRefund.idempotency_key == idem_key)
             )
         ).scalar_one_or_none()
         if existing is not None:
+            if (
+                int(existing.payment_id) != payment_id
+                or int(existing.order_id) != expected_order_id
+            ):
+                raise RuntimeError(f"迟到支付退款幂等键关联对象不匹配 payment_id={payment_id}")
             status = str(existing.status or "").upper()
-            if status in {"SUCCESS", "PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"}:
+            if status in {"SUCCESS", "PENDING", "PROCESSING", "UNKNOWN"}:
                 # SUCCESS 是完成；其余状态交由退款回调/查单补偿，不可另开退款单。
                 return
-            # FAILED/CLOSED 代表渠道明确终止。不能用相同幂等键重新创建另一笔退款，
-            # 也不能把事件伪装成成功；让 Outbox 进入重试/死信告警，等待人工核验。
+            # FAILED/CLOSED/ABNORMAL 不能当作退款成功；保留 Outbox 失败告警供人工核验。
             raise RuntimeError(
                 f"迟到支付自动退款已存在终态 {status}，需人工核验 payment_id={payment_id}"
             )
 
-        payment = await refund_db.get(Payment, payment_id)
-        if not payment:
-            raise RuntimeError(f"迟到支付对应的支付单不存在 payment_id={payment_id}")
-        order = await refund_db.get(Order, int(payment.order_id or 0))
-        if not order:
-            raise RuntimeError(f"迟到支付对应的订单不存在 payment_id={payment_id}")
         if str(payment.status or "").upper() == "REFUNDED":
             return
         if str(payment.status or "").upper() not in {"PAID", "PARTIAL_REFUND"}:
@@ -431,11 +449,20 @@ async def _handle_late_payment_auto_refund(db: AsyncSession, row) -> None:
         refundable = await PaymentService.refundable_amount(refund_db, payment)
         if refundable <= 0:
             return
-        await PaymentService.refund(
+        refund = await PaymentService.refund(
             refund_db,
             payment,
             refundable,
             reason,
             idempotency_key=idem_key,
         )
+        final_status = str(refund.status or "").upper()
+        if final_status in {"FAILED", "CLOSED", "ABNORMAL"}:
+            raise RuntimeError(
+                f"迟到支付渠道退款未成功 status={final_status} payment_id={payment_id}"
+            )
+        if final_status not in {"SUCCESS", "PENDING", "PROCESSING", "UNKNOWN"}:
+            raise RuntimeError(
+                f"迟到支付渠道退款返回未知状态 status={final_status} payment_id={payment_id}"
+            )
 
