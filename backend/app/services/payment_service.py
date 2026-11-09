@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.biz_no import generate_no, payment_biz, refund_biz, resolve_table_parts
 from app.core.exceptions import AppException
-from app.core.response import money, now_local, serialize_dt
+from app.core.response import ensure_local_aware, money, now_local, serialize_dt
 from app.models import (
     Customer,
     DiningTable,
@@ -2682,6 +2682,8 @@ class PaymentService:
         operator_id: int | None = None,
         pos_refund_request_id: int | None = None,
         idempotency_key: str | None = None,
+        pos_refund_execution_token: str | None = None,
+        pos_refund_execution_epoch: int | None = None,
     ) -> PaymentRefund:
         # Keep refund-row locks behind the shared Order/RechargeOrder → Payment
         # lock order. Callback and compensation paths use the same order before
@@ -2690,6 +2692,33 @@ class PaymentService:
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
+        # POS 审批执行权必须在同一事务内由数据库 token + epoch 验证。
+        # 旧 worker 即使在租约过期后恢复，也不能创建/绑定渠道退款单。
+        pos_request = None
+        if pos_refund_request_id is not None:
+            if not pos_refund_execution_token or pos_refund_execution_epoch is None:
+                raise AppException(40954, "POS 退款执行权缺失，拒绝创建渠道退款单")
+            pos_request = (
+                await db.execute(
+                    select(PosRefundRequest)
+                    .where(PosRefundRequest.id == int(pos_refund_request_id))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if (
+                pos_request is None
+                or int(pos_request.order_id) != int(payment.order_id or 0)
+                or pos_request.status != "PROCESSING"
+                or str(pos_request.execution_token or "") != str(pos_refund_execution_token)
+                or int(pos_request.execution_epoch or 0) != int(pos_refund_execution_epoch)
+            ):
+                raise AppException(40954, "POS 退款执行权已失效，拒绝创建渠道退款单")
+            lease_until = pos_request.execution_lease_until
+            if not pos_request.refund_id and (
+                lease_until is None or ensure_local_aware(lease_until) <= now_local()
+            ):
+                raise AppException(40954, "POS 退款执行租约已过期，拒绝创建渠道退款单")
+
         # HTTP 客户端可用 Idempotency-Key 安全重试退款请求。
         # 必须在支付终态检查之前查询，才能在“部分退款成功但响应丢失”后返回原退款单，
         # 而不是再次向渠道发起一笔新的部分退款。
@@ -2792,23 +2821,12 @@ class PaymentService:
             raise
 
         if pos_refund_request_id is not None:
-            pos_request = (
-                await db.execute(
-                    select(PosRefundRequest)
-                    .where(PosRefundRequest.id == int(pos_refund_request_id))
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
-            if (
-                pos_request is None
-                or int(pos_request.order_id) != int(payment.order_id or 0)
-                or pos_request.status not in ("PROCESSING", "FAILED")
-            ):
-                raise AppException(40954, "POS 退款申请状态已变化，无法绑定渠道退款单")
             # 在调用渠道前先建立精确关联，避免极快的异步 SUCCESS 回调早于 POS refund_id 落库。
+            # 这里复用前面已锁定并验证 token/epoch 的申请行，不重新查询，保持原子绑定。
             pos_request.refund_id = row.id
             pos_request.payment_id = payment.id
             pos_request.status = "PROCESSING"
+            pos_request.execution_lease_until = None
             pos_request.fail_reason = None
 
         # 短事务：落库 PENDING 退款单和 POS 关联并释放行锁后再调第三方
