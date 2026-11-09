@@ -200,7 +200,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
             require('./logger').reportApi('ERROR', upper, path, { status, code: body.code, message: msg })
           } catch (_) { }
           // P1-3/P2-6：认证失效交给 request() 层先尝试静默刷新并重放，失败才清会话
-          if (needAuth && (status === 401 || status === 403 || isStaleAuthMessage(msg))) {
+          if (needAuth && (status === 401 || isStaleAuthMessage(msg))) {
             reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))
             return
           }
