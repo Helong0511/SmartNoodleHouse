@@ -1092,8 +1092,7 @@ class PaymentService:
             try:
                 _require_provider_amount(pay_data, payment.amount)
             except AppException:
-                payment.status = "UNKNOWN"
-                await db.flush()
+                await cls._mark_order_payment_unknown_after_amount_mismatch(db, int(payment.id))
                 raise
             await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
             pay_data["status"] = "PAID"
@@ -1236,8 +1235,9 @@ class PaymentService:
             try:
                 _require_provider_amount(pay_data, payment.amount)
             except AppException:
-                payment.status = "UNKNOWN"
-                await db.flush()
+                await cls._mark_recharge_payment_unknown_after_amount_mismatch(
+                    db, int(recharge.id), int(payment.id)
+                )
                 raise
             payment.provider_trade_no = str(trade_no or "")
             await cls._settle_recharge_payment(
@@ -1739,6 +1739,73 @@ class PaymentService:
             **meta,
             **progress,
         }
+
+    @classmethod
+    async def _mark_order_payment_unknown_after_amount_mismatch(
+        cls, db: AsyncSession, payment_id: int
+    ) -> Payment:
+        """即时收款金额不匹配时，锁内刷新并持久化 UNKNOWN，不能覆盖并发回调的 PAID。"""
+        current = await cls._lock_order_then_payment(db, int(payment_id))
+        if current is None:
+            raise AppException(40401, "支付记录不存在")
+        if current.status not in ("PAID", "PARTIAL_REFUND", "REFUNDED", "UNKNOWN"):
+            old_status = current.status
+            current.status = "UNKNOWN"
+            await record_payment_status(
+                db,
+                payment_id=current.id,
+                from_status=old_status,
+                to_status="UNKNOWN",
+                source="IMMEDIATE_AMOUNT_MISMATCH",
+                remark="渠道即时结果缺少金额或金额不匹配，等待查单核实",
+            )
+            await db.flush()
+        # 请求层收到 AppException 后会 rollback；这里先提交核验状态，避免 UNKNOWN 被回滚丢失。
+        await db.commit()
+        return current
+
+    @classmethod
+    async def _mark_recharge_payment_unknown_after_amount_mismatch(
+        cls, db: AsyncSession, recharge_id: int, payment_id: int
+    ) -> Payment:
+        """充值即时金额不匹配时按 RechargeOrder→Payment 当前读收敛，保留并发成功回调。"""
+        recharge = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        payment = (
+            await db.execute(
+                select(Payment)
+                .where(Payment.id == int(payment_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if recharge is None or payment is None:
+            raise AppException(40491, "充值单或支付单不存在")
+        if recharge.status == "PAID" or payment.status == "PAID":
+            await db.commit()
+            if recharge.status != "PAID" or payment.status != "PAID":
+                raise AppException(50042, "充值支付与充值单状态不一致，已暂停自动处理，请人工核对")
+            return payment
+        if payment.status != "UNKNOWN":
+            old_status = payment.status
+            payment.status = "UNKNOWN"
+            await record_payment_status(
+                db,
+                payment_id=payment.id,
+                from_status=old_status,
+                to_status="UNKNOWN",
+                source="RECHARGE_AMOUNT_MISMATCH",
+                remark="充值渠道即时结果缺少金额或金额不匹配，等待查单核实",
+            )
+            await db.flush()
+        await db.commit()
+        return payment
 
     @classmethod
     async def _settle_mock_payment(
