@@ -49,7 +49,7 @@
 ```bash
 # 仅全新空库：执行前请确认目标库中没有任何需要保留的数据
 mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
+mysql --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
 mysql -u root -p < sql/data_custom.sql
 
 # 初始化管理员密码通过环境变量提供，不要把真实密码写入命令历史或文档
