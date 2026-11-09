@@ -577,8 +577,17 @@ async def create_recharge(
             )
         ).scalar_one_or_none()
         if existed:
-            if int(existed.customer_id) != int(customer.id):
-                raise AppException(40909, "幂等键冲突", status_code=409)
+            # 幂等键绑定完整充值意图，不能用同一 key 静默复用另一档位/门店/金额。
+            if (
+                int(existed.customer_id) != int(customer.id)
+                or int(existed.package_id) != int(pkg.id)
+                or int(existed.store_id) != int(store_id)
+                or money(existed.pay_amount) != money(pkg.pay_amount)
+                or money(existed.credit_principal) != money(pkg.pay_amount)
+                or money(existed.credit_gift) != money(pkg.gift_amount)
+                or (existed.channel or "").upper() != data.provider.upper()
+            ):
+                raise AppException(40909, "幂等键冲突：充值档位、门店、金额或支付渠道不一致", status_code=409)
             if existed.status == "PAID":
                 cust = await db.get(Customer, customer.id)
                 return success(
