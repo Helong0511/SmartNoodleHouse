@@ -69,10 +69,10 @@ function handleAuthError(page, err) {
       page.setData({ needPrivacyAgree: true })
     }
     privacy.showPrivacyPopup()
-    my.showModal({
+    my.alert({
       title: '需先同意隐私政策',
       content: '请先在小程序内同意隐私政策，并在开放平台开通「获取会员手机号」能力（手机号仅支持官方一键授权）。',
-      confirmText: '知道了'
+      buttonText: '知道了'
     })
     return
   }
