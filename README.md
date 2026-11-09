@@ -75,6 +75,24 @@ python scripts/初始化管理员.py
 - sql/data_test.sql：仅测试环境。
 - 已有数据库升级使用 backend/Alembic 迁移；执行前备份并在隔离副本演练。禁止对生产库直接运行全新初始化脚本。
 
+## 生产环境 MySQL / Redis 连接示例
+
+以下示例仅适用于 **MySQL、Redis 与应用部署在同一台 Ubuntu 主机**，且两个数据服务都只监听本机回环地址、启用强认证并通过防火墙限制访问的场景。示例中的密码是占位值，必须替换为独立生成的强密码；不得照抄上线。
+
+```dotenv
+APP_ENV=production
+APP_DEBUG=false
+DATABASE_URL=mysql+aiomysql://snh:URL_ENCODED_DB_PASSWORD@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4
+REDIS_URL=redis://:URL_ENCODED_REDIS_PASSWORD@127.0.0.1:6379/0
+ALLOW_LOOPBACK_PRODUCTION_SERVICES=true
+```
+
+- `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true` 只允许单机部署显式使用 MySQL/Redis 回环地址；它不代表可以将数据库或 Redis 端口暴露到公网。
+- 数据库账号应为专用最小权限账号，禁止使用 MySQL `root`；Redis 必须启用强密码或 ACL。MySQL/Redis 仅监听 `127.0.0.1` / `::1`，外部网络不可直接访问。
+- **跨主机部署必须使用私网地址并保持 `false`**：应用、MySQL 或 Redis 不在同一台主机时，分别将连接 URL 的主机名改为对应私网地址，并设置 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=false`（默认值）；不要用 localhost、127.0.0.1 或 ::1 指向远端服务。
+- URL 中密码若含有 `@`、`:`、`/`、`#`、`%` 等保留字符，必须先进行 **URL 百分号编码**，不能直接把原始密码拼进连接 URL。请妥善保管 `.env`，不要提交到 Git。
+- 详细网络绑定、账号授权、Redis ACL、启动校验和故障排查步骤以 [部署说明](docs/部署说明.md) 与 [配置检查清单](配置检查清单.md) 为准。
+
 ## 本地开发
 
 Windows PowerShell：
