@@ -511,30 +511,56 @@ class PaymentService:
         return p()
 
     @classmethod
-    async def order_net_collected(cls, db: AsyncSession, order_id: int) -> Decimal:
-        """订单净已收：各支付单金额 − 成功退款（含 PAID/PARTIAL_REFUND/REFUNDED）。"""
-        payments = list(
-            (
-                await db.execute(
-                    select(Payment).where(
-                        Payment.order_id == int(order_id),
-                        Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
-                    )
-                )
-            ).scalars().all()
+    async def _refund_rows_current(cls, db: AsyncSession, payment_id: int) -> list[PaymentRefund]:
+        """在已持有父级 Order/Payment 锁后，以当前读锁定退款事实，避免 RR 快照漏读新提交。"""
+        result = await db.execute(
+            select(PaymentRefund)
+            .where(PaymentRefund.payment_id == int(payment_id))
+            .order_by(PaymentRefund.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        return list(result.scalars().all())
+
+    @classmethod
+    async def order_net_collected(
+        cls, db: AsyncSession, order_id: int, *, current_read: bool = False
+    ) -> Decimal:
+        """订单净已收：各支付单金额 − 成功退款；资金状态收敛时可强制使用当前读。"""
+        payment_stmt = select(Payment).where(
+            Payment.order_id == int(order_id),
+            Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
+        ).order_by(Payment.id.asc())
+        if current_read:
+            payment_stmt = payment_stmt.with_for_update().execution_options(populate_existing=True)
+        payments = list((await db.execute(payment_stmt)).scalars().all())
         if not payments:
             return money(0)
-        pids = [p.id for p in payments]
-        refund_rows = (
-            await db.execute(
-                select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                    PaymentRefund.payment_id.in_(pids),
-                    PaymentRefund.status == "SUCCESS",
-                ).group_by(PaymentRefund.payment_id)
+        pids = [int(p.id) for p in payments]
+        if current_read:
+            refund_stmt = (
+                select(PaymentRefund)
+                .where(PaymentRefund.payment_id.in_(pids))
+                .order_by(PaymentRefund.id.asc())
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-        ).all()
-        refund_map = {int(pid): money(amt or 0) for pid, amt in refund_rows}
+            current_refunds = (await db.execute(refund_stmt)).scalars().all()
+            refund_map: dict[int, Decimal] = {}
+            for refund_row in current_refunds:
+                if refund_row.status == "SUCCESS":
+                    pid = int(refund_row.payment_id)
+                    refund_map[pid] = money(refund_map.get(pid, money(0)) + money(refund_row.amount))
+        else:
+            refund_rows = (
+                await db.execute(
+                    select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                        PaymentRefund.payment_id.in_(pids),
+                        PaymentRefund.status == "SUCCESS",
+                    ).group_by(PaymentRefund.payment_id)
+                )
+            ).all()
+            refund_map = {int(pid): money(amt or 0) for pid, amt in refund_rows}
         net = money(0)
         for p in payments:
             left = money(p.amount) - refund_map.get(int(p.id), money(0))
@@ -1384,13 +1410,27 @@ class PaymentService:
             return None
         order_id, recharge_id = peek[0], peek[1]
         if order_id:
-            await db.execute(select(Order).where(Order.id == int(order_id)).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         elif recharge_id:
             await db.execute(
-                select(RechargeOrder).where(RechargeOrder.id == int(recharge_id)).with_for_update()
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
+        # FOR UPDATE 是当前读；populate_existing 同步刷新当前 Session 中可能已加载的旧 ORM 快照。
         return (
-            await db.execute(select(Payment).where(Payment.id == int(payment_id)).with_for_update())
+            await db.execute(
+                select(Payment)
+                .where(Payment.id == int(payment_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
 
     @classmethod
@@ -1407,14 +1447,20 @@ class PaymentService:
             raise AppException(40302, "退款记录缺少有效订单关联")
         order = (
             await db.execute(
-                select(Order).where(Order.id == order_id).with_for_update()
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "退款关联订单不存在")
         payment = (
             await db.execute(
-                select(Payment).where(Payment.id == int(refund.payment_id)).with_for_update()
+                select(Payment)
+                .where(Payment.id == int(refund.payment_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not payment:
@@ -2473,13 +2519,12 @@ class PaymentService:
             row.succeeded_at = now_local()
             # 先锁订单再锁支付单，避免与支付回调的 Order→Payment 锁序死锁。
             payment, order = await cls._lock_order_then_payment_for_refund(db, row)
-            success_sum = await db.scalar(
-                select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                    PaymentRefund.payment_id == payment.id,
-                    PaymentRefund.status == "SUCCESS",
-                )
-            ) or Decimal("0")
-            # 当前行刚置 SUCCESS，sum 已包含
+            refund_rows = await cls._refund_rows_current(db, int(payment.id))
+            success_sum = sum(
+                (money(refund_row.amount) for refund_row in refund_rows if refund_row.status == "SUCCESS"),
+                money(0),
+            )
+            # 当前行刚置 SUCCESS，当前读已包含
             old_status = payment.status
             payment.status = (
                 "REFUNDED" if money(Decimal(str(success_sum))) >= money(payment.amount) else "PARTIAL_REFUND"
@@ -2531,7 +2576,7 @@ class PaymentService:
                             store_id=order.store_id,
                         )
                 # 按订单净已收判断：分笔退满一笔不得误标整单 REFUNDED
-                net = await cls.order_net_collected(db, order.id)
+                net = await cls.order_net_collected(db, order.id, current_read=True)
                 total = money(order.total_amount)
                 if net <= 0:
                     # 公益台账与营销归因冲减必须和退款 SUCCESS 同事务写入 Outbox。
@@ -2751,22 +2796,20 @@ class PaymentService:
         if amount <= 0:
             raise AppException(40051, "退款金额非法")
 
-        # 进行中/未知/异常待处理的退款单：禁止再开一笔，避免重复退款
-        inflight = await db.scalar(
-            select(func.count()).select_from(PaymentRefund).where(
-                PaymentRefund.payment_id == payment.id,
-                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
-            )
-        ) or 0
-        if int(inflight) > 0:
+        # _lock_order_then_payment 的初始定位查询可能已建立 RR 快照；资金判断必须改用
+        # 父级锁之后的 FOR UPDATE 当前读，避免漏掉等待期间刚提交的退款状态。
+        refund_rows = await cls._refund_rows_current(db, int(payment.id))
+        inflight = sum(
+            1 for refund_row in refund_rows
+            if refund_row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")
+        )
+        if inflight > 0:
             raise AppException(40054, "已有退款处理中，请勿重复提交")
 
-        refunded_success = await db.scalar(
-            select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                PaymentRefund.payment_id == payment.id,
-                PaymentRefund.status == "SUCCESS",
-            )
-        ) or Decimal("0")
+        refunded_success = sum(
+            (money(refund_row.amount) for refund_row in refund_rows if refund_row.status == "SUCCESS"),
+            money(0),
+        )
         remain = money(payment.amount) - money(Decimal(str(refunded_success)))
         if remain <= 0:
             raise AppException(40053, "可退余额为 0，不可再退")
