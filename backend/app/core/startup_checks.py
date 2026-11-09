@@ -228,10 +228,8 @@ def validate_settings(settings: Settings) -> None:
     elif is_prod and secret_enc and len(secret_enc) < 32:
         errors.append("SECRET_ENCRYPTION_KEY 须至少 32 字符")
 
-    if is_prod and bool(getattr(settings, "enable_customer_display", False)) and not (
-        getattr(settings, "display_screen_token", None) or ""
-    ).strip():
-        errors.append("已开启大厅叫号屏时，生产环境须配置 DISPLAY_SCREEN_TOKEN")
+    # 生产叫号屏使用数据库中的门店级独立令牌，在连接时按 store_id fail-closed 校验；
+    # DISPLAY_SCREEN_TOKEN 仅保留给开发环境回退，不再作为生产全局通行令牌。
 
     cors = (getattr(settings, "cors_origins", None) or "").lower()
     if is_prod and ("localhost" in cors or "127.0.0.1" in cors):
