@@ -1,8 +1,33 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 
 async function main() {
   const root = path.resolve(__dirname, "..");
+
+  // 支付成功后的异步流程不能自动弹订阅面板；必须由结果页的显式用户点击触发。
+  for (const platform of ["wechat", "alipay"]) {
+    const dir = platform === "wechat" ? "miniprogram-wechat" : "miniprogram-alipay";
+    const confirmSource = fs.readFileSync(
+      path.join(root, dir, "packageOrder/confirm/confirm.js"),
+      "utf8"
+    );
+    const resultSource = fs.readFileSync(
+      path.join(root, dir, "packageOrder/result/result.js"),
+      "utf8"
+    );
+    assert.doesNotMatch(confirmSource, /requestOrderReadySubscribe/,
+      platform + " must not request subscription automatically after checkout");
+    const handlerStart = resultSource.indexOf("async subscribeOrderReady()");
+    assert.notEqual(handlerStart, -1, platform + " must expose an explicit subscribe tap handler");
+    const handlerEnd = resultSource.indexOf("\n  },", handlerStart);
+    assert.notEqual(handlerEnd, -1, platform + " subscribe tap handler must be bounded");
+    const handler = resultSource.slice(handlerStart, handlerEnd);
+    const apiCall = handler.indexOf("subscribe.requestOrderReadySubscribe()");
+    const firstAwait = handler.indexOf("await ");
+    assert.ok(apiCall >= 0 && (firstAwait < 0 || apiCall < firstAwait),
+      platform + " must invoke platform subscribe API synchronously before awaiting");
+  }
 
   const wxConfigPath = require.resolve(path.join(root, "miniprogram-wechat/utils/clientConfig.js"));
   require.cache[wxConfigPath] = {
