@@ -55,8 +55,11 @@ def test_destructive_system_seed_requires_explicit_confirmation_before_truncate(
     guard = seed.index("@SMART_NOODLE_FRESH_INSTALL_CONFIRM")
     truncate = seed.upper().index("TRUNCATE TABLE")
     assert guard < truncate
+    assert "USE `smart_noodle_house`;" in seed
+    assert seed.index("USE `smart_noodle_house`;") < seed.index("CREATE PROCEDURE")
     assert "SIGNAL SQLSTATE '45000'" in seed
-    assert "DATABASE() <> 'smart_noodle_house'" in seed
+    assert "COALESCE(DATABASE(), '') <> 'smart_noodle_house'" in seed
+    assert "DATABASE() <> 'smart_noodle_house'" not in seed
 
 
 def test_immediate_payment_amount_is_required_and_must_match():
