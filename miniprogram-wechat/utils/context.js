@@ -133,7 +133,7 @@ function applyContext(table, store, options) {
   if (!g) return
   const opts = options || {}
   if (table) {
-    const storedToken = g.globalData.tableToken || wx.getStorageSync('table_token') || ''
+    const storedToken = opts.token || g.globalData.tableToken || wx.getStorageSync('table_token') || ''
     if (!table.qr_token && storedToken) {
       table = { ...table, qr_token: storedToken }
     }
@@ -329,7 +329,8 @@ async function bindTableFromToken(token) {
   const entry = await api.get('/miniprogram/entry', { token: raw, channel: 'wechat' }, false)
   if (entry && entry.table) {
     const store = await enrichStore(entry.store || null, entry.table)
-    applyContext(entry.table, store)
+    // /entry 不再回传永久 qr_token；首次扫码时使用本次请求凭证写入本地绑定。
+    applyContext(entry.table, store, { token: raw })
     return displayPayload(store, entry.table)
   }
   return null
