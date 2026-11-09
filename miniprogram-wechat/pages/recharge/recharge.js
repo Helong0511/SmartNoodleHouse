@@ -86,6 +86,8 @@ Page({
     balancePrincipal: '0.00',
     balanceGift: '0.00',
     loading: false,
+    canSubscribeBalanceLow: false,
+    subscribeLoading: false,
     storeId: null
   },
 
@@ -110,8 +112,11 @@ Page({
         packages: Array.isArray(packages) ? packages : [],
         selectedId: (packages && packages[0] && packages[0].id) || 0
       })
-      // 引导订阅余额偏低提醒（模板未配置时静默跳过）
-      try { await subscribe.requestBalanceLowSubscribe() } catch (_) { /* ignore */ }
+      // 仅预加载模板；真正拉起订阅弹窗必须由用户点击按钮触发。
+      try {
+        const templates = await subscribe.loadTemplates()
+        this.setData({ canSubscribeBalanceLow: !!(templates && templates.balance_low) })
+      } catch (_) { this.setData({ canSubscribeBalanceLow: false }) }
     } catch (e) {
       wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
     }
@@ -120,6 +125,19 @@ Page({
   onSelect(e) {
     const id = Number(e.currentTarget.dataset.id)
     if (id) this.setData({ selectedId: id })
+  },
+
+  async subscribeBalanceLow() {
+    if (this.data.subscribeLoading || !this.data.canSubscribeBalanceLow) return
+    // 平台订阅 API 必须在点击回调中立即调用，不能在 bootstrap 异步流程中自动拉起。
+    const request = subscribe.requestBalanceLowSubscribe()
+    this.setData({ subscribeLoading: true })
+    try {
+      const result = await request
+      wx.showToast({ title: result ? '订阅操作已完成' : '未完成订阅，可稍后重试', icon: 'none' })
+    } finally {
+      this.setData({ subscribeLoading: false })
+    }
   },
 
   async submit() {
