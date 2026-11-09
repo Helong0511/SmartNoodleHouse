@@ -15,12 +15,15 @@ CHANNEL = WS_BROADCAST_CHANNEL
 _listener_task: asyncio.Task | None = None
 
 
-async def publish_ws_event(channel: str, event: str, data: dict, store_id: int | None = None, msg_id: str | None = None) -> None:
+async def publish_ws_event(
+    channel: str, event: str, data: dict, store_id: int | None = None,
+    msg_id: str | None = None, customer_id: int | None = None,
+) -> None:
     from app.core.response import dumps_json
 
     # P1-8：携带 msg_id 供各 worker 去重；allow_nan=False 防脏 JSON
     payload = dumps_json(
-        {"msg_id": msg_id, "channel": channel, "event": event, "data": data, "store_id": store_id},
+        {"msg_id": msg_id, "channel": channel, "event": event, "data": data, "store_id": store_id, "customer_id": customer_id},
     )
     try:
         r = await get_redis()
@@ -29,7 +32,9 @@ async def publish_ws_event(channel: str, event: str, data: dict, store_id: int |
         logger.warning("WS Redis publish 失败，仅本地广播: %s", e)
 
 
-async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None, str | None], Awaitable[None]]) -> None:
+async def start_ws_subscriber(
+    on_message: Callable[[str, str, dict, int | None, str | None, int | None], Awaitable[None]]
+) -> None:
     """订阅 Redis，收到后回调本地 ConnectionManager.broadcast。"""
     global _listener_task
 
@@ -52,6 +57,7 @@ async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None, 
                             payload.get("data") or {},
                             payload.get("store_id"),
                             payload.get("msg_id"),  # P1-8
+                            payload.get("customer_id"),
                         )
                     except Exception as e:
                         logger.warning("WS subscriber 解析失败: %s", e)
