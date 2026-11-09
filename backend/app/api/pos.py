@@ -288,8 +288,8 @@ async def list_pos_refunds(
     keyword: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
 ):
     """退款申请列表：收银员看本人；店长/管理员看本店。"""
     data = await PosRefundService.list_requests(
