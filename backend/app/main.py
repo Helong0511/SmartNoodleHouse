@@ -761,6 +761,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # 在模块导入创建 ASGI app 时同步校验，不能依赖 lifespan（可能被 --lifespan off 关闭）。
+    validate_settings(settings)
     setup_logging(json_logs=settings.json_logs or settings.is_production, level=settings.log_level)
     # P1-40: 生产环境关闭 /docs /redoc /openapi.json
     docs_url = "/docs" if settings.is_development else None
