@@ -146,7 +146,7 @@ App({
     if (!options) return
     const q = normalizeLaunchQuery(options.query)
     let token = (q.token || '').trim()
-    let channel = (q.channel || '').trim()
+    const channel = 'wechat'
 
     // path 偶发带 ?token=；query 内 path 须用归一化后的 q（query 可能是字符串）
     if (!token) {
