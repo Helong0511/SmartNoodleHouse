@@ -4,6 +4,7 @@ import { attachHeartbeat } from './wsHeartbeat'
 export function openPublicWebSocket(
   channel: string,
   params?: Record<string, string | number | undefined | null>,
+  token?: string,
 ): WebSocket {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const qs = new URLSearchParams()
@@ -16,7 +17,7 @@ export function openPublicWebSocket(
   }
   const query = qs.toString()
   const url = `${proto}://${location.host}/api/ws/${channel}${query ? `?${query}` : ''}`
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(url, token ? ['access_token', token] : undefined)
   attachHeartbeat(ws)
   return ws
 }
