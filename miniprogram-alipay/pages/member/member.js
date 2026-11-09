@@ -1026,8 +1026,8 @@ Page({
 
   async onToggleRecommend(e) {
     if (this.data.updatingOptIn) return
-    const v = e && e.detail
-    const val = typeof v === 'boolean' ? (v ? 1 : 0) : (typeof v === 'number' ? v : (this.data.recommendOptIn ? 0 : 1))
+    const v = e && e.detail && e.detail.value
+    const val = v ? 1 : 0
     this.setData({ updatingOptIn: true })
     try {
       await auth.ensureLogin()
