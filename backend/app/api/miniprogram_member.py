@@ -14,7 +14,7 @@ from app.api.miniprogram import (
     _persistable_avatar_url,
 )
 from app.api.miniprogram_face import _face_status
-from app.core.config import get_settings
+from app.core.config import dev_mode_allowed, get_settings
 from app.core.exceptions import AppException
 from app.core.response import now_local, serialize_dt, success
 from app.models import Customer
@@ -544,8 +544,8 @@ async def bind_member_phone(
     # 个人主体/未开通取号能力时，真机无法弹出官方授权窗，前端提交 mock:debug 凭据
     # 走完整绑定链路（未验证、不合并账号），便于本地/真机调试。
     if data.phone_code == "mock:debug" or data.alipay_phone_encrypted == "mock:debug":
-        if not settings.is_development:
-            raise AppException(40054, "mock 授权凭据仅限开发调试环境使用")
+        if not dev_mode_allowed("allow_auth_mock"):
+            raise AppException(40054, "mock 授权凭据仅限显式开启 APP_DEBUG 与 ALLOW_AUTH_MOCK 的开发环境使用")
         return await _save_unverified_phone_response(
             db, request, customer, channel,
             _MOCK_DEBUG_PHONE,
