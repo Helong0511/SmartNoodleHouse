@@ -69,15 +69,21 @@ function hasToken() {
 }
 
 function optInEnabled() {
-  // 默认开启；member 页拉取 /privacy-settings 后写入 storage 与 globalData
+  // 隐私保护默认拒绝：只有用户明确开启个性化推荐后才允许采集行为事件。
+  let stored
   try {
-    const v = wx.getStorageSync('recommend_opt_in')
-    if (v === 0 || v === '0') return false
-  } catch (_) {}
+    stored = wx.getStorageSync('recommend_opt_in')
+  } catch (_) {
+    return false
+  }
+  if (stored === true || stored === 1 || stored === '1') return true
+  if (stored === false || stored === 0 || stored === '0') return false
   const app = getAppSafe()
   const gd = app && app.globalData
-  if (gd && (gd.recommendOptIn === 0 || gd.recommend_opt_in === 0)) return false
-  return true
+  return !!(gd && (
+    gd.recommendOptIn === true || gd.recommendOptIn === 1 || gd.recommendOptIn === '1' ||
+    gd.recommend_opt_in === true || gd.recommend_opt_in === 1 || gd.recommend_opt_in === '1'
+  ))
 }
 
 function currentStoreId() {
@@ -106,7 +112,7 @@ function track(eventType, props) {
   const type = String(eventType || '').toUpperCase()
   if (VALID_TYPES.indexOf(type) < 0) return
   // 隐私开关关闭：前端不入队，降低本地痕迹
-  if (!optInEnabled()) return
+  if (!optInEnabled()) { writeQueue([]); return }
   const p = props || {}
   const event = {
     event_id: p.event_id || genEventId(),
@@ -135,7 +141,7 @@ function flush() {
   if (!queue.length) return Promise.resolve({ skipped: true })
   if (!hasToken()) return Promise.resolve({ skipped: true, reason: 'no_token' })
   // 隐私开关关闭期间：不上报、不消耗队列（用户重新开启后可继续补发）
-  if (!optInEnabled()) return Promise.resolve({ skipped: true, reason: 'opt_out' })
+  if (!optInEnabled()) { writeQueue([]); return Promise.resolve({ skipped: true, reason: 'opt_out' }) }
 
   flushing = true
   const batch = queue.slice(0, BATCH_SIZE)
