@@ -88,7 +88,6 @@ async def test_idempotent_replay_rejects_changed_order_items():
 
 @pytest.mark.asyncio
 async def test_idempotent_replay_accepts_same_order_items():
-    from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     existing = SimpleNamespace(id=10, product_id=1, quantity=2, remark="少辣")
