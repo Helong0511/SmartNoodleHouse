@@ -159,7 +159,6 @@ async function addItem(entry) {
     option_ids: entry.option_ids || [],
     option_text: entry.option_text || '',
     remark: entry.remark || '',
-    unit_price: entry.unit_price != null ? String(entry.unit_price) : undefined,
     expected_revision: _meta.revision || undefined
   }
   const res = await api.post('/miniprogram/table-party/cart/items', body)
