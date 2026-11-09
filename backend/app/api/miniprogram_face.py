@@ -161,6 +161,9 @@ async def _enforce_liveness_challenge(
     settings = get_settings()
     mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
     if mode == "none":
+        # none 仅可用于本地开发；生产环境禁止通过配置关闭挑战校验。
+        if settings.is_production:
+            raise AppException(40342, "生产环境不允许关闭人脸动作挑战")
         return "none"
     from app.services.face_liveness_service import verify_liveness_challenge
 
