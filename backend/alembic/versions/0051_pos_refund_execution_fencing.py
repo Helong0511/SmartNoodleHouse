@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0051_pos_refund_execution_fencing"
+revision = "0051_pos_refund_fencing"
 down_revision = "0050_menu_db_generation"
 branch_labels = None
 depends_on = None
