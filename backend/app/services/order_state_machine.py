@@ -21,13 +21,12 @@ STAFF_TRANSITIONS: dict[str, set[str]] = {
     "REFUNDED": set(),
 }
 
-# 支付成功回调允许的迁移
-# P0 安全收敛：CONFIRMED → PAID 兜底，避免订单被异常推进到 CONFIRMED 后回调无法入账。
-# CANCELLED → PAID：超时关单后渠道迟到成功（本地 payment CLOSED、订单已取消）受控复活。
+# 支付成功回调允许的订单状态迁移。
+# CANCELLED 是不可复活的业务终态：迟到成功回调只确认支付流水并通过 Outbox 原路退款，
+# 不得把订单改回 PAID，也不得重新扣库存或恢复已释放的营销权益。
 PAYMENT_TRANSITIONS: dict[str, set[str]] = {
     "PENDING_PAYMENT": {"PAID"},
     "CONFIRMED": {"PAID"},
-    "CANCELLED": {"PAID"},
 }
 
 # 系统/外卖/超时/退款写入（含厨房同步后的平台回写）
