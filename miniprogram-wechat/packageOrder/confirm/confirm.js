@@ -1248,9 +1248,10 @@ Page({
     return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
   },
 
-  makeIdempotencyKey(cart) {
+  makeIdempotencyKey(cart, sharedMeta) {
     // 内容哈希 + 本次结算 nonce：网络重试可幂等；同款再买不会命中已付订单
     const cid = app.globalData.customerId || '0'
+    const shared = sharedMeta || require('../../utils/sharedCart').getMeta() || {}
     const items = (cart || auth.getCart() || []).map((c) => {
       const opts = (c.option_ids || []).slice().map(String).sort().join('.')
       return `${c.product_id}x${c.quantity || 1}:${opts}`
@@ -1262,6 +1263,8 @@ Page({
       this.data.selectedVoucherId || 0,
       this.data.payMethod || 'WECHAT',
       this.data.useSocialBenefit ? 'SOCIAL' : 'NORMAL',
+      shared.party_id || 0,
+      shared.revision || 0,
       this._composeRemark() || '',
       this._scheduledPickupIso() || '',
       items.join(',')
@@ -1382,7 +1385,7 @@ Page({
         dining_type: this.data.needPack ? 'TAKEAWAY' : 'DINE_IN',
         remark: remarkText,
         scheduled_pickup_at: this._scheduledPickupIso() || undefined,
-        idempotency_key: this.makeIdempotencyKey(cart),
+        idempotency_key: this.makeIdempotencyKey(cart, sharedMeta),
         shared_cart_party_id: sharedMeta.party_id || undefined,
         shared_cart_revision: sharedMeta.revision || undefined,
         skip_promotions: this.data.payMethod === 'BALANCE',
