@@ -1,7 +1,6 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const payUtil = require('../../utils/pay')
-const subscribe = require('../../utils/subscribe')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const voucherUtil = require('../../utils/voucher')
@@ -1445,11 +1444,6 @@ Page({
       auth.saveCart([])
       this.clearCheckoutNonce()
       prefUtil.clearPrefsCache(app)
-      try {
-        await subscribe.requestOrderReadySubscribe()
-      } catch (_) {
-        // 订阅授权是可选能力，不能阻断已成功的支付和订单结果页跳转。
-      }
       const pts =
         (payOutcome && payOutcome.sync && payOutcome.sync.points_earned) ||
           (payRes && payRes.points_earned)
