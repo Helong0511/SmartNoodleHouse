@@ -1586,7 +1586,7 @@ class PaymentService:
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "订单不存在")
-        # CANCELLED 允许受控复活（PAYMENT: CANCELLED→PAID）；其它终态拒绝
+        # CANCELLED 保持终态：迟到支付只记录实际收款并通过 Outbox 自动退款；其它退款终态拒绝
         if order.status == "REFUNDED" or order.payment_status == "REFUNDED":
             raise AppException(40901, "订单已退款，拒绝支付入账")
         if order.payment_status == "PAID" and payment.status in ("PENDING", "CLOSED"):
@@ -2106,7 +2106,7 @@ class PaymentService:
             raise AppException(40402, "订单不存在")
         if order.status == "REFUNDED" or order.payment_status == "REFUNDED":
             raise AppException(40901, "订单已退款，拒绝支付入账")
-        # CANCELLED：允许迟到回调复活（与查单路径一致）
+        # CANCELLED 保持终态：迟到回调只入账支付流水并排队原路退款，不恢复订单
         if order.payment_status == "PAID" and order.status != "CANCELLED":
             logger.warning(
                 "重复支付回调已拒绝 order=%s payment=%s",
