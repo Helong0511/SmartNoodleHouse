@@ -22,7 +22,8 @@ function hasPrivacyAgreed() {
     const value = stored && Object.prototype.hasOwnProperty.call(stored, 'data')
       ? stored.data
       : stored
-    return value === true || value === 1 || value === '1'
+    const timestamp = Number(value)
+    return value === true || (Number.isFinite(timestamp) && timestamp > 0)
   } catch (_) {
     return false
   }
