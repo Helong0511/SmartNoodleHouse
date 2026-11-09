@@ -73,11 +73,8 @@ export function clearCustomerSession() {
     'snh_channel', 'channel', 'snh_store_id',
     'member_prompt_done', 'h5_login_code',
   ]
-  for (const storage of [sessionStorage, localStorage]) {
-    try {
-      for (const key of keys) storage.removeItem(key)
-    } catch {
-      /* ignore storage access failures */
-    }
+  for (const key of keys) {
+    try { sessionStorage.removeItem(key) } catch { /* ignore */ }
+    try { localStorage.removeItem(key) } catch { /* ignore */ }
   }
 }
