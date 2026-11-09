@@ -100,7 +100,7 @@ App({
     my.getNetworkType({
       success: (res) => {
         this.globalData.networkType = res.networkType || 'unknown'
-        this.globalData.isOnline = res.networkType !== 'none'
+        this.globalData.isOnline = !!res.networkAvailable
       }
     })
     my.onNetworkStatusChange((res) => {
