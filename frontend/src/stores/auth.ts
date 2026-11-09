@@ -1,6 +1,4 @@
 import { defineStore } from 'pinia'
-import { clearCustomerToken } from '@/utils/customerAuth'
-import { clearCartStorage } from '@/utils/cart'
 import { computed, ref } from 'vue'
 import api from '@/api'
 import { clearCustomerSession } from '@/utils/customerAuth'
@@ -73,8 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = ''
     user.value = null
     clearStaffToken()
-    try { clearCustomerToken() } catch { /* storage may be unavailable */ }
-    clearCartStorage()
+    clearCustomerSession()
   }
 
   async function fetchMe() {
