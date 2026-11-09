@@ -215,7 +215,7 @@ class Settings(BaseSettings):
     dev_lan_host: str = ""
     # 桌台码跳转小程序版本：develop | trial | release；留空则 development→develop，production→release
     mini_program_env_version: str = ""
-    # 顾客叫号屏访问令牌（留空=不校验；生产建议设置后写入屏端 URL ?token=）
+    # 顾客叫号屏全局开发回退令牌；生产必须在每家门店设置独立 display_screen_token。
     display_screen_token: str = ""
 
     @property
