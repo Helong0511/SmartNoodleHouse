@@ -1915,7 +1915,7 @@ class PaymentService:
             "READY",
             "COMPLETED",
         ):
-            progress = await cls.payment_progress(db, order)
+            progress = await cls.payment_progress(db, order, current_read=True)
             existing = (
                 await db.execute(
                     select(Payment)
@@ -2022,7 +2022,7 @@ class PaymentService:
         tender = await cls._finalize_tender(
             db, payment=payment, order=order, provider="CASH", source="POS_CASH"
         )
-        progress = await cls.payment_progress(db, order)
+        progress = await cls.payment_progress(db, order, current_read=True)
         logger.info(
             "收银现金入账 order=%s payment=%s amount=%s operator=%s fully=%s",
             order.order_no,
