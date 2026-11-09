@@ -89,7 +89,6 @@ function applyPayload(payload) {
     product_id: it.product_id,
     name: it.name,
     quantity: it.quantity || 1,
-    unit_price: it.unit_price,
     subtotal: it.subtotal,
     option_ids: it.option_ids || [],
     option_text: it.option_text || '',
