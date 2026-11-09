@@ -30,7 +30,9 @@ async def test_login_updates_last_login_at_and_rehashes_legacy_password():
     req = MagicMock()
     data = LoginRequest(username="admin", password="secret")
 
-    with patch("app.api.auth.verify_password_and_update_async", new=AsyncMock(return_value=(True, "$argon2id$upgraded"))), patch(
+    with patch("app.api.auth._login_is_locked", new=AsyncMock(return_value=False)), patch(
+        "app.api.auth._clear_login_failures", new=AsyncMock()
+    ), patch("app.api.auth.verify_password_and_update_async", new=AsyncMock(return_value=(True, "$argon2id$upgraded"))), patch(
         "app.api.auth.create_access_token", return_value="tok"
     ), patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:read"})):
         resp = await login(data, req, db)

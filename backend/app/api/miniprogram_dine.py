@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -319,7 +320,7 @@ async def scan_entry(
     request: Request,
     db: DbSession,
     token: str,
-    channel: str = "wechat",
+    channel: Literal["wechat", "alipay"] = "wechat",
     store_id: int | None = None,
 ):
     from app.services.table_resolve import resolve_dining_table
@@ -336,7 +337,6 @@ async def scan_entry(
                 "table_no": table.table_no,
                 "table_name": table.table_name,
                 "store_id": table.store_id,
-                "qr_token": table.qr_token,
             },
             "store": store,
             "channel": channel,
@@ -344,7 +344,7 @@ async def scan_entry(
                 # 首次扫码不强制注册；会员引导改到支付成功页等非阻塞时机
                 "ask_register_member": False,
                 "ask_face_welcome": False,
-                "face_consent_text": "开启人脸迎宾后到店可自动欢迎。注册时需完成动作挑战与摄像头实拍（防重放 token），图像另做清晰度/亮度粗检；可随时关闭。",
+                "face_consent_text": "开启人脸迎宾后到店可自动欢迎。注册需完成随机动作挑战并由摄像头实拍采集；当前为基础防重放与图像质量检查，不等同专业服务端视觉活体检测，也不用于支付身份验证。可随时关闭并撤销人脸数据。",
                 "member_consent_text": "开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。随时可在「我的」页开通，不影响点餐。",
             },
         },

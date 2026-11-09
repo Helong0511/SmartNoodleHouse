@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import dev_mode_allowed, get_settings
 from app.core.exceptions import AppException
 
 logger = logging.getLogger(__name__)
@@ -18,10 +18,8 @@ _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
 
 
 def _mock_allowed() -> bool:
-    s = get_settings()
-    if s.is_production:
-        return False
-    return s.is_development or s.allow_auth_mock
+    """微信手机号/access_token 的 Mock 统一受三重门控保护。"""
+    return dev_mode_allowed("allow_auth_mock")
 
 
 _PHONE_CODE_TTL = 600
@@ -112,10 +110,8 @@ async def get_phone_by_code(code: str) -> str:
     settings = get_settings()
     try:
         if not settings.wechat_app_id or not settings.wechat_app_secret:
-            if _mock_allowed():
-                digest = hashlib.md5(code.encode()).hexdigest()[:8]
-                return f"138{digest[:8]}".ljust(11, "0")[:11]
-            raise AppException(50030, "微信小程序未配置，无法解析手机号")
+            # 手机号 mock 必须在 bind_member_phone 中走未验证分支；此处只接受微信官方 code。
+            raise AppException(50030, "微信小程序未配置，无法解析官方手机号授权码")
 
         token = await get_access_token()
         url = f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}"

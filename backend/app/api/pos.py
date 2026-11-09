@@ -49,7 +49,7 @@ async def search_pos_customers(
     user: CurrentUser,
     keyword: str = Query(..., min_length=1, max_length=100, description="手机号/昵称/会员号"),
     store_id: int | None = None,
-    page_size: int = 20,
+    page_size: int = Query(20, ge=1, le=100),
 ):
     """收银台绑客：按本店口径搜索会员（手机号/昵称/编号）。"""
     sid = require_bound_store(user, store_id)
@@ -208,8 +208,8 @@ async def current_shift_orders(
     request: Request,
     db: DbSession,
     user: CurrentUser,
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
 ):
     """当前班次内本人收款的收银订单列表。"""
     shift = await PosShiftService.get_open_shift(db, user.id)
@@ -288,8 +288,8 @@ async def list_pos_refunds(
     keyword: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
 ):
     """退款申请列表：收银员看本人；店长/管理员看本店。"""
     data = await PosRefundService.list_requests(

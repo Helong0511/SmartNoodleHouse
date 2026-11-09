@@ -6,6 +6,7 @@ const dineCtx = require('../../utils/context')
 const tracker = require('../../utils/tracker')
 const clientConfig = require('../../utils/clientConfig')
 const orderActions = require('../../utils/orderActions')
+const subscribe = require('../../utils/subscribe')
 const app = getApp()
 
 // 轻量评价标签（与后端 feedback_service.VERDICT_WHITELIST 对齐）
@@ -109,6 +110,8 @@ Page({
     loading: true,
     loadError: false, // P2-18：加载失败态
     repaying: false, // P3-17：支付按钮防重复提交
+    canSubscribeOrderReady: false,
+    subscribeLoading: false,
     order: {},
     orderItems: [],
     hasPacking: false,
@@ -158,8 +161,12 @@ Page({
   },
 
   onLoad(query) {
+    this._unloaded = false
     this.orderId = query.order_id
     this.pointsEarned = Number(query.points_earned || 0)
+    subscribe.loadTemplates().then((templates) => {
+      if (!this._unloaded) this.setData({ canSubscribeOrderReady: !!(templates && templates.alipay_order_ready) })
+    }).catch(() => {})
     this._boot()
   },
 
@@ -177,6 +184,7 @@ Page({
   },
 
   onUnload() {
+    this._unloaded = true
     this._clearPoll()
   },
 
@@ -435,6 +443,21 @@ Page({
     const code = this.data.pickupCode
     if (!code) return
     my.setClipboard({ text: code, success: () => my.showToast({ content: '已复制取餐号', type: 'success' }) })
+  },
+
+  async subscribeOrderReady() {
+    if (this.data.subscribeLoading || !this.data.canSubscribeOrderReady) return
+    // requestSubscribeMessage 必须在用户点击回调中立即调用，不能放到支付网络请求之后。
+    const request = subscribe.requestOrderReadySubscribe()
+    this.setData({ subscribeLoading: true })
+    try {
+      const result = await request
+      my.showToast({ content: result ? '订阅操作已完成' : '未完成订阅，可稍后重试', type: 'none' })
+    } catch (_) {
+      my.showToast({ content: '未完成订阅，可稍后重试', type: 'none' })
+    } finally {
+      this.setData({ subscribeLoading: false })
+    }
   },
 
   async repay() {

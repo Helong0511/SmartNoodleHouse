@@ -63,17 +63,32 @@ async def meituan_notify(request: Request, db: DbSession, background_tasks: Back
     try:
         provider = get_delivery_provider("MEITUAN")
         raw = provider.verify_notify(headers, body, notify_url=settings.meituan_notify_url)
+    except ValueError as exc:
+        import logging
+
+        message = str(exc)
+        status = 503 if ("未配置" in message or "无法验签" in message) else 401
+        logging.getLogger("app.delivery").warning("美团回调验签/配置失败: %s", message)
+        return JSONResponse({"data": "ng"}, status_code=status)
+    except Exception:
+        import logging
+
+        logging.getLogger("app.delivery").exception("美团回调验签阶段异常")
+        return JSONResponse({"data": "ng"}, status_code=503)
+
+    try:
         row, is_new = await enqueue_delivery_webhook(
             db, platform="MEITUAN", headers=headers, body=body, raw=raw
         )
         await db.commit()
-        if is_new:
-            background_tasks.add_task(process_inbox_item, row.id)
-    except Exception as e:
+    except Exception:
+        await db.rollback()
         import logging
 
-        logging.getLogger("app.delivery").warning("美团回调处理失败: %s", e, exc_info=True)
-        return JSONResponse({"data": "ng"}, status_code=200)
+        logging.getLogger("app.delivery").exception("美团回调持久化失败，要求平台重试")
+        return JSONResponse({"data": "ng"}, status_code=503)
+    if is_new:
+        background_tasks.add_task(process_inbox_item, row.id)
     return JSONResponse({"data": "ok"})
 
 
@@ -90,17 +105,32 @@ async def eleme_notify(request: Request, db: DbSession, background_tasks: Backgr
     try:
         provider = get_delivery_provider("ELEME")
         raw = provider.verify_notify(headers, body, notify_url=settings.eleme_notify_url)
+    except ValueError as exc:
+        import logging
+
+        message = str(exc)
+        status = 503 if ("未配置" in message or "无法验签" in message) else 401
+        logging.getLogger("app.delivery").warning("饿了么回调验签/配置失败: %s", message)
+        return JSONResponse({"message": "error"}, status_code=status)
+    except Exception:
+        import logging
+
+        logging.getLogger("app.delivery").exception("饿了么回调验签阶段异常")
+        return JSONResponse({"message": "error"}, status_code=503)
+
+    try:
         row, is_new = await enqueue_delivery_webhook(
             db, platform="ELEME", headers=headers, body=body, raw=raw
         )
         await db.commit()
-        if is_new:
-            background_tasks.add_task(process_inbox_item, row.id)
-    except Exception as e:
+    except Exception:
+        await db.rollback()
         import logging
 
-        logging.getLogger("app.delivery").warning("饿了么回调处理失败: %s", e, exc_info=True)
-        return JSONResponse({"message": "error"}, status_code=200)
+        logging.getLogger("app.delivery").exception("饿了么回调持久化失败，要求平台重试")
+        return JSONResponse({"message": "error"}, status_code=503)
+    if is_new:
+        background_tasks.add_task(process_inbox_item, row.id)
     return JSONResponse({"message": "ok"})
 
 

@@ -24,13 +24,13 @@ const PROD_API_BASE = 'https://your-domain.com/api'
 /** 本地模拟器（微信开发者工具） */
 const DEV_SIMULATOR_API = 'http://127.0.0.1:8000/api'
 
-/** 本地真机：电脑局域网 IP + 后端 uvicorn --host 0.0.0.0 */
+/** 本地真机：仅开发版显式开启 DEV_USE_LAN 后使用电脑局域网 IP */
 const DEV_LAN_HOST = '192.168.1.110'
 const DEV_USE_LAN = false
 const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api`
 
-/** 体验版是否连生产 API（默认 false） */
-const TRIAL_USE_PROD_API = false
+/** 体验版默认使用生产 HTTPS API；禁止上传版回退到内网 HTTP */
+const TRIAL_USE_PROD_API = true
 
 function isDevtools() {
   try {
@@ -52,9 +52,11 @@ function isDevtools() {
 function miniEnvVersion() {
   try {
     const info = wx.getAccountInfoSync()
-    return (info && info.miniProgram && info.miniProgram.envVersion) || ''
+    const version = String((info && info.miniProgram && info.miniProgram.envVersion) || '').toLowerCase()
+    // 只信任平台明确返回的 develop/trial；探测异常、空值或未知值均按正式版处理。
+    return ['develop', 'trial', 'release'].includes(version) ? version : 'release'
   } catch (e) {
-    return ''
+    return 'release'
   }
 }
 
@@ -81,23 +83,29 @@ function appendDevApiHint(text, apiBase) {
 }
 
 function resolveDevApiBase() {
-  if (DEV_USE_LAN || !isDevtools()) return DEV_LAN_API
-  return DEV_SIMULATOR_API
+  if (isDevtools()) return DEV_SIMULATOR_API
+  // 真机只有显式开启 DEV_USE_LAN 才走局域网；false 时绝不偷偷回退到内网 HTTP。
+  return DEV_USE_LAN ? DEV_LAN_API : DEV_SIMULATOR_API
 }
 
 function resolveApiBase() {
   const ver = miniEnvVersion()
-  if (ver === 'release' || (ver === 'trial' && TRIAL_USE_PROD_API)) {
-    // P0-4：正式版强制校验 HTTPS 且拒绝占位符
-    if (PROD_API_BASE.indexOf('your-domain.com') !== -1) {
-      throw new Error('PROD_API_BASE 仍为占位符，请在 env.js 替换为真实域名后再上传正式版')
-    }
-    if (!/^https:\/\//i.test(PROD_API_BASE)) {
-      throw new Error('PROD_API_BASE 必须为 HTTPS 地址')
-    }
-    return PROD_API_BASE
+  // 只有平台明确标记的开发版，或明确选择本地 API 的体验版，才允许使用 HTTP 开发地址。
+  if (ver === 'develop' || (ver === 'trial' && !TRIAL_USE_PROD_API)) {
+    return resolveDevApiBase()
   }
-  return resolveDevApiBase()
+  // App 模块初始化时也会调用此函数；不要在这里抛错导致正式版白屏。
+  // 首个真实 API 请求前由 assertApiBaseConfigured() 完成严格校验。
+  return PROD_API_BASE
+}
+
+function assertApiBaseConfigured(apiBase) {
+  const ver = miniEnvVersion()
+  if (ver === 'develop' || (ver === 'trial' && !TRIAL_USE_PROD_API)) return
+  const base = String(apiBase || PROD_API_BASE).trim()
+  if (!/^https:\/\//i.test(base) || /your-domain\.com/i.test(base)) {
+    throw new Error('正式版 API 地址未正确配置：请在 config/env.js 设置真实 HTTPS 域名并加入平台合法域名')
+  }
 }
 
 function getEnvDebugInfo() {
@@ -111,6 +119,7 @@ function getEnvDebugInfo() {
 
 module.exports = {
   resolveApiBase,
+  assertApiBaseConfigured,
   getEnvDebugInfo,
   isRelease,
   isDevelopOrTrial,

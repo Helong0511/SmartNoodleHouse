@@ -153,7 +153,7 @@
                   <el-button size="small" @click="copyDisplayUrl(item)">复制</el-button>
                   <el-button size="small" type="primary" link @click="openDisplayUrl(item)">打开</el-button>
                 </div>
-                <p class="display-url-hint">保存本店参数后生效；叫号屏浏览器用此地址全屏打开</p>
+                <p class="display-url-hint">生产环境每家门店必须使用独立令牌；保存本店参数后生效，叫号屏浏览器用此地址全屏打开</p>
               </div>
               <p v-else-if="!props.storeId" class="display-url-hint warn">请先选择门店后再生成地址</p>
             </div>
@@ -302,17 +302,15 @@ function buildDisplayScreenToken(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** 本店叫号屏完整地址：/display?store_id=&token= */
+/** 本店叫号屏链接：令牌放 URL fragment，不进入 HTTP request / Referer / 代理访问日志。 */
 function displayScreenUrl(item: any): string {
   const sid = Number(props.storeId || 0)
   if (!sid) return ''
   const token = String(item?.strValue || '').trim()
   if (!token) return ''
-  const q = new URLSearchParams({
-    store_id: String(sid),
-    token,
-  })
-  return `${window.location.origin}/display?${q.toString()}`
+  const q = new URLSearchParams({ store_id: String(sid) })
+  const fragment = new URLSearchParams({ token })
+  return `${window.location.origin}/display?${q.toString()}#${fragment.toString()}`
 }
 
 async function copyDisplayUrl(item: any) {

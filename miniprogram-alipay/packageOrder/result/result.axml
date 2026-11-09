@@ -157,6 +157,7 @@
     </view>
 
     <button class="btn-primary" a:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" loading="{{repaying}}" disabled="{{repaying}}" onTap="repay">继续支付</button>
+    <button class="btn-ghost" a:if="{{canSubscribeOrderReady && order.payment_status === 'PAID' && !isReady}}" loading="{{subscribeLoading}}" disabled="{{subscribeLoading}}" onTap="subscribeOrderReady">订阅出餐提醒</button>
     <button class="btn-primary" onTap="goMenu">继续点餐</button>
   </block>
 </view>

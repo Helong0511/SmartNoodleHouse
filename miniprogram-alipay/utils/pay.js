@@ -1,6 +1,18 @@
 /** 支付宝小程序支付：mock 环境跳过收银台，生产调 my.tradePay；支持待确认查单 */
 
+const { getEnvDebugInfo } = require('../config/env')
+
 const PENDING_KEY = 'pending_pay'
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000
+
+function currentCustomerId() {
+  try {
+    const app = getApp()
+    return Number((app && app.globalData && app.globalData.customerId) || readStorage('customer_id') || 0) || 0
+  } catch (_) {
+    return 0
+  }
+}
 
 function readStorage(key) {
   try {
@@ -29,7 +41,8 @@ function removeStorage(key) {
 
 function isMockPay(payData) {
   if (!payData) return false
-  return !!(payData.mock_settled || payData._mock)
+  const env = getEnvDebugInfo()
+  return !!(env && env.isDevtools && !env.isRelease && (payData.mock_settled || payData._mock))
 }
 
 function savePending(info) {
@@ -38,12 +51,27 @@ function savePending(info) {
     orderId: String(info.orderId),
     paymentNo: info.paymentNo ? String(info.paymentNo) : '',
     provider: info.provider || 'ALIPAY',
+    customerId: currentCustomerId(),
     at: Date.now()
   })
 }
 
 function readPending() {
-  return readStorage(PENDING_KEY) || null
+  const pending = readStorage(PENDING_KEY) || null
+  if (!pending) return null
+  const age = Date.now() - Number(pending.at || 0)
+  if (!pending.at || age < 0 || age > PENDING_TTL_MS) {
+    removeStorage(PENDING_KEY)
+    return null
+  }
+  const customerId = currentCustomerId()
+  // 无法确认当前顾客身份时暂不查单；旧格式/跨账号记录直接丢弃，避免串查他人订单。
+  if (!customerId) return null
+  if (!pending.customerId || Number(pending.customerId) !== customerId) {
+    removeStorage(PENDING_KEY)
+    return null
+  }
+  return pending
 }
 
 function clearPending(orderId) {

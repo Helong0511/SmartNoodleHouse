@@ -154,6 +154,7 @@ async def add_shared_cart_item(
 
 
 @router.patch("/table-party/cart/items/{item_id}")
+@router.post("/table-party/cart/items/{item_id}/quantity")
 async def update_shared_cart_item(
     item_id: int,
     body: SharedCartUpdateBody,

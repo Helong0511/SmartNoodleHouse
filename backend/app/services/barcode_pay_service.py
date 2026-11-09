@@ -35,6 +35,17 @@ async def _poll_wechat(payment_no: str) -> dict[str, Any]:
     raise AppException(50013, "微信支付超时，请顾客确认是否已付款；未付款请重新扫码")
 
 
+def _wechat_amount_from_result(result: dict[str, Any]) -> str:
+    raw = result.get("raw") if isinstance(result.get("raw"), dict) else {}
+    total_fee = raw.get("total_fee")
+    if total_fee is None:
+        raise AppException(50041, "微信付款码结果缺少 total_fee，禁止确认收款")
+    try:
+        return str(Decimal(str(total_fee)) / Decimal("100"))
+    except Exception as exc:
+        raise AppException(50041, "微信付款码 total_fee 非法") from exc
+
+
 async def settle_wechat_barcode(
     *,
     payment_no: str,
@@ -58,6 +69,7 @@ async def settle_wechat_barcode(
             "transaction_id": first.get("transaction_id"),
             "immediate_paid": True,
             "provider_trade_no": first.get("transaction_id"),
+            "provider_amount": _wechat_amount_from_result(first),
         }
     if state in ("USERPAYING", "UNKNOWN"):
         q = await _poll_wechat(payment_no)
@@ -68,6 +80,7 @@ async def settle_wechat_barcode(
             "transaction_id": q.get("transaction_id"),
             "immediate_paid": True,
             "provider_trade_no": q.get("transaction_id"),
+            "provider_amount": _wechat_amount_from_result(q),
         }
     raise AppException(50012, f"微信支付失败: {state or '未知'}")
 
@@ -111,5 +124,6 @@ async def settle_alipay_barcode(
             "trade_no": q.get("trade_no"),
             "immediate_paid": True,
             "provider_trade_no": q.get("trade_no"),
+            "provider_amount": q.get("total_amount"),
         }
     raise AppException(50021, "支付宝支付未完成")

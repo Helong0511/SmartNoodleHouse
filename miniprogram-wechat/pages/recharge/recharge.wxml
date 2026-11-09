@@ -21,6 +21,7 @@
   </view>
 
   <button class="btn-primary" loading="{{loading}}" disabled="{{!selectedId}}" bindtap="submit">确认充值</button>
+  <button class="btn-ghost mini" wx:if="{{canSubscribeBalanceLow}}" loading="{{subscribeLoading}}" disabled="{{subscribeLoading}}" bindtap="subscribeBalanceLow">订阅余额提醒</button>
   <view class="rules">
     <view class="rules-title">储值说明</view>
     <view class="tip">· 到账金额 = 本金 + 赠送，支付成功后立即可用于本店点餐结算。</view>

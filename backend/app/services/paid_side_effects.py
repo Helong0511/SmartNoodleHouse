@@ -4,6 +4,7 @@
   - points_award       → CustomerService.award_points_for_paid_order
   - coupon_mark_used   → CouponService.mark_used
   - pref_update        → PreferenceService.update_from_order
+  - taste_learning     → TasteLearningService.record_paid_order_events
   - milestone_coupon   → CouponService.issue_milestones_after_paid
 
 各副作用函数自身按 order_id / 幂等键去重，故 outbox 重试不会重复入账。
@@ -34,6 +35,7 @@ async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
         "points_award",
         "coupon_mark_used",
         "pref_update",
+        "taste_learning",
         "milestone_coupon",
         "social_benefit_confirm",
         "campaign_attribution",
@@ -146,13 +148,19 @@ async def _handle_pref_update(db: AsyncSession, row) -> None:
     if not order or not order.customer_id:
         return
     await PreferenceService.update_from_order(db, order.id)
-    # 智能推荐：补记 ORDER_PAID 事件并即时增量学习（event_id 幂等，重试安全）
+
+
+@register_outbox_handler("paid_side_effect", "taste_learning")
+async def _handle_taste_learning(db: AsyncSession, row) -> None:
+    """支付后的推荐画像学习独立重试；失败必须向 Outbox 传播。"""
+    from app.models import Order
     from app.services.taste_learning_service import TasteLearningService
 
-    try:
-        await TasteLearningService.record_paid_order_events(db, order.id)
-    except Exception:
-        logger.exception("推荐画像支付学习失败 order_id=%s", order.id)
+    order = await db.get(Order, int(row.aggregate_id))
+    if not order or not order.customer_id:
+        return
+    # 事件写入以 event_id 幂等；异常不吞掉，由 Outbox 退避重试并最终进入死信。
+    await TasteLearningService.record_paid_order_events(db, order.id)
 
 
 @register_outbox_handler("paid_side_effect", "milestone_coupon")
@@ -372,3 +380,97 @@ async def enqueue_coupon_release(db: AsyncSession, order_id: int) -> None:
         )
     except Exception:
         logger.exception("入队 coupon_release 失败 order_id=%s", order_id)
+
+@register_outbox_handler("late_payment", "auto_refund")
+async def _handle_late_payment_auto_refund(db: AsyncSession, row) -> None:
+    """取消订单迟到收款自动原路退款；独立会话执行渠道请求，固定幂等键防重复。"""
+    from sqlalchemy import select
+    from app.core.database import AsyncSessionLocal
+    from app.models import Order, Payment, PaymentRefund
+    from app.services.payment_service import PaymentService
+
+    payment_id = int(row.aggregate_id)
+    payload = json.loads(row.payload) if isinstance(row.payload, str) else (row.payload or {})
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"迟到支付 Outbox payload 格式非法 event_id={row.id}")
+    if int(payload.get("payment_id") or 0) != payment_id:
+        raise RuntimeError(f"迟到支付 Outbox payment_id 与 aggregate_id 不一致 event_id={row.id}")
+    expected_order_id = int(payload.get("order_id") or 0)
+    if expected_order_id <= 0:
+        raise RuntimeError(f"迟到支付 Outbox 缺少有效 order_id event_id={row.id}")
+    reason = str(payload.get("reason") or "订单已取消，迟到支付自动退款")[:255]
+    idem_key = f"late-payment-refund:{payment_id}"
+
+    # 退款申请自身会 commit 并访问支付渠道，必须使用独立会话，不能提交/释放
+    # Outbox worker 当前持有的 claim 事务；外层只有在本 handler 正常返回后才标 DONE。
+    async with AsyncSessionLocal() as refund_db:
+        payment = await refund_db.get(Payment, payment_id)
+        if not payment:
+            raise RuntimeError(f"迟到支付对应的支付单不存在 payment_id={payment_id}")
+        if int(payment.order_id or 0) != expected_order_id:
+            raise RuntimeError(f"迟到支付 Outbox 与支付单订单归属不一致 payment_id={payment_id}")
+        order = await refund_db.get(Order, expected_order_id)
+        if not order:
+            raise RuntimeError(f"迟到支付对应的订单不存在 payment_id={payment_id}")
+        if str(order.status or "").upper() not in {"CANCELLED", "REFUNDED"}:
+            raise RuntimeError(
+                f"迟到支付自动退款要求订单保持取消/退款终态 order_id={expected_order_id}"
+            )
+
+        existing = (
+            await refund_db.execute(
+                select(PaymentRefund).where(PaymentRefund.idempotency_key == idem_key)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if (
+                int(existing.payment_id) != payment_id
+                or int(existing.order_id) != expected_order_id
+            ):
+                raise RuntimeError(f"迟到支付退款幂等键关联对象不匹配 payment_id={payment_id}")
+            status = str(existing.status or "").upper()
+            if status in {"SUCCESS", "PENDING", "PROCESSING", "UNKNOWN"}:
+                # SUCCESS 是完成；其余状态交由退款回调/查单补偿，不可另开退款单。
+                return
+            # FAILED/CLOSED/ABNORMAL 不能当作退款成功；保留 Outbox 失败告警供人工核验。
+            raise RuntimeError(
+                f"迟到支付自动退款已存在终态 {status}，需人工核验 payment_id={payment_id}"
+            )
+
+        if str(payment.status or "").upper() == "REFUNDED":
+            return
+        if str(payment.status or "").upper() not in {"PAID", "PARTIAL_REFUND"}:
+            raise RuntimeError(
+                f"迟到支付单状态不可退款 status={payment.status} payment_id={payment_id}"
+            )
+
+        inflight = await refund_db.scalar(
+            select(PaymentRefund.id).where(
+                PaymentRefund.payment_id == payment_id,
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
+            ).limit(1)
+        )
+        if inflight is not None:
+            # 可能已有人工退款申请；先等待它由渠道回调/查单收敛，再计算剩余可退金额。
+            raise RuntimeError(f"支付单已有退款处理中，等待收敛 payment_id={payment_id}")
+
+        refundable = await PaymentService.refundable_amount(refund_db, payment)
+        if refundable <= 0:
+            return
+        refund = await PaymentService.refund(
+            refund_db,
+            payment,
+            refundable,
+            reason,
+            idempotency_key=idem_key,
+        )
+        final_status = str(refund.status or "").upper()
+        if final_status in {"FAILED", "CLOSED", "ABNORMAL"}:
+            raise RuntimeError(
+                f"迟到支付渠道退款未成功 status={final_status} payment_id={payment_id}"
+            )
+        if final_status not in {"SUCCESS", "PENDING", "PROCESSING", "UNKNOWN"}:
+            raise RuntimeError(
+                f"迟到支付渠道退款返回未知状态 status={final_status} payment_id={payment_id}"
+            )
+

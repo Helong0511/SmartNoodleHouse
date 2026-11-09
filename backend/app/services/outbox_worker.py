@@ -437,6 +437,27 @@ async def process_outbox_item(outbox_id: int) -> bool:
             except Exception:
                 logger.exception("Failed to register recommendation cache invalidation handler")
 
+        # 支付/退款相关 handler 通过装饰器注册。Worker 在服务重启后可能先于
+        # 任意支付 API 请求恢复积压事件；不能依赖业务请求曾经 import 过该模块。
+        # 显式按 aggregate_type 懒加载，保证 paid_side_effect / refund /
+        # coupon_release / late_payment / order_notification 均可跨重启恢复。
+        if row.aggregate_type in {
+            "paid_side_effect", "refund", "order", "late_payment", "order_notification"
+        }:
+            try:
+                import app.services.paid_side_effects  # noqa: F401
+            except Exception as exc:
+                logger.exception(
+                    "Failed to import payment outbox handler registry agg=%s event=%s",
+                    row.aggregate_type,
+                    row.event_kind,
+                )
+                await db.rollback()
+                await _mark_failed(
+                    db, row, f"handler_module_import_failed: {type(exc).__name__}", wid=wid
+                )
+                return True
+
         handler = _resolve_outbox_handler(row)
         if handler is None:
             logger.error("Outbox handler not registered: %s/%s id=%s", row.aggregate_type, row.event_kind, outbox_id)

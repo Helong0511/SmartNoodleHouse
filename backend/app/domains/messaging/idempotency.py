@@ -116,10 +116,13 @@ async def try_acquire(
         meta_json = dumps_json(meta)[:500]
 
     row = ProcessedMessage(scope=scope, message_id=message_id, meta_json=meta_json)
-    db.add(row)
     try:
-        # SAVEPOINT：并发下仍可能撞 UNIQUE，隔离冲突不回滚外层业务事务
+        # 必须先建立 SAVEPOINT，再 add/flush。
+        # SQLAlchemy begin_nested() 会先 flush 当前 Session 的待处理对象；
+        # 若在 begin_nested() 前 db.add(row)，唯一键冲突可能发生在 SAVEPOINT 外，
+        # 进而把调用方整个业务事务置为 PendingRollback。
         async with db.begin_nested():
+            db.add(row)
             await db.flush()
     except IntegrityError:
         try:

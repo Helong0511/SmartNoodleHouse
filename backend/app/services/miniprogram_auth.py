@@ -5,7 +5,7 @@ from datetime import datetime
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import dev_mode_allowed, get_settings
 from app.core.exceptions import AppException
 from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa2
 
@@ -19,21 +19,15 @@ def _identity_fingerprint(value: str | None) -> str:
 
 
 def _mock_allowed(*, provider_configured: bool = False) -> bool:
-    """生产禁止 mock；开发未配密钥或显式 ALLOW_AUTH_MOCK=true 时允许。"""
-    s = get_settings()
-    if s.is_production:
-        return False
-    if s.allow_auth_mock:
-        return True
-    # 本地调试：未配置小程序密钥时自动走 mock，避免必配微信才能进首页
-    return s.is_development and not provider_configured
+    """Mock 必须同时满足 development、APP_DEBUG 和 ALLOW_AUTH_MOCK 三重门控。"""
+    # provider_configured 保留为兼容参数；是否配置真实平台凭据不应放宽 Mock 安全门。
+    _ = provider_configured
+    return dev_mode_allowed("allow_auth_mock")
 
 
 def _allow_explicit_mock_code(code: str) -> bool:
-    """mock: 仅允许 development 环境使用，staging/prod 均不得凭前缀绕过真实平台认证。"""
-    if not code or not str(code).startswith("mock:"):
-        return False
-    return bool(get_settings().is_development)
+    """mock: 凭证仅在三重门控全部开启时可用，不能只凭 APP_ENV=development 绕过平台认证。"""
+    return bool(code and str(code).startswith("mock:") and _mock_allowed())
 
 
 def _mock_wechat_openid(code: str) -> dict:

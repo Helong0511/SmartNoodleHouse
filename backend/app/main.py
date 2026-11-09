@@ -761,6 +761,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # 在模块导入创建 ASGI app 时同步校验，不能依赖 lifespan（可能被 --lifespan off 关闭）。
+    validate_settings(settings)
     setup_logging(json_logs=settings.json_logs or settings.is_production, level=settings.log_level)
     # P1-40: 生产环境关闭 /docs /redoc /openapi.json
     docs_url = "/docs" if settings.is_development else None
@@ -826,6 +828,10 @@ def create_app() -> FastAPI:
             )
         return await call_next(request)
 
+    # 全局请求体上限与 Nginx client_max_body_size 7m 对齐；回调仍由更严格的 512KB 专项中间件约束。
+    from app.core.request_body_limit import RequestBodyLimitMiddleware
+
+    app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=7 * 1024 * 1024)
     # 请求体硬限制放在 Allowlist/RateLimit 之后执行：先拒绝未授权来源，
     # 避免攻击者在读取完整回调体前占用缓冲槽。
     app.add_middleware(WebhookBodyLimitMiddleware, max_body_bytes=settings.webhook_max_body_bytes)

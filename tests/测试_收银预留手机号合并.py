@@ -95,21 +95,28 @@ async def test_bind_verified_phone_merges_pos_shell_points_and_social(db_session
         verification_source="WECHAT",
         confirm_merge=False,
     )
+    # 缓存主键后再 commit；AsyncSession 默认 expire_on_commit，
+    # 提交后直接访问 ORM 属性会在同步上下文触发 MissingGreenlet。
+    mini_id = int(mini.id)
+    shell_id = int(shell.id)
+    merged_id = int(merged_customer.id)
     await db_session.commit()
 
     assert merged is True
-    assert int(merged_customer.id) == int(mini.id)
-    assert int(merged_customer.phone_verified or 0) == 1
-    assert int(merged_customer.points or 0) == 88
+    assert merged_id == mini_id
+    merged_after = await db_session.get(Customer, mini_id)
+    assert merged_after is not None
+    assert int(merged_after.phone_verified or 0) == 1
+    assert int(merged_after.points or 0) == 88
 
-    shell_after = await db_session.get(Customer, shell.id)
+    shell_after = await db_session.get(Customer, shell_id)
     assert shell_after is not None
     assert int(shell_after.status or 0) == 0
 
     social = (
         await db_session.execute(
             select(CustomerSocialIdentity).where(
-                CustomerSocialIdentity.customer_id == mini.id,
+                CustomerSocialIdentity.customer_id == mini_id,
                 CustomerSocialIdentity.identity_code == "SANITATION",
                 CustomerSocialIdentity.status == "ACTIVE",
             )

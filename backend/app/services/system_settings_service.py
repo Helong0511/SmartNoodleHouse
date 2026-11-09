@@ -108,7 +108,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "string",
         "max_length": 128,
         "store_override": True,
-        "description": "本店叫号屏 URL 的 token 参数；留空则沿用平台 .env 的 DISPLAY_SCREEN_TOKEN；生产环境建议各店独立",
+        "description": "本店叫号屏 URL 的独立 token；生产环境必须逐店设置，不继承全局 DISPLAY_SCREEN_TOKEN；开发环境可使用全局回退",
     },
     "visitor_data_retention_days": {
         "group": "welcome",

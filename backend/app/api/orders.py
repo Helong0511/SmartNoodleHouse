@@ -75,41 +75,46 @@ async def create_order(
         skip_promotions=bool(data.skip_promotions),
         operator_id=None,
         scheduled_pickup_at=data.scheduled_pickup_at,
+        shared_cart_party_id=data.shared_cart_party_id,
+        shared_cart_revision=data.shared_cart_revision,
         use_social_benefit=bool(data.use_social_benefit),
         social_rule_id=data.social_rule_id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
-    # 一人结全桌：正式下单成功后清空本桌共享草稿
-    try:
+    is_idempotent_replay = bool(getattr(order, "_idempotent_replay", False))
+    if not is_idempotent_replay:
+        # 一人结全桌：共享草稿清理是下单事务的一部分；失败必须回滚订单与库存，
+        # 不能留下已下单但草稿仍可再次结算的状态。
         from app.services.shared_cart_service import SharedCartService
 
-        await SharedCartService.clear_after_order(
-            db,
-            store_id=int(order.store_id),
-            table_id=int(order.table_id) if order.table_id else None,
-            customer_id=int(customer.id),
-        )
-    except Exception:
-        pass
+        async with db.begin_nested():
+            await SharedCartService.clear_after_order(
+                db,
+                store_id=int(order.store_id),
+                table_id=int(order.table_id) if order.table_id else None,
+                customer_id=int(customer.id),
+            )
     await db.commit()
-    try:
-        await ws_manager.notify_order_event(
-            "ORDER_CREATED",
-            {
-                "order_id": order.id,
-                "order_no": order.order_no,
-                "status": order.status,
-                "store_id": order.store_id,
-                "table_id": order.table_id,
-                "table_no": table.table_no if table else None,
-                "dining_type": order.dining_type,
-            },
-        )
-    except Exception as ws_err:
-        # WS 推送失败不应导致下单事务回滚（顾客已视为下单成功）
-        import logging
+    if not is_idempotent_replay:
+        try:
+            await ws_manager.notify_order_event(
+                "ORDER_CREATED",
+                {
+                    "order_id": order.id,
+                    "order_no": order.order_no,
+                    "status": order.status,
+                    "store_id": order.store_id,
+                    "table_id": order.table_id,
+                    "table_no": table.table_no if table else None,
+                    "dining_type": order.dining_type,
+                },
+                customer_id=int(order.customer_id) if order.customer_id else None,
+            )
+        except Exception as ws_err:
+            # WS 推送失败不应导致下单事务回滚（顾客已视为下单成功）
+            import logging
 
-        logging.getLogger("app.order").warning("下单 WS 通知失败 order=%s: %s", order.order_no, ws_err)
+            logging.getLogger("app.order").warning("下单 WS 通知失败 order=%s: %s", order.order_no, ws_err)
     await AuditService.log(
         db,
         action="order.create",

@@ -9,8 +9,47 @@ const STATUS_LABEL = {
   CANCELLED: '已取消'
 }
 
-function genRequestId() {
-  return `fs${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+const FLASH_SALE_REQUESTS_KEY = 'flash_sale_request_ids_v1'
+const FLASH_SALE_REQUEST_TTL = 24 * 60 * 60 * 1000
+
+function requestScope(campaignId, storeId) {
+  const customerId = Number(auth.readStorage('customer_id') || 0)
+  return `${customerId}:${Number(storeId)}:${Number(campaignId)}`
+}
+
+function readRequestMap() {
+  try {
+    const value = my.getStorageSync({ key: FLASH_SALE_REQUESTS_KEY })
+    return value && value.data && typeof value.data === 'object' && !Array.isArray(value.data) ? value.data : {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function getRequestId(campaignId, storeId) {
+  const now = Date.now()
+  const scope = requestScope(campaignId, storeId)
+  const entries = Object.entries(readRequestMap())
+    .filter(([, item]) => item && item.id && now - Number(item.createdAt || 0) < FLASH_SALE_REQUEST_TTL)
+    .sort((a, b) => Number(b[1].createdAt || 0) - Number(a[1].createdAt || 0))
+    .slice(0, 49)
+  const cache = {}
+  entries.forEach(([key, item]) => { cache[key] = item })
+  if (cache[scope]) return cache[scope].id
+  const id = `fs${now.toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  cache[scope] = { id, createdAt: now }
+  try {
+    my.setStorageSync({ key: FLASH_SALE_REQUESTS_KEY, data: cache })
+  } catch (_) {
+    throw new Error('无法保存抢购幂等凭证，已阻止重复提交风险')
+  }
+  return id
+}
+
+function clearRequestId(campaignId, storeId) {
+  const cache = readRequestMap()
+  delete cache[requestScope(campaignId, storeId)]
+  try { my.setStorageSync({ key: FLASH_SALE_REQUESTS_KEY, data: cache }) } catch (_) {}
 }
 
 /** 列表按钮状态：限购 / 已持有 / 售罄仅做展示，服务端仍会二次校验 */
@@ -67,9 +106,10 @@ Page({
       .catch(() => this.reload())
   },
 
-  onTableChange(e) {
-    if (e && e.detail) {
-      this.applyCtx(e.detail)
+  onTableChange(ctx) {
+    const next = ctx && ctx.detail ? ctx.detail : ctx
+    if (next) {
+      this.applyCtx(next)
       this.reload()
     }
   },
@@ -146,16 +186,17 @@ Page({
     try {
       const res = await api.post(`/miniprogram/flash-sales/${campaignId}/claim`, {
         store_id: this.data.storeId,
-        client_request_id: genRequestId()
+        client_request_id: getRequestId(campaignId, this.data.storeId)
       })
+      clearRequestId(campaignId, this.data.storeId)
       if (res && res.already_claimed) {
         my.showToast({ content: '已抢到，请勿重复抢购', type: 'none' })
       } else {
         const deadline = (res && (res.expires_at || res.verify_deadline_at)) || ''
-        my.showModal({
+        my.alert({
           title: '抢购成功',
           content: `核销码 ${res.claim_no}${deadline ? `，请在 ${deadline} 前到店核销` : ''}`,
-          showCancel: false
+          buttonText: '知道了'
         })
       }
       this.setData({ tab: 'mine' })

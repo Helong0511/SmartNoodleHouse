@@ -182,3 +182,59 @@ async def test_completed_clears_claim(db_session):
     assert updated.status == "COMPLETED"
     assert updated.kitchen_claimed_by is None
     assert updated.kitchen_claimed_at is None
+
+@pytest.mark.asyncio
+async def test_stale_takeover_cannot_overwrite_new_claimer(db_session):
+    """接管请求基于旧认领人 CAS；并发先行者已接管时，迟到请求必须冲突。"""
+    from sqlalchemy import update
+
+    store = Store(id=841, store_no="T-CLAIM-05", name="认领店5", status=1)
+    cook_a = User(
+        id=842, username="cook_a5", password_hash="x", display_name="张三",
+        role_id=1, store_id=store.id, status=1,
+    )
+    cook_b = User(
+        id=843, username="cook_b5", password_hash="x", display_name="李四",
+        role_id=1, store_id=store.id, status=1,
+    )
+    cook_c = User(
+        id=844, username="cook_c5", password_hash="x", display_name="王五",
+        role_id=1, store_id=store.id, status=1,
+    )
+    order = Order(
+        id=845, order_no="O-CLAIM-05", store_id=store.id,
+        status="COOKING", payment_status="PAID",
+        subtotal=Decimal("18.00"), total_amount=Decimal("18.00"),
+        kitchen_claimed_by=cook_a.id,
+        kitchen_claimed_at=datetime.now(timezone.utc),
+    )
+    db_session.add_all([store, cook_a, cook_b, cook_c, order])
+    # async session 默认 commit 后 expire_on_commit；先缓存标量主键，
+    # 避免在提交后直接读取过期 ORM 属性触发 MissingGreenlet。
+    order_id = int(order.id)
+    stale_operator_id = int(cook_b.id)
+    winner_operator_id = int(cook_c.id)
+    stale_claimer_id = int(cook_a.id)
+    await db_session.commit()
+
+    # 模拟另一个事务先完成接管，但当前请求仍持有旧的 ORM 认领人快照。
+    await db_session.execute(
+        update(Order)
+        .where(Order.id == order_id)
+        .values(kitchen_claimed_by=winner_operator_id)
+        .execution_options(synchronize_session=False)
+    )
+    # 提交模拟的并发赢家，保证随后 CAS 失败后的 rollback 不会撤销赢家的认领。
+    await db_session.commit()
+    # 保留请求读取时的旧快照；数据库中已是 winner_operator_id。
+    order.status = "COOKING"
+    order.kitchen_claimed_by = stale_claimer_id
+
+    with pytest.raises(AppException) as ei:
+        await takeover_kitchen_claim(
+            db_session, order, operator_id=stale_operator_id
+        )
+    assert ei.value.code == 40028
+    await db_session.rollback()
+    refreshed = await db_session.get(Order, order_id, populate_existing=True)
+    assert refreshed.kitchen_claimed_by == winner_operator_id

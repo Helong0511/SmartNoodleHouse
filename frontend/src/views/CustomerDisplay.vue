@@ -23,7 +23,7 @@
       <h2>请配置门店</h2>
       <p>在浏览器地址栏追加参数，例如：</p>
       <code>/display?store_id=1</code>
-      <p v-if="needToken" class="hint">生产环境还需 <code>&amp;token=您的叫号屏令牌</code></p>
+      <p v-if="needToken" class="hint">生产环境请使用后台生成的本门店专属叫号屏链接。</p>
     </div>
 
     <div v-else-if="featureDisabled" class="setup">
@@ -158,10 +158,23 @@ const storeId = computed(() => {
   const n = Number(Array.isArray(raw) ? raw[0] : raw)
   return Number.isFinite(n) && n > 0 ? n : 0
 })
-const displayToken = computed(() => {
-  const raw = route.query.token
-  return String(Array.isArray(raw) ? raw[0] : raw || '').trim()
-})
+const displayToken = ref('')
+
+function initializeDisplayToken() {
+  const fragment = String(window.location.hash || '').replace(/^#/, '')
+  const fragmentToken = new URLSearchParams(fragment).get('token') || ''
+  const rawQueryToken = route.query.token
+  const queryToken = String(Array.isArray(rawQueryToken) ? rawQueryToken[0] : rawQueryToken || '').trim()
+  displayToken.value = String(fragmentToken || queryToken).trim()
+
+  if (fragmentToken || queryToken) {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('token')
+    url.hash = ''
+    // 清除地址栏与当前历史项中的 bearer token；新链接使用 fragment，HTTP 请求不会携带它。
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`)
+  }
+}
 
 const storeName = ref('')
 const preparing = ref<DisplayItem[]>([])
@@ -180,6 +193,7 @@ watch(soundOn, (on) => {
 const voiceUnlocked = ref(isVoiceUnlocked())
 
 let ws: WebSocket | null = null
+let disposed = false
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -408,10 +422,21 @@ function tickReadyRemind() {
   processReadyVoice(ready.value, false)
 }
 
-async function load() {
-  if (!storeId.value) return
+let loadChain: Promise<void> = Promise.resolve()
+
+function load(): Promise<void> {
+  // WebSocket 与轮询共用串行队列，避免旧快照覆盖新状态。
+  const next = loadChain.then(() => loadOnce(), () => loadOnce())
+  loadChain = next.catch(() => {})
+  return next
+}
+
+async function loadOnce() {
+  if (disposed || !storeId.value) return
+  const requestedStoreId = storeId.value
   try {
     const res = await publicApi.get('/orders/display/active', { params: displayParams() })
+    if (disposed || requestedStoreId !== storeId.value) return
     featureDisabled.value = false
     const data = res.data || {}
     const nextReady = (data.ready || []) as DisplayItem[]
@@ -438,12 +463,16 @@ async function load() {
 }
 
 async function loadStoreName() {
-  if (!storeId.value) return
+  if (disposed || !storeId.value) return
+  const requestedStoreId = storeId.value
   try {
-    const res = await publicApi.get(`/miniprogram/stores/${storeId.value}`)
+    const res = await publicApi.get(`/miniprogram/stores/${requestedStoreId}`)
+    if (disposed || requestedStoreId !== storeId.value) return
     storeName.value = res.data?.name || ''
   } catch {
-    storeName.value = `门店 #${storeId.value}`
+    if (!disposed && requestedStoreId === storeId.value) {
+      storeName.value = `门店 #${requestedStoreId}`
+    }
   }
 }
 
@@ -455,42 +484,46 @@ function stopPoll() {
 }
 
 function startPoll() {
-  if (pollTimer) return
+  if (disposed || pollTimer) return
   pollTimer = setInterval(() => load(), 8000)
   connStatus.value = 'polling'
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return
+  if (disposed || reconnectTimer) return
   const delay = Math.min(15000, 1000 * 2 ** reconnectAttempt++)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    connectWs()
+    if (!disposed) connectWs()
   }, delay)
 }
 
 function connectWs() {
-  if (!storeId.value) return
-  try {
-    ws?.close()
-  } catch {
-    /* */
+  if (disposed || !storeId.value) return
+  const previous = ws
+  ws = null
+  if (previous) {
+    previous.onclose = null
+    try { previous.close() } catch { /* */ }
   }
   connStatus.value = 'connecting'
   const params: Record<string, string | number> = { store_id: storeId.value }
-  if (displayToken.value) params.token = displayToken.value
-  ws = openPublicWebSocket('display', params)
+  ws = openPublicWebSocket('display', params, displayToken.value)
 
   ws.onopen = () => {
     reconnectAttempt = 0
     connStatus.value = 'online'
     stopPoll()
   }
-  ws.onmessage = () => load()
+  ws.onmessage = () => {
+    if (!disposed) void load()
+  }
   ws.onerror = () => {
+    if (disposed) return
     connStatus.value = 'offline'
   }
   ws.onclose = () => {
+    if (disposed) return
     connStatus.value = 'offline'
     startPoll()
     scheduleReconnect()
@@ -532,6 +565,8 @@ function tickClock() {
 let unbindVoice: (() => void) | null = null
 
 onMounted(async () => {
+  initializeDisplayToken()
+  disposed = false
   unbindVoice = bindAutoVoiceUnlock((ok) => {
     if (ok) voiceUnlocked.value = true
   })
@@ -549,6 +584,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   unbindVoice?.()
   stopPoll()
   for (const id of overdueTimers.keys()) clearOverdueTimer(id)

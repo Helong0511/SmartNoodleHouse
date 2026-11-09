@@ -154,16 +154,6 @@ async def apply_order_status(
         # 不能吞掉数据库错误后提交 READY 却缺失通知任务。
         await notify_order_ready_subscribe(db, order)
     elif target == "PAID" and old != "PAID":
-        if old == "CANCELLED":
-            # 关单后渠道迟到成功：取消时已回补库存，复活须重新扣库
-            order.cancelled_at = None
-            try:
-                await _deduct_order_stock(db, order)
-            except Exception:
-                logger.exception(
-                    "迟到支付复活扣库失败 order_id=%s，拒绝入账以免超卖", order.id
-                )
-                raise
         if order.customer_id:
             # 支付成功副作用：与 PAID 同事务写入 DB outbox（积分/券/口味）。
             # outbox 写入失败 → 整事务回滚（含 PAID），provider 回调重试，fail-closed。
@@ -233,25 +223,6 @@ async def _restore_order_stock(db: AsyncSession, order: Order) -> None:
     # deadlocking when their OrderItem rows are returned in different orders.
     for product_id in sorted(aggregated):
         await restore_stock(db, product_id, aggregated[product_id], store_id=order.store_id)
-    if aggregated:
-        from app.services.menu_cache_service import invalidate_store_menu_cache
-
-        await invalidate_store_menu_cache(db, order.store_id)
-
-
-async def _deduct_order_stock(db: AsyncSession, order: Order) -> None:
-    """CANCELLED→PAID 复活时重新扣库存（与建单扣库口径一致）。"""
-    from app.services.stock_service import deduct_stock
-
-    items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
-    aggregated: dict[int, int] = {}
-    for it in items:
-        pid = int(it.product_id)
-        aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
-    # Match restore/create ordering so all order lifecycle paths lock products
-    # by ascending primary key, independent of cart or database row order.
-    for product_id in sorted(aggregated):
-        await deduct_stock(db, product_id, aggregated[product_id], store_id=order.store_id)
     if aggregated:
         from app.services.menu_cache_service import invalidate_store_menu_cache
 

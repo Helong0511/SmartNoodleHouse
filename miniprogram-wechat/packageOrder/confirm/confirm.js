@@ -1,7 +1,6 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const payUtil = require('../../utils/pay')
-const subscribe = require('../../utils/subscribe')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const voucherUtil = require('../../utils/voucher')
@@ -172,7 +171,7 @@ Page({
     const cart = auth.getCart() || []
     return cart.map((c) => {
       const opts = (c.option_ids || []).slice().map(String).sort().join('.')
-      return `${c.product_id}x${c.quantity || 1}:${opts}`
+      return `${c.product_id}x${c.quantity || 1}:${opts}:${String(c.remark || '')}`
     }).sort().join('|')
   },
 
@@ -468,6 +467,7 @@ Page({
     this._socialHint = null
     this._socialIdentityCodes = []
     try {
+      const sid = this.submitStoreId() || this.storeId()
       await clientConfig.loadClientConfig(true, sid).catch(() => { })
       if (!clientConfig.isSocialBenefitEnabled()) {
         this.setData({ hasSocialBenefit: false, useSocialBenefit: false, socialBenefitLabel: '' })
@@ -1247,9 +1247,10 @@ Page({
     return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
   },
 
-  makeIdempotencyKey(cart) {
+  makeIdempotencyKey(cart, sharedMeta) {
     // 内容哈希 + 本次结算 nonce：网络重试可幂等；同款再买不会命中已付订单
     const cid = app.globalData.customerId || '0'
+    const shared = sharedMeta || require('../../utils/sharedCart').getMeta() || {}
     const items = (cart || auth.getCart() || []).map((c) => {
       const opts = (c.option_ids || []).slice().map(String).sort().join('.')
       return `${c.product_id}x${c.quantity || 1}:${opts}`
@@ -1259,6 +1260,11 @@ Page({
       this.data.needPack ? '1' : '0',
       this.data.selectedCouponId || 0,
       this.data.selectedVoucherId || 0,
+      this.data.payMethod || 'WECHAT',
+      this.data.useSocialBenefit ? 'SOCIAL' : 'NORMAL',
+      shared.party_id || 0,
+      shared.revision || 0,
+      this._composeRemark() || '',
       this._scheduledPickupIso() || '',
       items.join(',')
     ].join('|')
@@ -1368,6 +1374,8 @@ Page({
         return
       }
       await auth.ensureLogin()
+      const sharedCart = require('../../utils/sharedCart')
+      const sharedMeta = sharedCart.isActive() ? sharedCart.getMeta() : {}
       const order = await api.post('/orders', {
         store_id: this.submitStoreId(),
         table_token: tableToken,
@@ -1376,7 +1384,9 @@ Page({
         dining_type: this.data.needPack ? 'TAKEAWAY' : 'DINE_IN',
         remark: remarkText,
         scheduled_pickup_at: this._scheduledPickupIso() || undefined,
-        idempotency_key: this.makeIdempotencyKey(cart),
+        idempotency_key: this.makeIdempotencyKey(cart, sharedMeta),
+        shared_cart_party_id: sharedMeta.party_id || undefined,
+        shared_cart_revision: sharedMeta.revision || undefined,
         skip_promotions: this.data.payMethod === 'BALANCE',
         use_social_benefit: this.data.payMethod !== 'BALANCE' && !!this.data.useSocialBenefit,
         customer_coupon_id: (this.data.payMethod === 'BALANCE' || this.data.useSocialBenefit)
@@ -1388,7 +1398,8 @@ Page({
         items: cart.map((c) => ({
           product_id: c.product_id,
           quantity: c.quantity || 1,
-          option_ids: c.option_ids || []
+          option_ids: c.option_ids || [],
+          remark: c.remark || undefined
         }))
       })
       const payRes = await api.post(`/payments/orders/${order.id}/pay`, {
@@ -1424,14 +1435,15 @@ Page({
         wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${ptsFail}` })
         return
       }
+      // 收银台成功但服务端尚未确认 PAID：保留购物车与 checkout nonce，交由结果页继续查单。
+      if (!(payOutcome && payOutcome.paid === true)) {
+        wx.showToast({ title: '支付结果确认中，请稍后在订单页查看', icon: 'none', duration: 2500 })
+        wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}` })
+        return
+      }
       auth.saveCart([])
       this.clearCheckoutNonce()
       prefUtil.clearPrefsCache(app)
-      try {
-        await subscribe.requestOrderReadySubscribe()
-      } catch (_) {
-        // 订阅授权是可选能力，不能阻断已成功的支付和订单结果页跳转。
-      }
       const pts =
         (payOutcome && payOutcome.sync && payOutcome.sync.points_earned) ||
           (payRes && payRes.points_earned)

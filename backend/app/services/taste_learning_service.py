@@ -324,7 +324,7 @@ class TasteLearningService:
     async def record_paid_order_events(db, order_id: int) -> int:
         """为已支付订单逐明细补记 ORDER_PAID 事件（event_id 幂等），并即时增量学习。
 
-        由 paid_side_effects 的 pref_update handler 调用；outbox 重试安全：
+        由 paid_side_effects 的 taste_learning handler 调用；outbox 重试安全：
         重复事件被唯一约束去重，学习以水位增量 fold。
         """
         from app.models import Customer

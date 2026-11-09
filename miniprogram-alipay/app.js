@@ -53,8 +53,17 @@ App({
     // 桌台恢复：qr_token 为静态凭证，是否有效由后端 /entry 裁决，
     // 本地不再因 4h TTL 删除 token（旧逻辑会导致真机反复要求扫码绑桌）
     this.parseLaunch(options)
-    privacy.setupPrivacy()
+    // 先注册平台授权回调，再读取授权状态；探测失败或本地未同意时显示自有隐私提示。
     privacy.bindAppPrivacyHandler(this)
+    privacy.setupPrivacy().then((res) => {
+      if ((res && res.needAuthorization) || !privacy.hasPrivacyAgreed()) {
+        this.globalData.needPrivacyPopup = true
+        privacy.showPrivacyPopup()
+      }
+    }).catch(() => {
+      this.globalData.needPrivacyPopup = true
+      privacy.showPrivacyPopup()
+    })
     clientConfig.loadClientConfig().catch(() => { })
     // 库重置后本地 customer_token 会失效；静默探测并清理，避免启动期 Uncaught
     auth.purgeStaleSessionIfNeeded().catch(() => { })
@@ -91,7 +100,7 @@ App({
     my.getNetworkType({
       success: (res) => {
         this.globalData.networkType = res.networkType || 'unknown'
-        this.globalData.isOnline = res.networkType !== 'none'
+        this.globalData.isOnline = !!res.networkAvailable
       }
     })
     my.onNetworkStatusChange((res) => {
@@ -140,7 +149,7 @@ App({
     // 支付宝：query 可能是对象，也可能是 "token=xx&channel=alipay" 字符串
     const q = normalizeLaunchQuery(options.query)
     let token = (q.token || '').trim()
-    let channel = (q.channel || '').trim()
+    const channel = 'alipay'
 
     // Scheme 的 page 会落到 options.path；query 内 path 须用归一化后的 q（query 可能是字符串）
     if (!token) {
@@ -157,10 +166,6 @@ App({
       try {
         const scene = String(sceneRaw)
         token = parseTableTokenFromScan(scene)
-        if (!channel) {
-          const nested = normalizeLaunchQuery(scene)
-          if (nested.channel) channel = nested.channel
-        }
       } catch (_) { }
     }
 

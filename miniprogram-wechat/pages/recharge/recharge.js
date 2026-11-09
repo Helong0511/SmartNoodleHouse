@@ -4,6 +4,29 @@ const payUtil = require('../../utils/pay')
 const dineCtx = require('../../utils/context')
 const subscribe = require('../../utils/subscribe')
 
+const RECHARGE_IDEMPOTENCY_KEY = 'recharge_idempotency_v1'
+const RECHARGE_IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000
+
+function getRechargeIdempotencyKey(packageId, storeId) {
+  const customerId = Number(auth.readStorage('customer_id') || 0)
+  const signature = `${customerId}:${Number(packageId)}:${Number(storeId || 0)}`
+  try {
+    const saved = wx.getStorageSync(RECHARGE_IDEMPOTENCY_KEY)
+    if (saved && saved.signature === signature && Date.now() - saved.createdAt < RECHARGE_IDEMPOTENCY_TTL) return saved.key
+  } catch (_) {}
+  const key = `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  try {
+    wx.setStorageSync(RECHARGE_IDEMPOTENCY_KEY, { signature, key, createdAt: Date.now() })
+  } catch (error) {
+    throw new Error('无法保存充值幂等凭证，已阻止重复充值风险')
+  }
+  return key
+}
+
+function clearRechargeIdempotencyKey() {
+  try { wx.removeStorageSync(RECHARGE_IDEMPOTENCY_KEY) } catch (_) {}
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -43,6 +66,7 @@ async function confirmRechargePaid(rechargeId, maxTries) {
 }
 
 function goMemberAfterSuccess() {
+  clearRechargeIdempotencyKey()
   markMemberWalletDirty()
   wx.showToast({ title: '充值成功', icon: 'success' })
   setTimeout(() => {
@@ -62,6 +86,8 @@ Page({
     balancePrincipal: '0.00',
     balanceGift: '0.00',
     loading: false,
+    canSubscribeBalanceLow: false,
+    subscribeLoading: false,
     storeId: null
   },
 
@@ -86,8 +112,11 @@ Page({
         packages: Array.isArray(packages) ? packages : [],
         selectedId: (packages && packages[0] && packages[0].id) || 0
       })
-      // 引导订阅余额偏低提醒（模板未配置时静默跳过）
-      try { await subscribe.requestBalanceLowSubscribe() } catch (_) { /* ignore */ }
+      // 仅预加载模板；真正拉起订阅弹窗必须由用户点击按钮触发。
+      try {
+        const templates = await subscribe.loadTemplates()
+        this.setData({ canSubscribeBalanceLow: !!(templates && templates.balance_low) })
+      } catch (_) { this.setData({ canSubscribeBalanceLow: false }) }
     } catch (e) {
       wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
     }
@@ -96,6 +125,21 @@ Page({
   onSelect(e) {
     const id = Number(e.currentTarget.dataset.id)
     if (id) this.setData({ selectedId: id })
+  },
+
+  async subscribeBalanceLow() {
+    if (this.data.subscribeLoading || !this.data.canSubscribeBalanceLow) return
+    // 平台订阅 API 必须在点击回调中立即调用，不能在 bootstrap 异步流程中自动拉起。
+    const request = subscribe.requestBalanceLowSubscribe()
+    this.setData({ subscribeLoading: true })
+    try {
+      const result = await request
+      wx.showToast({ title: result ? '订阅操作已完成' : '未完成订阅，可稍后重试', icon: 'none' })
+    } catch (_) {
+      wx.showToast({ title: '未完成订阅，可稍后重试', icon: 'none' })
+    } finally {
+      this.setData({ subscribeLoading: false })
+    }
   },
 
   async submit() {
@@ -118,9 +162,9 @@ Page({
         store_id: storeId,
         provider: 'WECHAT',
         channel_type: 'miniprogram',
-        idempotency_key: `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+        idempotency_key: getRechargeIdempotencyKey(packageId, storeId)
       })
-      if (payRes && (payRes.status === 'PAID' || payRes.already_paid || payRes.mock_settled)) {
+      if (payRes && (payRes.status === 'PAID' || payRes.already_paid)) {
         if (payRes.wallet) applyWalletLocal(this, payRes.wallet)
         else await this.bootstrap()
         markMemberWalletDirty(payRes.wallet)

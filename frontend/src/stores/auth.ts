@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import api from '@/api'
+import { clearCustomerSession } from '@/utils/customerAuth'
 import {
   clearStaffToken,
   getStaffSessionMeta,
@@ -70,6 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = ''
     user.value = null
     clearStaffToken()
+    clearCustomerSession()
   }
 
   async function fetchMe() {

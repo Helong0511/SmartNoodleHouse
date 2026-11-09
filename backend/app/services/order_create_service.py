@@ -10,12 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import Order, Store
+from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Store
 from app.services.customer_service import CustomerService
 from app.services.order_service import OrderPriceCalculator
 
 
 class OrderCreateService:
+    @staticmethod
+    def _should_apply_social_benefit(customer_id: int | None, use_social_benefit: bool) -> bool:
+        """公益折扣必须由顾客显式勾选；旧版 social_rule_id 仅兼容接收，不参与资格判断。"""
+        return customer_id is not None and bool(use_social_benefit)
+
     @staticmethod
     def _is_reusable_idempotent_order(order: Order) -> bool:
         """仅待支付未结清订单可被幂等键复用。"""
@@ -52,8 +57,9 @@ class OrderCreateService:
         if len(combined) <= 64:
             return combined
         # 不可直接截断：相同长前缀会碰撞并错误复用他人/另一购物车的订单。
-        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        return f"{scope}sha256:{digest}"[:64]
+        digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+        # 超长键直接返回完整 256-bit 摘要；scope 已参与哈希，不再截断摘要位数。
+        return digest
 
     @staticmethod
     def _assert_idempotent_order_match(
@@ -65,6 +71,11 @@ class OrderCreateService:
         operator_id: int | None,
         dining_type: str | None = None,
         table_id: int | None = None,
+        remark: str | None = None,
+        customer_coupon_id: int | None = None,
+        customer_voucher_id: int | None = None,
+        scheduled_pickup_at: str | None = None,
+        skip_promotions: bool = False,
     ) -> None:
         """命中幂等订单后必须再次校验归属，禁止直接 return 他人订单。"""
         ch = (channel or "").strip().upper()
@@ -89,6 +100,113 @@ class OrderCreateService:
             order_tid = getattr(order, "table_id", None)
             if order_tid is not None and int(order_tid) != int(table_id):
                 raise AppException(40902, "幂等键冲突：桌台不一致")
+        if (getattr(order, "remark", None) or "") != (remark or ""):
+            raise AppException(40902, "幂等键冲突：订单备注不一致")
+        if getattr(order, "customer_coupon_id", None) != customer_coupon_id:
+            raise AppException(40902, "幂等键冲突：优惠券不一致")
+        if getattr(order, "customer_voucher_id", None) != customer_voucher_id:
+            raise AppException(40902, "幂等键冲突：代金券不一致")
+        if skip_promotions and any(
+            money(getattr(order, field, 0) or 0) > money(0)
+            for field in ("discount_amount", "coupon_discount", "voucher_discount")
+        ):
+            raise AppException(40902, "幂等键冲突：余额支付优惠策略不一致")
+        requested_pickup = None
+        if scheduled_pickup_at:
+            try:
+                requested_pickup = datetime.fromisoformat(scheduled_pickup_at)
+            except ValueError as exc:
+                raise AppException(40061, "预约取餐时间格式不正确") from exc
+            if requested_pickup.tzinfo is not None:
+                requested_pickup = requested_pickup.replace(tzinfo=None)
+        existing_pickup = getattr(order, "scheduled_pickup_at", None)
+        if existing_pickup is not None and existing_pickup.tzinfo is not None:
+            existing_pickup = existing_pickup.replace(tzinfo=None)
+        if existing_pickup != requested_pickup:
+            raise AppException(40902, "幂等键冲突：预约取餐时间不一致")
+
+    @staticmethod
+    async def _assert_idempotent_order_items_match(
+        db: AsyncSession, order: Order, items: list[dict]
+    ) -> None:
+        """幂等重放必须匹配原订单的餐品、数量、备注和规格，防止同 key 偷换购物车。"""
+        existing_items = (
+            await db.execute(
+                select(OrderItem)
+                .where(OrderItem.order_id == int(order.id))
+                .order_by(OrderItem.id)
+            )
+        ).scalars().all()
+        if len(existing_items) != len(items):
+            raise AppException(40902, "幂等键冲突：订单餐品数量不一致")
+
+        requested_option_ids = [
+            int(option_id)
+            for item in items
+            for option_id in (item.get("option_ids") or [])
+        ]
+        options_by_id = {}
+        if requested_option_ids:
+            options = (
+                await db.execute(select(Option).where(Option.id.in_(set(requested_option_ids))))
+            ).scalars().all()
+            options_by_id = {int(option.id): option for option in options}
+
+        item_ids = [int(item.id) for item in existing_items]
+        existing_options = (
+            await db.execute(
+                select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids))
+            )
+        ).scalars().all() if item_ids else []
+        option_groups_by_id = {}
+        requested_group_ids = {
+            int(option.group_id)
+            for option in options_by_id.values()
+            if getattr(option, "group_id", None) is not None
+        }
+        if requested_group_ids:
+            groups = (
+                await db.execute(select(OptionGroup).where(OptionGroup.id.in_(requested_group_ids)))
+            ).scalars().all()
+            option_groups_by_id = {int(group.id): group for group in groups}
+        option_codes_by_item: dict[int, list[tuple[str, str, int]]] = {}
+        for option in existing_options:
+            option_codes_by_item.setdefault(int(option.order_item_id), []).append(
+                (
+                    str(option.group_name_snapshot or ""),
+                    str(option.option_code or ""),
+                    int(option.quantity or 1),
+                )
+            )
+
+        existing_signatures = []
+        for existing in existing_items:
+            existing_signatures.append((
+                int(existing.product_id),
+                int(existing.quantity),
+                existing.remark or "",
+                tuple(sorted(option_codes_by_item.get(int(existing.id), []))),
+            ))
+
+        requested_signatures = []
+        for requested in items:
+            requested_codes = []
+            for option_id in (requested.get("option_ids") or []):
+                option = options_by_id.get(int(option_id))
+                group = option_groups_by_id.get(int(option.group_id)) if option else None
+                if option is None or group is None:
+                    raise AppException(40902, "幂等键冲突：规格选项不存在")
+                requested_codes.append((str(group.name or ""), str(option.code or ""), 1))
+            requested_signatures.append((
+                int(requested.get("product_id") or 0),
+                int(requested.get("quantity") or 0),
+                requested.get("remark") or "",
+                tuple(sorted(requested_codes)),
+            ))
+
+        # 按规范化签名比较，不依赖用户在购物车中调整餐品行顺序。
+        if sorted(existing_signatures) != sorted(requested_signatures):
+            raise AppException(40902, "幂等键冲突：餐品、数量、备注或规格不一致")
 
     @staticmethod
     async def create_order(
@@ -109,6 +227,8 @@ class OrderCreateService:
         operator_id: int | None = None,
         skip_promotions: bool = False,
         scheduled_pickup_at: str | None = None,
+        shared_cart_party_id: int | None = None,
+        shared_cart_revision: int | None = None,
         use_social_benefit: bool = False,
         social_rule_id: int | None = None,
     ) -> Order:
@@ -137,6 +257,12 @@ class OrderCreateService:
                 raise AppException(40008, "堂食请先扫桌台二维码，或在确认页选择桌号")
             if not store_id or int(store_id) <= 0:
                 raise AppException(40008, "缺少桌台令牌或有效门店")
+            # H5/外带无桌台令牌时，门店 ID 来自请求参数，必须重新验证存在且启用。
+            store = await db.get(Store, int(store_id))
+            if not store:
+                raise AppException(40401, "门店不存在")
+            if int(store.status or 0) != 1:
+                raise AppException(40302, "该门店当前不可下单")
 
         scoped_key = OrderCreateService._scoped_idempotency_key(
             idempotency_key,
@@ -155,13 +281,36 @@ class OrderCreateService:
                     store_id=store_id,
                     channel=channel,
                     operator_id=operator_id,
-                    dining_type=dining_type,
+                    dining_type=dining_type or ("TAKEAWAY" if need_pack else "DINE_IN"),
                     table_id=table_id,
+                    remark=remark,
+                    customer_coupon_id=customer_coupon_id,
+                    customer_voucher_id=customer_voucher_id,
+                    scheduled_pickup_at=scheduled_pickup_at,
+                    skip_promotions=skip_promotions,
                 )
                 # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
                 if not OrderCreateService._is_reusable_idempotent_order(order):
                     raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
+                await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
+                # 告知 API 层这是幂等重放，不能清理用户在原订单后新建的共享车内容。
+                setattr(order, "_idempotent_replay", True)
                 return order
+
+        # 同桌共享购物车启用时，必须锁定 party 并校验版本与餐品快照。
+        if table_id and (channel or "").strip().upper() in ("WECHAT", "ALIPAY"):
+            from app.services.shared_cart_service import SharedCartService, is_takeaway_table
+
+            if not is_takeaway_table(table) and await SharedCartService.is_enabled(db, int(store_id)):
+                await SharedCartService.validate_checkout(
+                    db,
+                    store_id=int(store_id),
+                    table_id=int(table_id),
+                    customer_id=int(customer_id),
+                    party_id=shared_cart_party_id,
+                    expected_revision=shared_cart_revision,
+                    items=items,
+                )
 
         dtype = (dining_type or "").strip().upper()
         if dtype not in ("DINE_IN", "TAKEAWAY"):
@@ -246,9 +395,18 @@ class OrderCreateService:
                         store_id=store_id,
                         channel=channel,
                         operator_id=operator_id,
+                        dining_type=dining_type or ("TAKEAWAY" if need_pack else "DINE_IN"),
+                        table_id=table_id,
+                        remark=remark,
+                        customer_coupon_id=customer_coupon_id,
+                        customer_voucher_id=customer_voucher_id,
+                        scheduled_pickup_at=scheduled_pickup_at,
+                        skip_promotions=skip_promotions,
                     )
                     if not OrderCreateService._is_reusable_idempotent_order(order):
                         raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
+                    await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
+                    setattr(order, "_idempotent_replay", True)
                     return order
             raise AppException(40901, "订单创建冲突，请重试")
 
@@ -271,7 +429,7 @@ class OrderCreateService:
 
             # 公益与券互斥；与会员折比补贴，取更优（折扣更低者）
             social_hit = None
-            if customer_id and (use_social_benefit or social_rule_id):
+            if OrderCreateService._should_apply_social_benefit(customer_id, use_social_benefit):
                 if customer_coupon_id or customer_voucher_id:
                     raise AppException(40008, "公益折扣不可与优惠券同享，请取消券后重试")
                 pids = [int(i["product_id"]) for i in items]
@@ -281,22 +439,9 @@ class OrderCreateService:
                     await db.execute(select(_Product).where(_Product.id.in_(pids)))
                 ).scalars().all() if pids else []
                 cids = [int(p.category_id) for p in prods if p.category_id]
-                if social_rule_id:
-                    from app.models import SocialBenefitRule
-
-                    rule = await db.get(SocialBenefitRule, int(social_rule_id))
-                    codes = await SocialBenefitService.active_codes(db, int(customer_id))
-                    if (
-                        rule
-                        and int(rule.status) == 1
-                        and rule.identity_code in codes
-                        and rule.benefit_type == "ORDER_DISCOUNT"
-                        and rule.discount_rate is not None
-                        and (rule.store_id is None or int(rule.store_id) == int(order.store_id))
-                    ):
-                        social_hit = (rule, rule.identity_code)
-                if social_hit is None and use_social_benefit:
-                    # 显式勾选公益：须可命中规则（再与会员折比优）
+                if use_social_benefit:
+                    # social_rule_id 不作为规则选择依据；
+                    # 服务端统一校验日期/星期/时段/限次/餐品/分类/折扣率。
                     social_hit = await SocialBenefitService.require_best_rule(
                         db,
                         customer_id=int(customer_id),

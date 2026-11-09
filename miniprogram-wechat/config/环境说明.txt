@@ -13,29 +13,29 @@
 
   场景              API 自动选择              域名校验怎么做
   ──────────────  ───────────────────────  ──────────────────────────────────
-  ① 本机 IDE 模拟   http://127.0.0.1:8000    详情→本地设置→不校验合法域名；urlCheck=false
-  ② 真机调试/预览   http://局域网IP:8000      同上不校验；后端 --host 0.0.0.0
-  ③ 正式版 release  PROD_API_BASE（HTTPS）   mp.weixin.qq.com 配置 request 合法域名；urlCheck=true
+  ① 本机 IDE develop http://127.0.0.1:8000   仅 IDE 本地设置临时忽略域名校验
+  ② 真机 develop     DEV_LAN_API（显式开启）  后端 --host 0.0.0.0；仅开发调试临时忽略
+  ③ trial / release  PROD_API_BASE（HTTPS）   配置 request 合法域名；urlCheck=true
 
 【本机 IDE 步骤】
   1. 后端：cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
   2. 打开 miniprogram-wechat
   3. 右上角「详情」→「本地设置」→ 勾选「不校验合法域名、web-view…」
-  4. project.config.json 开发阶段保持 setting.urlCheck=false
+  4. 仓库 project.config.json 始终保持 setting.urlCheck=true；仅在 IDE 本地设置临时忽略，不要提交 false
   5. 编译；确认 API 为 http://127.0.0.1:8000/api
 
 【真机调试步骤】
-  1. config/env.js 改 DEV_LAN_HOST=电脑局域网 IP
+  1. config/env.js 设置 DEV_LAN_HOST=电脑局域网 IP，并显式设置 DEV_USE_LAN=true（默认 false 不走局域网）
   2. 后端 --host 0.0.0.0:8000；手机与电脑同一 WiFi；VPN 易导致调试通道 IP 错乱
   3. 仍勾选「不校验合法域名」
   4. 「真机调试」扫码；API 应为 http://192.168.x.x:8000/api
      若仍 127.0.0.1：可设 DEV_USE_LAN=true 强制局域网
 
 【正式上线】
-  1. config/env.js：PROD_API_BASE=https://你的域名/api
+  1. config/env.js：PROD_API_BASE=https://你的域名/api；trial 默认也走该 HTTPS 地址（TRIAL_USE_PROD_API=true）
   2. mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
   3. 上传前 project.config.json → urlCheck=true，并用真机验证合法域名
-  4. release 自动走 PROD_API_BASE
+  4. trial / release 自动走 PROD_API_BASE；域名未配置时首个请求 fail-closed
 
 【个人主体 / 未开通手机号能力】
   ENABLE_WX_AVATAR=true
@@ -47,4 +47,4 @@
 
 【改局域网 IP】
   config/env.js → DEV_LAN_HOST；真机勿用 127.0.0.1
-  project.config.json → urlCheck（开发 false / 上传前 true）
+  project.config.json → urlCheck 始终 true；开发调试只在 IDE 本地临时忽略

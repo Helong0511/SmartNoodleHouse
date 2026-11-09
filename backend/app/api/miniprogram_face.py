@@ -56,9 +56,14 @@ async def _require_face_welcome_enabled(db: AsyncSession) -> None:
 async def face_liveness_challenge(request: Request, db: DbSession, customer: CurrentCustomer):
     """下发一次性活体挑战（动作 + token）。mode=none 时返回空 token。"""
     await _require_face_welcome_enabled(db)
+    settings = get_settings()
+    mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
+    if settings.is_production and mode == "none":
+        raise AppException(40342, "生产环境不允许关闭人脸动作挑战")
     from app.services.face_liveness_service import generate_liveness_challenge
 
     challenge = await generate_liveness_challenge(customer_id=customer.id)
+    challenge["anti_spoof_level"] = "basic"
     return success(challenge, request=request)
 
 
@@ -161,6 +166,9 @@ async def _enforce_liveness_challenge(
     settings = get_settings()
     mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
     if mode == "none":
+        # none 仅可用于本地开发；生产环境禁止通过配置关闭挑战校验。
+        if settings.is_production:
+            raise AppException(40342, "生产环境不允许关闭人脸动作挑战")
         return "none"
     from app.services.face_liveness_service import verify_liveness_challenge
 

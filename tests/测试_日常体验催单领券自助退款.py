@@ -406,6 +406,7 @@ async def test_scheduled_pickup_validation_window():
     from app.services.customer_service import OrderCreateService
 
     db = MagicMock()
+    db.get = AsyncMock(return_value=SimpleNamespace(status=1))
     db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
 
     # 过早（10 分钟内）

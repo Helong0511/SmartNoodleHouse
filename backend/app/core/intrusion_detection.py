@@ -85,7 +85,7 @@ _VULN_PROBE_PATTERNS = (
 
 def _is_exempt(path: str) -> bool:
     for prefix in _EXEMPT_PATH_PREFIXES:
-        if path == prefix or path.startswith(prefix + "/") or path.startswith(prefix):
+        if path == prefix or path.startswith(prefix + "/"):
             return True
     return False
 
@@ -98,13 +98,11 @@ def _match_patterns(haystack: str, patterns: tuple[str, ...]) -> str | None:
 
 
 def _collect_request_text(request: Request) -> str:
-    """合并 path / query / 关键 header 用于模式匹配。"""
+    """仅检查 path/query 的探针特征；不是 WAF，不检查 UA/Referer 或请求体。"""
     path = (request.url.path or "").lower()
     # request.url.query 是原始百分号编码字符串；解码后再匹配，避免 UNION%20SELECT 漏检
     query = unquote_plus(request.url.query or "").lower()
-    ua = (request.headers.get("user-agent") or "").lower()
-    ref = (request.headers.get("referer") or "").lower()
-    return f"{path} {query} {ua} {ref}"
+    return f"{path} {query}"
 
 
 def detect_intrusion(request: Request) -> tuple[bool, str]:

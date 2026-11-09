@@ -297,3 +297,10 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 ## 11. 结论
 
 资金链路核心控制点（验签、幂等、状态机、行锁、Outbox、超时关单）均有真实代码与对应测试，全套 791 个测试通过。未发现可导致重复入账、超额退款、跨店扣款或未支付进厨房的资金安全缺陷。遗留项均为运维侧（密钥轮换、沙箱联调、对账文件）而非代码缺陷。
+
+## 2026-11-09 Outbox 推荐学习重试边界复核
+
+- 支付成功后的口味偏好更新（`pref_update`）与推荐行为学习（`taste_learning`）使用独立 Outbox 事件，互不阻塞。
+- 推荐学习异常必须向 Outbox worker 传播，进入指数退避重试；达到最大尝试次数后进入失败/死信告警，不得仅记录日志后把事件标记为 DONE。
+- `tests/test_paid_side_effects_retry.py` 覆盖事件独立入队、偏好更新不再隐式触发推荐学习、推荐学习异常向 worker 传播。
+- 此项为代码级回归防护；仍需以最新提交对应的 CI 结果作为验收证据。

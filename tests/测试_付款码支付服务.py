@@ -13,7 +13,7 @@ async def test_wechat_micropay_success_immediate():
     with patch(
         "app.services.barcode_pay_service.wechat_pay_v2_client.micropay",
         new_callable=AsyncMock,
-        return_value={"trade_state": "SUCCESS", "transaction_id": "wx123"},
+        return_value={"trade_state": "SUCCESS", "transaction_id": "wx123", "raw": {"total_fee": "100"}},
     ):
         data = await settle_wechat_barcode(
             payment_no="P1",
@@ -34,7 +34,7 @@ async def test_wechat_userpaying_then_query_success():
     ), patch(
         "app.services.barcode_pay_service.wechat_pay_v2_client.order_query",
         new_callable=AsyncMock,
-        return_value={"trade_state": "SUCCESS", "transaction_id": "wx456"},
+        return_value={"trade_state": "SUCCESS", "transaction_id": "wx456", "raw": {"total_fee": "200"}},
     ), patch("app.services.barcode_pay_service.asyncio.sleep", new_callable=AsyncMock):
         data = await settle_wechat_barcode(
             payment_no="P2",

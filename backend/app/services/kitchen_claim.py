@@ -88,13 +88,37 @@ async def takeover_kitchen_claim(
     claimer = order.kitchen_claimed_by
     if claimer and int(claimer) == int(operator_id):
         return order
+    # 认领接管必须基于读取时的旧认领人做 CAS 条件更新。
+    # 若两名员工同时接管，只有第一个匹配旧值的请求成功，后到请求不能静默覆盖。
+    expected_claimer = int(claimer) if claimer else None
+    claimer_condition = (
+        Order.kitchen_claimed_by.is_(None)
+        if expected_claimer is None
+        else Order.kitchen_claimed_by == expected_claimer
+    )
     stmt = (
         update(Order)
-        .where(Order.id == int(order.id))
+        .where(
+            Order.id == int(order.id),
+            Order.status.in_(CLAIM_FROM_STATUSES),
+            claimer_condition,
+        )
         .values(kitchen_claimed_by=int(operator_id), kitchen_claimed_at=now_local())
+        .execution_options(synchronize_session=False)
     )
-    await db.execute(stmt)
-    await db.flush()
+    result = await db.execute(stmt)
+    if result.rowcount != 1:
+        # 更新失败说明状态或认领人已被其他事务改变；刷新后给出明确冲突，
+        # 不向前端返回“接管成功”但实际认领人却是另一人的假成功。
+        await db.refresh(order)
+        if order.status not in CLAIM_FROM_STATUSES:
+            raise AppException(40029, "订单状态已变化，当前不可接管，请刷新后重试")
+        if order.kitchen_claimed_by and int(order.kitchen_claimed_by) == int(operator_id):
+            return order
+        name = await claimer_display_name(db, order.kitchen_claimed_by)
+        detail = f"订单已被「{name}」接管" if name else "订单认领状态已变化"
+        raise AppException(40028, f"{detail}，请刷新后重试")
+
     order.kitchen_claimed_by = int(operator_id)
     order.kitchen_claimed_at = now_local()
     return order

@@ -39,10 +39,21 @@ if (fs.existsSync(path.join(root, 'config/环境说明.txt'))) {
   }
 }
 
-// 4) 远程日志是否仅开发版启用
+// 4) 精确核对正式版日志闸门，不能只靠 app.js 任意位置出现 isRelease() 误判通过
 const appSrc = read('app.js')
-if (/remoteLogger\.install\(\)/.test(appSrc) && !/isRelease\(\)/.test(appSrc)) {
-  problems.push('app.js: remoteLogger.install() 未加环境闸门，正式版仍会上报全量日志')
+if (!/if\s*\(\s*!isRelease\(\)\s*\)\s*remoteLogger\.install\(\)/.test(appSrc)) {
+  problems.push('app.js: remoteLogger.install() 必须由 if (!isRelease()) 精确保护')
+}
+const loggerSrc = read('utils/logger.js')
+if (!/function remoteReportingAllowed\(\)[\s\S]*?return !require\(['"]\.\.\/config\/env['"]\)\.isRelease\(\)/.test(loggerSrc)) {
+  problems.push('utils/logger.js: reportApi/push 缺少独立正式版外发闸门')
+}
+const apiSrc = read('utils/api.js')
+if (!/assertApiBaseConfigured\(base\)/.test(apiSrc)) {
+  problems.push('utils/api.js: 首次真实请求前未调用 assertApiBaseConfigured')
+}
+if (!/const TRIAL_USE_PROD_API = true/.test(envSrc)) {
+  problems.push('config/env.js: 上传体验版必须默认走 HTTPS API，禁止回退内网 HTTP')
 }
 
 if (!problems.length) {

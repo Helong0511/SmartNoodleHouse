@@ -66,23 +66,24 @@ async def _seed(
     exclude_store_b: bool = False,
 ):
     """一店/二店 + 总部抢购活动 + 门店库存 + 顾客。"""
-    store_a = Store(store_no="FS01", name="抢购一店", status=1)
-    store_b = Store(store_no="FS02", name="抢购二店", status=1)
+    suffix = uuid4().hex[:8].upper()
+    store_a = Store(store_no=f"FS01-{suffix}", name="抢购一店", status=1)
+    store_b = Store(store_no=f"FS02-{suffix}", name="抢购二店", status=1)
     db.add_all([store_a, store_b])
     await db.flush()
     a_id, b_id = int(store_a.id), int(store_b.id)
 
-    cat_a = ProductCategory(store_id=a_id, category_no="CAT-FS-A", name="霸王面分类")
-    cat_b = ProductCategory(store_id=b_id, category_no="CAT-FS-B", name="霸王面分类")
+    cat_a = ProductCategory(store_id=a_id, category_no=f"CAT-FS-A-{suffix}", name="霸王面分类")
+    cat_b = ProductCategory(store_id=b_id, category_no=f"CAT-FS-B-{suffix}", name="霸王面分类")
     db.add_all([cat_a, cat_b])
     await db.flush()
 
     prod_a = Product(
-        store_id=a_id, category_id=int(cat_a.id), product_no="P-FS-A",
+        store_id=a_id, category_id=int(cat_a.id), product_no=f"P-FS-A-{suffix}",
         name="霸王面（一店）", price=Decimal("18.00"), status="ON_SALE", stock=50,
     )
     prod_b = Product(
-        store_id=b_id, category_id=int(cat_b.id), product_no="P-FS-B",
+        store_id=b_id, category_id=int(cat_b.id), product_no=f"P-FS-B-{suffix}",
         name="霸王面（二店）", price=Decimal("18.00"), status="ON_SALE", stock=50,
     )
     db.add_all([prod_a, prod_b])
@@ -90,7 +91,7 @@ async def _seed(
     prod_a_id, prod_b_id = int(prod_a.id), int(prod_b.id)
 
     customer = Customer(
-        customer_no="C-FS-1",
+        customer_no=f"C-FS-1-{suffix}",
         display_name="抢购客",
         member_status="MEMBER",
         account_status="ACTIVE",
@@ -106,8 +107,8 @@ async def _seed(
     now = naive_local_now()
     camp = MarketingCampaign(
         store_id=None,
-        code="FS-TEST",
-        code_key="HQ:FS-TEST",
+        code=f"FS-TEST-{suffix}",
+        code_key=f"HQ:FS-TEST-{suffix}",
         name="射洪霸王面限量免费",
         campaign_type="MEMBER_DAY",
         status="RUNNING",
@@ -350,6 +351,39 @@ async def test_claim_success_and_request_replay(db_session):
 
 
 @pytest.mark.asyncio
+async def test_claim_request_id_cannot_be_reused_for_another_campaign(db_session):
+    """同一 client_request_id 绑定顾客、活动、门店，不能静默复用其他活动资格。"""
+    first_seed = await _seed(db_session, remaining=2, per_customer_limit=1)
+    second_seed = await _seed(db_session, remaining=2, per_customer_limit=1)
+    request_id = "cross-campaign-01"
+
+    first = await FlashSaleService.claim(
+        db_session,
+        campaign_id=first_seed["campaign_id"],
+        store_id=first_seed["store_a_id"],
+        customer_id=first_seed["customer_id"],
+        client_request_id=request_id,
+    )
+    await db_session.commit()
+
+    from app.core.exceptions import AppException
+
+    with pytest.raises(AppException) as exc:
+        await FlashSaleService.claim(
+            db_session,
+            campaign_id=second_seed["campaign_id"],
+            store_id=second_seed["store_a_id"],
+            customer_id=first_seed["customer_id"],
+            client_request_id=request_id,
+        )
+    assert exc.value.code == 40909
+    assert await _remaining(
+        db_session, second_seed["campaign_id"], second_seed["store_a_id"]
+    ) == 2
+    assert first["status"] == "CLAIMED"
+
+
+@pytest.mark.asyncio
 async def test_claim_existing_claimed_returns_already(db_session):
     """同一顾客已有未过期资格：再次抢购直接返回原资格，不重复扣减。"""
     seed = await _seed(db_session, remaining=2, per_customer_limit=1)
@@ -475,7 +509,7 @@ async def test_claim_expired_previous_claim_marked_expired(db_session):
 
 @pytest.mark.asyncio
 async def test_verify_creates_zero_amount_non_revenue_order(db_session):
-    """核销生成 0 元免单订单：PAID/FREE/non_revenue，无支付流水、不计营业收入。"""
+    """核销生成 0 元免单订单：订单 PAID、FREE 零元 Payment、non_revenue，不计营业收入。"""
     seed = await _seed(db_session, remaining=2, per_customer_limit=1)
     claim = await FlashSaleService.claim(
         db_session,
@@ -496,7 +530,7 @@ async def test_verify_creates_zero_amount_non_revenue_order(db_session):
 
     order = await db_session.get(Order, int(out["order_id"]))
     assert order.status == "PAID"
-    assert order.payment_status == "FREE"
+    assert order.payment_status == "PAID"
     assert order.payment_method == "FREE"
     assert bool(order.non_revenue) is True
     assert order.total_amount == Decimal("0.00")
@@ -511,7 +545,14 @@ async def test_verify_creates_zero_amount_non_revenue_order(db_session):
         )
         or 0
     )
-    assert payments == 0
+    assert payments == 1
+    free_payment = await db_session.scalar(
+        select(Payment).where(Payment.order_id == int(out["order_id"]))
+    )
+    assert free_payment is not None
+    assert free_payment.status == "PAID"
+    assert free_payment.provider == "FREE"
+    assert free_payment.amount == Decimal("0.00")
 
     item = (
         await db_session.execute(
@@ -887,8 +928,18 @@ async def test_api_verify_ignores_client_store_and_idempotent(db_session, monkey
         assert announce.await_count == 1
 
         order = await db_session.get(Order, int(out["order_id"]))
-        assert order.payment_status == "FREE"
+        # 订单 payment_status=PAID 表示结算已完成；FREE 是支付方式/渠道，
+        # 非营业收入由 non_revenue 明确标记，不能把两种状态混为一谈。
+        assert order.payment_status == "PAID"
+        assert order.payment_method == "FREE"
         assert bool(order.non_revenue) is True
+        free_payment = await db_session.scalar(
+            select(Payment).where(Payment.order_id == order.id)
+        )
+        assert free_payment is not None
+        assert free_payment.provider == "FREE"
+        assert free_payment.status == "PAID"
+        assert free_payment.amount == Decimal("0.00")
 
         r2 = await ac.post("/api/marketing/flash-sales/claims/verify", json=payload)
         assert r2.status_code == 200

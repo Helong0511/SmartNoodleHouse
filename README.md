@@ -58,22 +58,54 @@
 6. 外卖平台 webhook 经签名/来源检查和幂等 inbox 进入统一订单流；菜单、库存和状态同步需真实平台凭证验证。
 7. 人脸迎宾属于敏感个人信息处理：必须主动授权、最少采集、可撤回；未授权用户不得建立可识别身份档案。
 
+## 顾客叫号屏与 WebSocket
+
+- 本地开发可访问 `http://127.0.0.1:5173/display?store_id=门店ID`。
+- 生产环境必须在后台对应门店的「门店业务设置」中生成并保存**本店独立叫号屏令牌**，使用该门店生成的完整访问 URL；不同门店令牌不能互换。
+- 全局 `DISPLAY_SCREEN_TOKEN` 仅作为本地开发回退，不作为生产通行令牌。生产门店缺少独立令牌、数据库读取失败或令牌不匹配时，WebSocket 必须拒绝连接。
+- 叫号屏令牌属于长期访问凭据，不要公开分享或写入工单；若曾泄露，应立即轮换。厨房、订单、摄像头等受保护频道默认拒绝未授权连接。
+
+
 ## 数据库初始化与升级
 
-全新隔离环境初始化前，先检查 SQL 文件是否含清库操作，并确认目标数据库不是生产数据：
+**重要：初始化 SQL 不是升级脚本。** `sql/struct.sql` 仅用于全新空库结构初始化；`sql/data_sys.sql` 含多张业务表的 `TRUNCATE`，只能在全新、隔离、确认无任何业务数据的数据库中执行。禁止将初始化 SQL 用于已有营业库或生产库升级。
+
+全新空库初始化（先确认目标库名、数据库主机与备份策略；不要在已有业务数据的库上执行）：
 
 ```bash
+# 创建全新数据库结构；该脚本不会替代已有库的 Alembic 迁移
 mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
+
+# data_sys.sql 有显式保护；必须在本次连接中明确确认“全新空库”
+mysql --database=smart_noodle_house --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
+
+# 仅新库初始化门店种子；禁止对已有库重复灌入
+mysql --database=smart_noodle_house -u root -p < sql/data_custom.sql
+
+# 通过隐藏输入设置首个管理员密码，避免把密码写进 shell 历史
+read -s -p "管理员初始密码: " ADMIN_INITIAL_PASSWORD
+export ADMIN_INITIAL_PASSWORD
+echo
 python scripts/初始化管理员.py
+unset ADMIN_INITIAL_PASSWORD
 ```
 
-- sql/struct.sql：结构真源和 canonical schema。
-- sql/data_sys.sql：系统必要种子；包含清理/重建种子数据操作，必须确认目标库。
-- sql/data_custom.sql：门店经营种子。
-- sql/data_test.sql：仅测试环境。
-- 已有数据库升级使用 backend/Alembic 迁移；执行前备份并在隔离副本演练。禁止对生产库直接运行全新初始化脚本。
+**已有数据库升级（包括生产营业库）只执行 Alembic 迁移：**
+
+```bash
+cd backend
+# 升级前先完成 mysqldump 备份，并在隔离副本演练恢复和迁移
+alembic upgrade head
+```
+
+| 脚本 | 说明 |
+|---|---|
+| `sql/struct.sql` | 全新空库结构初始化；不会删除数据库，不是已有库升级脚本 |
+| `sql/data_sys.sql` | **破坏性初始化种子**：含全表 TRUNCATE，必须显式确认，仅限全新空库 |
+| `sql/data_custom.sql` | 门店经营初始化种子，仅按新库初始化流程执行 |
+| `sql/data_test.sql` | 仅本地测试数据，禁止写入生产 |
+
+不得对已有数据库执行上述初始化 SQL 或重新灌入种子。生产升级必须先备份、验证可恢复，再执行 Alembic。
 
 ## 生产环境 MySQL / Redis 连接示例
 
@@ -133,6 +165,10 @@ npm run dev
 - 不提交 .env、真实密码、API Secret、商户私钥、平台证书或人脸数据。
 - 不在文档中写可用默认管理员密码或有效访问 token；首次管理员密码通过安全流程初始化。
 - 生产关闭所有 Mock/debug/reload，使用最小权限数据库账号、Redis ACL/强认证和安全网络绑定。
+- 只有显式 `APP_ENV=development/dev/local` 且数据库、Redis 均为本机回环服务、未配置正式商户凭据时才按开发环境放宽；未知环境值、远程依赖或正式支付/外卖凭据会强制按生产策略校验。
+- 微信/支付宝正式版必须配置真实 HTTPS API 域名；微信 `urlCheck=true`。小程序环境探测失败按 release 处理，不允许回退到内网 HTTP。
+- 日志不得记录 AppSecret、access_token、API key、私钥或完整数据库连接凭据；上线前运行 `python scripts/上线前运维检查清单.py` 扫描历史日志，并完成已泄露凭据轮换。
+
 - 生产公网仅开放必要 HTTPS 入口；MySQL、Redis、RTSP 和内部管理端口不直接暴露公网。
 - 支付回调必须验签、校验金额和商户身份、幂等落库；退款和库存变更必须可审计。
 - 多门店每个查询、缓存键、后台任务、WebSocket 和导出均实施服务端门店隔离。

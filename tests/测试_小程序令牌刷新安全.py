@@ -88,19 +88,34 @@ def test_refresh_preserves_validated_channel_from_expired_token(payload, expecte
 
 def test_explicit_mock_login_allowed_only_in_development(monkeypatch):
     monkeypatch.setattr(
-        "app.services.miniprogram_auth.get_settings",
-        lambda: SimpleNamespace(is_development=True, is_production=False),
+        "app.core.config.get_settings",
+        lambda: SimpleNamespace(
+            is_development=True,
+            is_production=False,
+            app_debug=True,
+            allow_auth_mock=True,
+        ),
     )
     assert _allow_explicit_mock_code("mock:local-device") is True
 
     monkeypatch.setattr(
-        "app.services.miniprogram_auth.get_settings",
-        lambda: SimpleNamespace(is_development=False, is_production=False),
+        "app.core.config.get_settings",
+        lambda: SimpleNamespace(
+            is_development=False,
+            is_production=False,
+            app_debug=True,
+            allow_auth_mock=True,
+        ),
     )
     assert _allow_explicit_mock_code("mock:staging-device") is False
 
     monkeypatch.setattr(
-        "app.services.miniprogram_auth.get_settings",
-        lambda: SimpleNamespace(is_development=False, is_production=True),
+        "app.core.config.get_settings",
+        lambda: SimpleNamespace(
+            is_development=False,
+            is_production=True,
+            app_debug=True,
+            allow_auth_mock=True,
+        ),
     )
     assert _allow_explicit_mock_code("mock:production-device") is False

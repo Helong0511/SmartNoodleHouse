@@ -122,7 +122,7 @@ function getAuthCode() {
         const msg = formatError(err, '')
         // 真机偶发「未关联」类错误时仍允许 mock，避免卡死联调
         const ideAuthGap = /关联小程序|选择关联|请先\[选择/i.test(msg)
-        if (ideAuthGap && !(env && env.isRelease)) {
+        if (ideAuthGap && env && env.isDevtools && !env.isRelease) {
           console.warn('[auth] 非正式版 getAuthCode 失败，使用 mock 登录', err)
           resolve({ authCode: 'mock:simulator' })
           return
@@ -162,7 +162,10 @@ function clearCustomerSession(app) {
     // 库重置后本地昵称/头像属于已删除顾客，必须清掉，否则会写回新客并跳过注册
     my.removeStorageSync({ key: 'nickname' })
     my.removeStorageSync({ key: 'avatar_url' })
+    // 顾客会话切换后不再发送上一账号尚未上报的行为事件。
+    my.removeStorageSync({ key: 'behavior_event_queue' })
   } catch (_) { }
+  clearRegDraft()
 }
 
 function isStaleCustomerAuthError(err) {

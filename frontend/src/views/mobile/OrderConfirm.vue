@@ -9,7 +9,7 @@
 
     <div class="card">
       <div class="label">已选餐品</div>
-      <div v-for="(item, idx) in cart" :key="idx" class="line">
+      <div v-for="(item, idx) in cart" :key="cartItemKey(item, idx)" class="line">
         <img v-if="item.imageUrl" :src="item.imageUrl" class="mini" alt="" />
         <div v-else class="mini placeholder">{{ (item.name || '餐')[0] }}</div>
         <span class="name">
@@ -48,6 +48,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { getCustomerToken, setCustomerToken } from '@/utils/customerAuth'
 import { mediaUrl } from '@/utils/media'
+import { cartItemKey, readCartStorage } from '@/utils/cart'
 
 const router = useRouter()
 const remark = ref('')
@@ -57,7 +58,7 @@ const tableLabel = ref('')
 const channelRaw = localStorage.getItem('snh_channel') || localStorage.getItem('channel') || 'wechat'
 const channel = channelRaw.toUpperCase() === 'ALIPAY' ? 'ALIPAY' : 'WECHAT'
 const channelLabel = channel === 'ALIPAY' ? '支付宝' : '微信'
-const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
+const cart = ref<any[]>(readCartStorage())
 const memberRate = ref(1)
 const isMember = ref(false)
 const memberLevelName = ref('')

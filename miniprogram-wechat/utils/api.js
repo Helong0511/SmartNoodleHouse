@@ -1,4 +1,4 @@
-const { resolveApiBase } = require('../config/env')
+const { resolveApiBase, assertApiBaseConfigured } = require('../config/env')
 const { localizeNativeErrMsg } = require('./errMsg')
 
 const DEFAULT_API_BASE = resolveApiBase()
@@ -14,13 +14,14 @@ function getAppSafe() {
 /** 优先 globalData，否则用 config/env 默认值（Tab 页冷启动时 getApp 可能暂不可用） */
 function resolveBaseUrl() {
   const app = getAppSafe()
-  if (app && app.globalData) {
-    const configured = String(app.globalData.apiBase || '').trim()
-    if (configured) return configured
-    app.globalData.apiBase = DEFAULT_API_BASE
-    return DEFAULT_API_BASE
-  }
-  return DEFAULT_API_BASE
+  const configured = app && app.globalData
+    ? String(app.globalData.apiBase || '').trim()
+    : ''
+  const base = configured || DEFAULT_API_BASE
+  // 首次真实请求时校验；配置错误不会在 App 模块加载阶段造成白屏。
+  assertApiBaseConfigured(base)
+  if (app && app.globalData) app.globalData.apiBase = base
+  return base
 }
 
 function authHeader() {
@@ -138,7 +139,15 @@ function buildQueryUrl(path, data) {
 }
 
 function requestOnce(method, path, data = {}, needAuth = true) {
-  const base = resolveBaseUrl()
+  let base
+  try {
+    base = resolveBaseUrl()
+  } catch (err) {
+    // 配置错误也必须遵守 Promise API 契约，交由调用方统一 catch，不能同步抛出。
+    return Promise.reject(makeRequestError(err && err.message ? err.message : '小程序 API 地址配置无效', {
+      code: 'API_BASE_INVALID'
+    }))
+  }
   return new Promise((resolve, reject) => {
     if (!base) {
       reject(makeRequestError('未配置 apiBase，请在 miniprogram-wechat/config/env.js 填写 PROD_API_BASE 或 DEV_LAN_HOST'))
@@ -168,7 +177,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
             require('./logger').reportApi('ERROR', upper, path, { status, code: body.code, message: msg })
           } catch (_) { }
           // P1-3/P2-6：认证失效交给 request() 层先尝试静默刷新并重放，失败才清会话
-          if (needAuth && (status === 401 || status === 403 || isStaleAuthMessage(msg))) {
+          if (needAuth && (status === 401 || isStaleAuthMessage(msg))) {
             reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))
             return
           }
