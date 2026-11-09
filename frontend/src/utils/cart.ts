@@ -303,3 +303,30 @@ export function validateCategoryRequires(cart: any[], products?: any[], categori
   }
   return issues
 }
+
+
+/** 解析 H5 本地购物车：损坏 JSON、非数组或无效行均 fail-safe 为空购物车。 */
+export function parseStoredCart(raw: string | null | undefined): any[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+      const productId = Number(item.product_id)
+      const quantity = Number(item.quantity ?? 1)
+      return Number.isFinite(productId) && productId > 0 && Number.isFinite(quantity) && quantity > 0
+    })
+  } catch {
+    return []
+  }
+}
+
+/** 购物车行稳定 key；正常情况下同商品+同规格已由 mergeCartItem 合并。 */
+export function cartItemKey(item: any, index = 0): string {
+  const productId = Number(item?.product_id) || 0
+  const optionIds = Array.isArray(item?.option_ids)
+    ? item.option_ids.map((id: unknown) => String(id)).sort().join(',')
+    : ''
+  return `${productId}:${optionIds}:${index}`
+}
