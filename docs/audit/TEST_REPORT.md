@@ -212,4 +212,4 @@ python -m pytest tests/ -q --tb=line --no-header
 - 退款一致性新增当前读测试：`PaymentRefund` 汇总要求 `FOR UPDATE + populate_existing`；订单净已收聚合锁定 Payment 与 PaymentRefund；父行锁后刷新 Payment；在途 UNKNOWN 退款阻止再次创建；收款剩余金额计算可强制当前读。
 - 关联提交：`4a98702eff3205c7685ba0c412ff1def5179efd3`。最新 CI 尚未完成，测试结果不得提前登记为通过。
 
-- 即时付款码结算增加回调先成功或已进入部分/全额退款终态时不降级、不重复记账的回归；金额异常路径增加不降级终态、持久化 UNKNOWN/状态历史及充值锁序当前读测试；充值结算会刷新锁定后的支付/充值单状态，且拒绝把 REFUNDED 降级为 PAID。关联提交：`83388d8aaa6cc72f0e84dcb6ca0e5016e2200ae1`；等待最新 CI。
+- 即时付款码结算增加回调先成功或已进入部分/全额退款终态时不降级、不重复记账的回归；金额异常路径增加不降级终态、持久化 UNKNOWN/状态历史及充值锁序当前读测试；充值结算会刷新锁定后的支付/充值单状态，拒绝把 REFUNDED 降级为 PAID；即时渠道交易号延后至锁内写入。关联提交：`83388d8aaa6cc72f0e84dcb6ca0e5016e2200ae1`；等待最新 CI。
