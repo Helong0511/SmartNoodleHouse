@@ -11,7 +11,7 @@ from typing import Any
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
 
-from app.core.config import get_settings
+from app.core.config import dev_mode_allowed, get_settings
 from app.core.exceptions import AppException
 
 logger = logging.getLogger(__name__)
@@ -20,8 +20,8 @@ _OK_CODES = frozenset({"", "10000", "200"})
 
 
 def _mock_allowed() -> bool:
-    s = get_settings()
-    return s.is_development or bool(getattr(s, "allow_auth_mock", False))
+    """支付宝手机号/订阅 Mock 统一受三重门控保护。"""
+    return dev_mode_allowed("allow_auth_mock")
 
 
 def _alipay_mini_configured() -> bool:
@@ -312,7 +312,7 @@ def decrypt_phone_response(encrypted_b64: str) -> str:
         raise AppException(40054, "缺少支付宝手机号密文")
 
     settings = get_settings()
-    if settings.is_development and not (settings.alipay_aes_key or "").strip():
+    if _mock_allowed() and not (settings.alipay_aes_key or "").strip():
         mock = re.search(r"1\d{10}", raw)
         if mock:
             logger.warning("开发环境未配置 ALIPAY_AES_KEY，从密文占位解析手机号（仅联调）")
@@ -321,8 +321,8 @@ def decrypt_phone_response(encrypted_b64: str) -> str:
 
     cipher_text, plain_mobile = _extract_cipher_from_envelope(raw)
     if plain_mobile:
-        # P0-3: 生产环境拒绝明文手机号（防客户端伪造），仅开发环境允许
-        if not settings.is_development:
+        # 只有显式开启开发调试 Mock 时才接受明文占位手机号；其余环境必须验证 AES 密文。
+        if not _mock_allowed():
             raise AppException(40054, "支付宝手机号必须为 AES 加密报文，拒绝明文响应")
         return plain_mobile
     if not cipher_text:
