@@ -67,9 +67,10 @@ Page({
       .catch(() => this.reload())
   },
 
-  onTableChange(e) {
-    if (e && e.detail) {
-      this.applyCtx(e.detail)
+  onTableChange(ctx) {
+    const next = ctx && ctx.detail ? ctx.detail : ctx
+    if (next) {
+      this.applyCtx(next)
       this.reload()
     }
   },
@@ -152,10 +153,10 @@ Page({
         my.showToast({ content: '已抢到，请勿重复抢购', type: 'none' })
       } else {
         const deadline = (res && (res.expires_at || res.verify_deadline_at)) || ''
-        my.showModal({
+        my.alert({
           title: '抢购成功',
           content: `核销码 ${res.claim_no}${deadline ? `，请在 ${deadline} 前到店核销` : ''}`,
-          showCancel: false
+          buttonText: '知道了'
         })
       }
       this.setData({ tab: 'mine' })
