@@ -5,6 +5,7 @@
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
+async function main() {
 function loadWithFailingEnvironment(relativePath, globalName) {
   global[globalName] = {
     getAccountInfoSync() {
@@ -83,3 +84,9 @@ for (const [relativePath, globalName, apiPath] of [
 }
 
 console.log("Mini-program environment fail-closed checks passed.");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
