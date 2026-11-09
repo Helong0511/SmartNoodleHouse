@@ -2,7 +2,31 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
+
+
+_SENSITIVE_QUERY_RE = re.compile(
+    r"(?i)([?&](?:secret|access_token|refresh_token|api[_-]?key|key|sign|signature|token)=)[^&\\s]+"
+)
+
+
+class SensitiveQueryRedactionFilter(logging.Filter):
+    """日志兜底脱敏，避免 URL 查询参数中的凭据进入控制台或轮转文件。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = _SENSITIVE_QUERY_RE.sub(r"\\1[REDACTED]", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        if record.exc_info:
+            record.exc_text = _SENSITIVE_QUERY_RE.sub(
+                r"\\1[REDACTED]", logging.Formatter().formatException(record.exc_info)
+            )
+        elif record.exc_text:
+            record.exc_text = _SENSITIVE_QUERY_RE.sub(r"\\1[REDACTED]", record.exc_text)
+        return True
 
 
 class JsonFormatter(logging.Formatter):
@@ -31,8 +55,11 @@ def setup_logging(*, json_logs: bool = False, level: str = "INFO") -> None:
         handler.setFormatter(JsonFormatter())
     else:
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    handler.addFilter(SensitiveQueryRedactionFilter())
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    # httpx 会在 INFO 级别记录完整请求 URL；微信 access_token 接口将 AppSecret 放在 query 中。
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     # 降低噪音
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
@@ -41,6 +68,10 @@ def setup_logging(*, json_logs: bool = False, level: str = "INFO") -> None:
         from app.services.file_log_service import attach_backend_file_handler
 
         path = attach_backend_file_handler(root)
+        # 文件 handler 在此处才创建；必须同样应用脱敏过滤器。
+        for configured_handler in root.handlers:
+            if not any(isinstance(item, SensitiveQueryRedactionFilter) for item in configured_handler.filters):
+                configured_handler.addFilter(SensitiveQueryRedactionFilter())
         logging.getLogger(__name__).info("文件日志目录: %s", path)
     except Exception:
         logging.getLogger(__name__).exception("初始化文件日志失败")
