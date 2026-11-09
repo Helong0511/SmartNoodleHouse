@@ -2628,7 +2628,6 @@ class PaymentService:
                         for kind, payload in (
                             ("points_deduct_refund", {"order_id": int(order.id), "refund_id": int(row.id)}),
                             ("pref_recompute", {"order_id": int(order.id), "refund_id": int(row.id)}),
-                            ("taste_learning_refund", {"order_id": int(order.id), "refund_id": int(row.id)}),
                         ):
                             await enqueue_outbox(
                                 db,
@@ -2637,6 +2636,15 @@ class PaymentService:
                                 event_kind=kind,
                                 payload=payload,
                             )
+                    # 推荐退款学习无论同步偏好重算是否成功都必须入队；
+                    # 否则同步成功路径不会产生 Outbox 事件，画像负向学习会被漏掉。
+                    await enqueue_outbox(
+                        db,
+                        aggregate_type="refund",
+                        aggregate_id=int(row.id),
+                        event_kind="taste_learning_refund",
+                        payload={"order_id": int(order.id), "refund_id": int(row.id)},
+                    )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status
             row.fail_reason = row.fail_reason or fail_reason or (
