@@ -135,6 +135,8 @@ Page({
     try {
       const result = await request
       wx.showToast({ title: result ? '订阅操作已完成' : '未完成订阅，可稍后重试', icon: 'none' })
+    } catch (_) {
+      wx.showToast({ title: '未完成订阅，可稍后重试', icon: 'none' })
     } finally {
       this.setData({ subscribeLoading: false })
     }
