@@ -894,6 +894,8 @@ class PaymentService:
                     select(Payment)
                     .where(Payment.order_id == order.id, Payment.status == "PENDING")
                     .order_by(Payment.id.desc())
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalars().all()
         )
@@ -1022,6 +1024,7 @@ class PaymentService:
         if reused:
             try:
                 synced, sync_meta = await cls.sync_payment_status(db, payment)
+                payment = synced
             except AppException as exc:
                 logger.warning(
                     "复用支付单查单失败 payment=%s: %s", payment.payment_no, exc.message
@@ -1127,7 +1130,19 @@ class PaymentService:
         recharge = locked
         if recharge.status == "PAID":
             raise AppException(40010, "充值单已支付")
-        if recharge.status not in ("PENDING",):
+        # 多端/重试可能同时为同一充值单创建支付：先锁充值单并刷新当前状态，
+        # 再锁定读取现有支付单，避免两个请求都看见“无 PENDING”后各建一笔。
+        recharge = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if recharge is None:
+            raise AppException(40491, "充值单不存在")
+        if recharge.status != "PENDING":
             raise AppException(40012, f"当前充值单状态不可支付: {recharge.status}")
 
         provider_u = provider.upper()
@@ -1186,8 +1201,8 @@ class PaymentService:
         payment_id = payment.id
         recharge_id = recharge.id
         await db.commit()
-        payment = await db.get(Payment, payment_id)
-        recharge = await db.get(RechargeOrder, recharge_id)
+        payment = await db.get(Payment, payment_id, populate_existing=True)
+        recharge = await db.get(RechargeOrder, recharge_id, populate_existing=True)
         if not payment or not recharge:
             raise AppException(40491, "充值/支付单不存在")
 
@@ -1350,6 +1365,8 @@ class PaymentService:
                     .where(Payment.recharge_order_id == current.id)
                     .order_by(Payment.id.desc())
                     .limit(1)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
         if not payment:
@@ -1934,6 +1951,8 @@ class PaymentService:
                     .where(Payment.order_id == order.id, Payment.status == "PAID")
                     .order_by(Payment.id.desc())
                     .limit(1)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
             if existing and progress.get("fully_paid"):
@@ -1957,6 +1976,8 @@ class PaymentService:
                         Payment.provider.in_(("WECHAT", "ALIPAY")),
                     )
                     .order_by(Payment.id.desc())
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalars().all()
         )
