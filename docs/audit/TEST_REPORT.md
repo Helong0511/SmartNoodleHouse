@@ -197,7 +197,7 @@ python -m pytest tests/ -q --tb=line --no-header
 - 结果：12/12 jobs success
 - 后端：2020 passed, 16 skipped in 678.90s
 - 覆盖率：60.35%（CI 门槛 35%）
-- 双端小程序：JS 语法、正式环境 fail-closed、订阅授权手势、支付宝隐私 API fail-closed，以及充值幂等 A→B→A / 精确清理 / TTL / storage failure 专项测试通过。
+- 双端小程序：JS 语法、正式环境 fail-closed、订阅授权手势、支付宝隐私 API fail-closed，以及充值幂等 A→B→A / 精确清理 / 本地时间前进 30 天仍复用待处理键 / storage failure 专项测试通过。
 - MySQL 8：空库 Alembic upgrade、downgrade 再 upgrade、schema/字符集检查通过。
 - Redis 7.4：真实 Lua owner 锁、generation fencing、失效和旧缓存拒绝测试通过。
 - 其他：前端 Node 24/26 构建、依赖锁一致性、Python/Rust 依赖安全审计、Windows Rust DLL 构建通过。
@@ -205,3 +205,9 @@ python -m pytest tests/ -q --tb=line --no-header
 ### 结果边界
 
 以上结果只证明该 SHA 在 CI 环境中的自动化验证通过。16 个 skipped 仍须结合测试名称确认其是否为外部平台/真实凭证依赖；生产 MySQL 现有数据迁移、微信/支付宝官方沙箱、外卖平台回调、备份恢复、监控告警和预生产容量压测仍需人工验收。后续文档-only 提交也必须查看最新 PR head 的 Actions，不能沿用旧 SHA 的绿灯。
+
+## 2026-11-09 后续测试增量（待 CI）
+
+- 充值幂等回归已取消本地 24 小时 TTL 自动轮换断言，改为模拟本地时间前进 30 天仍必须复用原待处理键；原因是本地时钟不能证明渠道支付已经终态。
+- 退款一致性新增当前读测试：`PaymentRefund` 汇总要求 `FOR UPDATE + populate_existing`；订单净已收聚合锁定 Payment 与 PaymentRefund；父行锁后刷新 Payment；在途 UNKNOWN 退款阻止再次创建。
+- 关联提交：`4a98702eff3205c7685ba0c412ff1def5179efd3`。最新 CI 尚未完成，测试结果不得提前登记为通过。
