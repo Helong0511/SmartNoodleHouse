@@ -42,36 +42,39 @@
 
 ### 2. 数据库
 
-**全新环境**按结构 + 生产种子初始化（会删除并重建同名库，已有业务数据勿执行 `struct.sql`）：
+**重要：初始化 SQL 不是升级脚本。** `sql/struct.sql` 已移除无条件删库操作，但 `sql/data_sys.sql` 仍包含多张业务表的 `TRUNCATE`，只允许在全新、隔离、确认无任何业务数据的数据库中执行。禁止把以下命令用于已有库或生产营业库。
+
+全新空库初始化（执行前先核对当前连接的数据库主机、库名，并确认备份策略）：
 
 ```bash
+# 仅全新空库：执行前请确认目标库中没有任何需要保留的数据
 mysql -u root -p < sql/struct.sql
 mysql -u root -p < sql/data_sys.sql
 mysql -u root -p < sql/data_custom.sql
+
+# 初始化管理员密码通过环境变量提供，不要把真实密码写入命令历史或文档
+export ADMIN_INITIAL_PASSWORD='请替换为强随机密码'
 python scripts/初始化管理员.py
+unset ADMIN_INITIAL_PASSWORD
 ```
 
-生产部署前必须修改 `sql/struct.sql` 内数据库账号密码占位符，并设置管理员强密码：
+**已有数据库升级（包括生产环境）只执行 Alembic 迁移：**
 
 ```bash
-# 先把 struct.sql 中 REPLACE_WITH_STRONG_DB_PASSWORD 换成强密码
-mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
-set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
-python scripts/初始化管理员.py
+cd backend
+alembic upgrade head
 ```
+
+不得对已有库执行 `sql/struct.sql`、`sql/data_sys.sql` 或重新灌入初始化种子。升级前必须完成并验证 MySQL 备份；恢复演练通过后方可发布。
 
 | 脚本 | 说明 |
 |------|------|
-| `sql/struct.sql` | **结构真源**：建库授权、完整 DDL（含 Alembic baseline 的 CANONICAL SCHEMA 段） |
-| `sql/data_sys.sql` | **系统必要种子**：角色权限、全局系统参数、默认会员等级、平台券模板等（含全表 TRUNCATE） |
-| `sql/data_custom.sql` | **门店经营种子**：SH01 菜单/规格/桌台 + SH01/SH02 门店壳与里程碑等（幂等，无 TRUNCATE） |
-| `sql/data_test.sql` | **仅本地测试**：补齐 SH02 分类/菜品/桌台/员工/摄像头/人脸样例（禁止写入生产） |
+| `sql/struct.sql` | 全新空库结构初始化；不会删除数据库，但不会替代已有库的迁移流程 |
+| `sql/data_sys.sql` | **破坏性初始化种子**：含全表 TRUNCATE，只能在全新空库执行，严禁用于已有库/生产升级 |
+| `sql/data_custom.sql` | 门店经营初始化种子；仅按新库初始化流程执行 |
+| `sql/data_test.sql` | 仅本地测试数据，禁止写入生产 |
 
-已有库升级请用 Alembic：`cd backend && alembic upgrade head`（`0001_baseline` 只执行 `struct.sql` 的 CANONICAL SCHEMA，不删库）。
-
-开发种子默认管理员: `admin` / `admin123`（生产请用 `初始化管理员.py` 设置强密码）
+开发种子默认管理员为 `admin`；生产必须使用 `scripts/初始化管理员.py` 设置独立强密码并完成首次登录改密。
 
 ### 3. 后端
 
