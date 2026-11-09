@@ -1365,7 +1365,6 @@ class PaymentService:
                     .where(Payment.recharge_order_id == current.id)
                     .order_by(Payment.id.desc())
                     .limit(1)
-                    .with_for_update()
                     .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
