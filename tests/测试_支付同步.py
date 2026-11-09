@@ -573,3 +573,42 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
     assert getattr(returned, "_idempotent_replay", False) is True
     db.rollback.assert_awaited_once()
     db.commit.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_pos_refund_rejects_stale_execution_epoch_before_creating_refund():
+    """旧审批 worker 即使恢复，也不能越过 DB fencing 创建渠道退款单。"""
+    payment = SimpleNamespace(id=301, order_id=401, status="PAID", amount=Decimal("10.00"))
+    request = SimpleNamespace(
+        id=501,
+        order_id=401,
+        status="PROCESSING",
+        execution_token="new-owner-token",
+        execution_epoch=12,
+        execution_lease_until=None,
+        refund_id=None,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = request
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    db.add = MagicMock()
+
+    with patch.object(
+        PaymentService, "_lock_order_then_payment", new_callable=AsyncMock, return_value=payment
+    ):
+        with pytest.raises(AppException) as exc:
+            await PaymentService.refund(
+                db,
+                payment,
+                Decimal("10.00"),
+                "POS 退款",
+                pos_refund_request_id=501,
+                pos_refund_execution_token="old-owner-token",
+                pos_refund_execution_epoch=11,
+            )
+
+    assert exc.value.code == 40954
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
