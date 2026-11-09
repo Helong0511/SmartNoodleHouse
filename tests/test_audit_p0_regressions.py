@@ -14,8 +14,9 @@ def test_only_explicit_development_environment_is_non_production():
         assert not settings.is_development, env
 
 
-def test_default_app_environment_is_fail_closed():
-    # 显式 _env_file=None 避免读取开发者本机 .env。
+def test_default_app_environment_is_fail_closed(monkeypatch):
+    # 同时清除测试 conftest 注入的开发环境，验证真正的无配置默认值。
+    monkeypatch.delenv("APP_ENV", raising=False)
     settings = Settings(_env_file=None)
     assert settings.is_production
     assert not settings.is_development
@@ -35,3 +36,37 @@ def test_sensitive_query_parameters_are_redacted_from_log_message():
     rendered = record.getMessage()
     assert "very-secret-value" not in rendered
     assert "secret=[REDACTED]" in rendered
+
+def test_schema_initializer_does_not_drop_database():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    schema = (root / "sql" / "struct.sql").read_text(encoding="utf-8")
+    assert "DROP DATABASE" not in schema.upper()
+
+
+def test_destructive_system_seed_requires_explicit_confirmation_before_truncate():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    seed = (root / "sql" / "data_sys.sql").read_text(encoding="utf-8")
+    guard = seed.index("@SMART_NOODLE_FRESH_INSTALL_CONFIRM")
+    truncate = seed.upper().index("TRUNCATE TABLE")
+    assert guard < truncate
+    assert "SIGNAL SQLSTATE '45000'" in seed
+    assert "DATABASE() <> 'smart_noodle_house'" in seed
+
+
+def test_immediate_payment_amount_is_required_and_must_match():
+    from decimal import Decimal
+
+    import pytest
+
+    from app.core.exceptions import AppException
+    from app.services.payment_service import _require_provider_amount
+
+    with pytest.raises(AppException):
+        _require_provider_amount({}, Decimal("12.50"))
+    with pytest.raises(AppException):
+        _require_provider_amount({"provider_amount": "12.49"}, Decimal("12.50"))
+    _require_provider_amount({"provider_amount": "12.50"}, Decimal("12.50"))
