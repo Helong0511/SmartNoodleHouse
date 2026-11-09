@@ -182,6 +182,7 @@ async def websocket_endpoint(
     role = None
     is_super = False
     user_key: str | None = None
+    customer_id: int | None = None
 
     if channel == "display":
         if not store_id or int(store_id) <= 0:
@@ -265,6 +266,7 @@ async def websocket_endpoint(
                         await websocket.close(code=4401, reason="无效令牌")
                         return
                     user_key = f"customer:{customer.id}"
+                    customer_id = int(customer.id)
                 elif typ != "staff":
                     await websocket.close(code=4401, reason="无效令牌类型")
                     return
@@ -305,6 +307,7 @@ async def websocket_endpoint(
             store_id=effective_store,
             is_super_admin=is_super and effective_store is None,
             user_key=user_key,
+            customer_id=customer_id,
         )
     except PermissionError as e:
         await websocket.close(code=4429, reason=str(e)[:120])
