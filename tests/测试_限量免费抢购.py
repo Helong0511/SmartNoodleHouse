@@ -66,23 +66,24 @@ async def _seed(
     exclude_store_b: bool = False,
 ):
     """一店/二店 + 总部抢购活动 + 门店库存 + 顾客。"""
-    store_a = Store(store_no="FS01", name="抢购一店", status=1)
-    store_b = Store(store_no="FS02", name="抢购二店", status=1)
+    suffix = uuid4().hex[:8].upper()
+    store_a = Store(store_no=f"FS01-{suffix}", name="抢购一店", status=1)
+    store_b = Store(store_no=f"FS02-{suffix}", name="抢购二店", status=1)
     db.add_all([store_a, store_b])
     await db.flush()
     a_id, b_id = int(store_a.id), int(store_b.id)
 
-    cat_a = ProductCategory(store_id=a_id, category_no="CAT-FS-A", name="霸王面分类")
-    cat_b = ProductCategory(store_id=b_id, category_no="CAT-FS-B", name="霸王面分类")
+    cat_a = ProductCategory(store_id=a_id, category_no=f"CAT-FS-A-{suffix}", name="霸王面分类")
+    cat_b = ProductCategory(store_id=b_id, category_no=f"CAT-FS-B-{suffix}", name="霸王面分类")
     db.add_all([cat_a, cat_b])
     await db.flush()
 
     prod_a = Product(
-        store_id=a_id, category_id=int(cat_a.id), product_no="P-FS-A",
+        store_id=a_id, category_id=int(cat_a.id), product_no=f"P-FS-A-{suffix}",
         name="霸王面（一店）", price=Decimal("18.00"), status="ON_SALE", stock=50,
     )
     prod_b = Product(
-        store_id=b_id, category_id=int(cat_b.id), product_no="P-FS-B",
+        store_id=b_id, category_id=int(cat_b.id), product_no=f"P-FS-B-{suffix}",
         name="霸王面（二店）", price=Decimal("18.00"), status="ON_SALE", stock=50,
     )
     db.add_all([prod_a, prod_b])
@@ -90,7 +91,7 @@ async def _seed(
     prod_a_id, prod_b_id = int(prod_a.id), int(prod_b.id)
 
     customer = Customer(
-        customer_no="C-FS-1",
+        customer_no=f"C-FS-1-{suffix}",
         display_name="抢购客",
         member_status="MEMBER",
         account_status="ACTIVE",
@@ -106,8 +107,8 @@ async def _seed(
     now = naive_local_now()
     camp = MarketingCampaign(
         store_id=None,
-        code="FS-TEST",
-        code_key="HQ:FS-TEST",
+        code=f"FS-TEST-{suffix}",
+        code_key=f"HQ:FS-TEST-{suffix}",
         name="射洪霸王面限量免费",
         campaign_type="MEMBER_DAY",
         status="RUNNING",
