@@ -31,8 +31,19 @@ def _strip_ctrl(value: str) -> str:
     return _CTRL_RE.sub(" ", value or "")
 
 
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)")
+_IDENTIFIER_RE = re.compile(
+    r"(?i)(/\b(?:orders|payments|refunds|recharges)\b/)[A-Za-z0-9_-]+"
+    r"|\b(?:customer|member|order|payment|refund)_?(?:id|no)\s*[:=]\s*[A-Za-z0-9_-]+"
+)
+
+
 def _redact_secrets(value: str) -> str:
-    return _SECRET_RE.sub(r"\1\2***", value or "")
+    cleaned = _SECRET_RE.sub(r"\1\2***", value or "")
+    cleaned = _PHONE_RE.sub("[PHONE_REDACTED]", cleaned)
+    return _IDENTIFIER_RE.sub(
+        lambda match: (match.group(1) or "") + "[ID_REDACTED]", cleaned
+    )
 
 
 class ClientLogEntry(BaseModel):
@@ -57,19 +68,19 @@ class ClientLogEntry(BaseModel):
     @field_validator("extra")
     @classmethod
     def limit_extra(cls, v: Any) -> Any:
-        if v is None:
+        # 客户端 extra 不接受任意对象；仅保留排障必需的状态码，避免 PII/订单详情落盘。
+        if v is None or not isinstance(v, dict):
             return None
-        try:
-            raw = dumps_json(v)
-        except Exception:
-            raw = str(v)
-        raw = _redact_secrets(_strip_ctrl(raw))
-        if len(raw) > _MAX_EXTRA_JSON:
-            return {"_truncated": raw[:_MAX_EXTRA_JSON]}
-        try:
-            return json.loads(raw)
-        except Exception:
-            return raw
+        safe: dict[str, int | str] = {}
+        status = v.get("status")
+        if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+            safe["status"] = status
+        code = v.get("code")
+        if isinstance(code, int) and not isinstance(code, bool):
+            safe["code"] = code
+        elif isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", code):
+            safe["code"] = code
+        return safe
 
 
 class ClientLogBatch(BaseModel):
