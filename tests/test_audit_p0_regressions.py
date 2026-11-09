@@ -70,3 +70,22 @@ def test_immediate_payment_amount_is_required_and_must_match():
     with pytest.raises(AppException):
         _require_provider_amount({"provider_amount": "12.49"}, Decimal("12.50"))
     _require_provider_amount({"provider_amount": "12.50"}, Decimal("12.50"))
+
+@pytest.mark.asyncio
+async def test_login_guard_fails_closed_when_redis_is_unavailable(monkeypatch):
+    from app import core
+    from app.api import auth
+    from app.core.exceptions import AppException
+
+    async def unavailable():
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(core.redis_client, "get_redis", unavailable)
+    for operation in (
+        auth._login_is_locked,
+        auth._record_login_failure,
+        auth._clear_login_failures,
+    ):
+        with pytest.raises(AppException) as exc:
+            await operation("audit-test-user", "127.0.0.1")
+        assert exc.value.status_code == 503
