@@ -18,11 +18,12 @@ function verifyWechat() {
     assert.equal(helper.getRechargeIdempotencyKey(1, 10, 3), firstA, 'A→B→A must reuse A key')
     assert.equal(Object.keys(storage[STORAGE_KEY].entries).length, 2)
     assert.equal(helper.clearRechargeIdempotencyKey(firstA), true)
-    assert.notEqual(helper.getRechargeIdempotencyKey(1, 10, 3), firstA)
+    const replacementA = helper.getRechargeIdempotencyKey(1, 10, 3)
+    assert.notEqual(replacementA, firstA)
     assert.equal(helper.getRechargeIdempotencyKey(1, 20, 3), firstB, 'clearing A must not clear B')
 
     Date.now = () => 1_000_000 + 30 * 24 * 60 * 60 * 1000
-    assert.equal(helper.getRechargeIdempotencyKey(1, 10, 3), firstA, 'old pending key must not rotate based only on local age')
+    assert.equal(helper.getRechargeIdempotencyKey(1, 10, 3), replacementA, 'old pending key must not rotate based only on local age')
 
     const get = global.wx.getStorageSync
     global.wx.getStorageSync = () => { throw new Error('storage unavailable') }
@@ -51,11 +52,12 @@ function verifyAlipay() {
     assert.equal(helper.getRechargeIdempotencyKey(2, 10, 4), firstA, 'A→B→A must reuse A key')
     assert.equal(Object.keys(storage[STORAGE_KEY].entries).length, 2)
     assert.equal(helper.clearRechargeIdempotencyKey(firstA), true)
-    assert.notEqual(helper.getRechargeIdempotencyKey(2, 10, 4), firstA)
+    const replacementA = helper.getRechargeIdempotencyKey(2, 10, 4)
+    assert.notEqual(replacementA, firstA)
     assert.equal(helper.getRechargeIdempotencyKey(2, 20, 4), firstB, 'clearing A must not clear B')
 
     Date.now = () => 2_000_000 + 30 * 24 * 60 * 60 * 1000
-    assert.equal(helper.getRechargeIdempotencyKey(2, 10, 4), firstA, 'old pending key must not rotate based only on local age')
+    assert.equal(helper.getRechargeIdempotencyKey(2, 10, 4), replacementA, 'old pending key must not rotate based only on local age')
 
     const get = global.my.getStorageSync
     global.my.getStorageSync = () => { throw new Error('storage unavailable') }
