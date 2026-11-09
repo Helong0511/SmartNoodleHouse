@@ -1,6 +1,8 @@
 """代码审查报告 P0 回归：配置 fail-closed 与日志凭据脱敏。"""
 import logging
 
+import pytest
+
 from app.core.config import Settings
 from app.core.logging_config import SensitiveQueryRedactionFilter
 
