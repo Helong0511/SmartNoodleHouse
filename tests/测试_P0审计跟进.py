@@ -194,7 +194,7 @@ async def test_get_phone_by_code_rejects_replay():
     ), patch.object(wmc, "get_access_token", new_callable=AsyncMock, return_value="access-token"), patch(
         "app.services.wechat_mini_client.httpx.AsyncClient", return_value=FakeClient()
     ), patch(
-        "app.services.webhook_replay.claim_once", new_callable=AsyncMock, return_value="owner-token"
+        "app.services.webhook_replay.claim_once", new_callable=AsyncMock, side_effect=["owner-token", None]
     ), patch("app.services.webhook_replay.release_claim", new_callable=AsyncMock):
         phone1 = await wmc.get_phone_by_code("once-code-xyz")
         assert phone1 == "13800138000"
