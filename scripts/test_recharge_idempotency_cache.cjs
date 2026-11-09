@@ -21,8 +21,8 @@ function verifyWechat() {
     assert.notEqual(helper.getRechargeIdempotencyKey(1, 10, 3), firstA)
     assert.equal(helper.getRechargeIdempotencyKey(1, 20, 3), firstB, 'clearing A must not clear B')
 
-    Date.now = () => 1_000_000 + TTL_MS + 1
-    assert.notEqual(helper.getRechargeIdempotencyKey(1, 10, 3), firstA, 'expired key must rotate')
+    Date.now = () => 1_000_000 + 30 * 24 * 60 * 60 * 1000
+    assert.equal(helper.getRechargeIdempotencyKey(1, 10, 3), firstA, 'old pending key must not rotate based only on local age')
 
     const get = global.wx.getStorageSync
     global.wx.getStorageSync = () => { throw new Error('storage unavailable') }
@@ -54,8 +54,8 @@ function verifyAlipay() {
     assert.notEqual(helper.getRechargeIdempotencyKey(2, 10, 4), firstA)
     assert.equal(helper.getRechargeIdempotencyKey(2, 20, 4), firstB, 'clearing A must not clear B')
 
-    Date.now = () => 2_000_000 + TTL_MS + 1
-    assert.notEqual(helper.getRechargeIdempotencyKey(2, 10, 4), firstA, 'expired key must rotate')
+    Date.now = () => 2_000_000 + 30 * 24 * 60 * 60 * 1000
+    assert.equal(helper.getRechargeIdempotencyKey(2, 10, 4), firstA, 'old pending key must not rotate based only on local age')
 
     const get = global.my.getStorageSync
     global.my.getStorageSync = () => { throw new Error('storage unavailable') }
@@ -71,4 +71,4 @@ function verifyAlipay() {
 
 verifyWechat()
 verifyAlipay()
-console.log('WeChat/Alipay recharge idempotency cache switching, exact clear, TTL and fail-closed: OK')
+console.log('WeChat/Alipay recharge idempotency cache switching, exact clear, age-independent retention and fail-closed: OK')
