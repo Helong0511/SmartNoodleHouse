@@ -2628,6 +2628,7 @@ class PaymentService:
                         for kind, payload in (
                             ("points_deduct_refund", {"order_id": int(order.id), "refund_id": int(row.id)}),
                             ("pref_recompute", {"order_id": int(order.id), "refund_id": int(row.id)}),
+                            ("taste_learning_refund", {"order_id": int(order.id), "refund_id": int(row.id)}),
                         ):
                             await enqueue_outbox(
                                 db,
