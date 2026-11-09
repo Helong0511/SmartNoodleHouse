@@ -33,7 +33,8 @@ function getRequestId(campaignId, storeId) {
     .filter(([, item]) => item && item.id && now - Number(item.createdAt || 0) < FLASH_SALE_REQUEST_TTL)
     .sort((a, b) => Number(b[1].createdAt || 0) - Number(a[1].createdAt || 0))
     .slice(0, 49)
-  const cache = Object.fromEntries(entries)
+  const cache = {}
+  entries.forEach(([key, item]) => { cache[key] = item })
   if (cache[scope]) return cache[scope].id
   const id = `fs${now.toString(36)}${Math.random().toString(36).slice(2, 10)}`
   cache[scope] = { id, createdAt: now }
