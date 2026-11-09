@@ -120,7 +120,7 @@ async def test_multi_item_stock_deduction_uses_stable_product_lock_order(monkeyp
 
     monkeypatch.setattr("app.services.stock_service.deduct_stock", fake_deduct)
     monkeypatch.setattr(
-        "app.services.menu_cache_service.enqueue_menu_cache_invalidation", AsyncMock()
+        "app.services.menu_cache_service.invalidate_store_menu_cache", AsyncMock()
     )
 
     await deduct_for_order_items(
@@ -172,7 +172,7 @@ async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypa
     monkeypatch.setattr("app.services.stock_service.restore_stock", fake_restore)
     monkeypatch.setattr("app.services.stock_service.deduct_stock", fake_deduct)
     monkeypatch.setattr(
-        "app.services.menu_cache_service.enqueue_menu_cache_invalidation", AsyncMock()
+        "app.services.menu_cache_service.invalidate_store_menu_cache", AsyncMock()
     )
     order = SimpleNamespace(id=88, store_id=7)
 
