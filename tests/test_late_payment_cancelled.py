@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.core.exceptions import AppException
+from app.services.order_state_machine import assert_payment_transition
 from app.services.payment_service import PaymentService
 
 
@@ -82,6 +84,12 @@ async def test_late_payment_for_cancelled_order_queues_refund_without_reviving(
     change_status.assert_not_awaited()
     assert order.status == "CANCELLED"
     assert order.payment_status == expected_payment_status
-    assert order.cancelled_at if hasattr(order, "cancelled_at") else True
     assert result["late_payment"] is True
     assert result["refund_queued"] is True
+
+
+
+def test_cancelled_order_cannot_be_revived_by_payment_transition():
+    with pytest.raises(AppException) as exc:
+        assert_payment_transition("CANCELLED", "PAID")
+    assert exc.value.code == 40024
