@@ -404,9 +404,9 @@ async def _handle_late_payment_auto_refund(db: AsyncSession, row) -> None:
         order = await refund_db.get(Order, expected_order_id)
         if not order:
             raise RuntimeError(f"迟到支付对应的订单不存在 payment_id={payment_id}")
-        if str(order.status or "").upper() != "CANCELLED":
+        if str(order.status or "").upper() not in {"CANCELLED", "REFUNDED"}:
             raise RuntimeError(
-                f"迟到支付自动退款要求订单保持 CANCELLED order_id={expected_order_id}"
+                f"迟到支付自动退款要求订单保持取消/退款终态 order_id={expected_order_id}"
             )
 
         existing = (
