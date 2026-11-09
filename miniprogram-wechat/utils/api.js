@@ -139,7 +139,15 @@ function buildQueryUrl(path, data) {
 }
 
 function requestOnce(method, path, data = {}, needAuth = true) {
-  const base = resolveBaseUrl()
+  let base
+  try {
+    base = resolveBaseUrl()
+  } catch (err) {
+    // 配置错误也必须遵守 Promise API 契约，交由调用方统一 catch，不能同步抛出。
+    return Promise.reject(makeRequestError(err && err.message ? err.message : '小程序 API 地址配置无效', {
+      code: 'API_BASE_INVALID'
+    }))
+  }
   return new Promise((resolve, reject) => {
     if (!base) {
       reject(makeRequestError('未配置 apiBase，请在 miniprogram-wechat/config/env.js 填写 PROD_API_BASE 或 DEV_LAN_HOST'))
