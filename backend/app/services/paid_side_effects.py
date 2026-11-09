@@ -34,6 +34,7 @@ async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
         "points_award",
         "coupon_mark_used",
         "pref_update",
+        "taste_learning",
         "milestone_coupon",
         "social_benefit_confirm",
         "campaign_attribution",
@@ -146,13 +147,19 @@ async def _handle_pref_update(db: AsyncSession, row) -> None:
     if not order or not order.customer_id:
         return
     await PreferenceService.update_from_order(db, order.id)
-    # 智能推荐：补记 ORDER_PAID 事件并即时增量学习（event_id 幂等，重试安全）
+
+
+@register_outbox_handler("paid_side_effect", "taste_learning")
+async def _handle_taste_learning(db: AsyncSession, row) -> None:
+    """支付后的推荐画像学习独立重试；失败必须向 Outbox 传播。"""
+    from app.models import Order
     from app.services.taste_learning_service import TasteLearningService
 
-    try:
-        await TasteLearningService.record_paid_order_events(db, order.id)
-    except Exception:
-        logger.exception("推荐画像支付学习失败 order_id=%s", order.id)
+    order = await db.get(Order, int(row.aggregate_id))
+    if not order or not order.customer_id:
+        return
+    # 事件写入以 event_id 幂等；异常不吞掉，由 Outbox 退避重试并最终进入死信。
+    await TasteLearningService.record_paid_order_events(db, order.id)
 
 
 @register_outbox_handler("paid_side_effect", "milestone_coupon")
