@@ -36,19 +36,21 @@ logger = logging.getLogger(__name__)
 
 def _wechat_callback_receipt_identity(data: dict, parsed: dict) -> tuple[str, ...]:
     """构造稳定的微信通知身份；签名头 nonce 是每次 HTTP 请求随机值，不能用于回调幂等。"""
-    notification_id = str(data.get("id") or "").strip()
+    notification_id = str(data.get("id") or parsed.get("id") or "").strip()
+    event_type = str(data.get("event_type") or parsed.get("event_type") or "").strip().upper()
     if parsed.get("is_refund"):
+        # 微信通知 id 是官方稳定事件标识；success_time/create_time 不是幂等身份。
         return (
-            f"{notification_id}" if notification_id else "",
+            notification_id,
             str(parsed.get("refund_no") or data.get("out_refund_no") or "").strip(),
-            str(data.get("event_type") or parsed.get("refund_status") or "").strip().upper(),
-            str(data.get("success_time") or data.get("create_time") or "").strip(),
+            str(parsed.get("refund_id") or data.get("refund_id") or "").strip(),
+            event_type or str(parsed.get("refund_status") or "").strip().upper(),
         )
     return (
         notification_id,
         str(data.get("out_trade_no") or parsed.get("payment_no") or "").strip(),
         str(data.get("transaction_id") or parsed.get("provider_trade_no") or "").strip(),
-        str(data.get("event_type") or parsed.get("status") or "").strip().upper(),
+        event_type or str(parsed.get("status") or "").strip().upper(),
     )
 
 
@@ -2950,6 +2952,17 @@ class PaymentService:
 
         query_status = str(result.get("status") or "PROCESSING").strip().upper()
         if query_status == "SUCCESS":
+            # SUCCESS 必须同时绑定本地退款单、原支付单和原渠道交易号；缺任一项都不能入账。
+            if (
+                not result_refund_no
+                or result_refund_no != str(refund.refund_no)
+                or not result_payment_no
+                or result_payment_no != str(payment.payment_no)
+                or not result_trade_no
+                or not local_trade_no
+                or result_trade_no != local_trade_no
+            ):
+                raise AppException(50302, "渠道退款查询缺少或不匹配完整退款/原支付身份，拒绝入账")
             if provider_u == "ALIPAY":
                 amount_raw = result.get("amount")
                 if amount_raw is None:
