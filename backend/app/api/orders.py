@@ -104,6 +104,7 @@ async def create_order(
                 "table_no": table.table_no if table else None,
                 "dining_type": order.dining_type,
             },
+            customer_id=int(order.customer_id) if order.customer_id else None,
         )
     except Exception as ws_err:
         # WS 推送失败不应导致下单事务回滚（顾客已视为下单成功）
