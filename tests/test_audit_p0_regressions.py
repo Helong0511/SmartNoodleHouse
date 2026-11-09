@@ -73,14 +73,14 @@ def test_immediate_payment_amount_is_required_and_must_match():
 
 @pytest.mark.asyncio
 async def test_login_guard_fails_closed_when_redis_is_unavailable(monkeypatch):
-    from app import core
+    import app.core.redis_client as redis_client
     from app.api import auth
     from app.core.exceptions import AppException
 
     async def unavailable():
         raise ConnectionError("redis unavailable")
 
-    monkeypatch.setattr(core.redis_client, "get_redis", unavailable)
+    monkeypatch.setattr(redis_client, "get_redis", unavailable)
     for operation in (
         auth._login_is_locked,
         auth._record_login_failure,
