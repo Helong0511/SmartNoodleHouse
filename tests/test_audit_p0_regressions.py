@@ -172,3 +172,44 @@ def test_intrusion_probe_ignores_user_agent_and_rejects_prefix_exemption_bypass(
         }
     )
     assert detect_intrusion(request) == (False, "")
+
+
+def test_social_benefit_requires_explicit_opt_in_not_legacy_rule_id():
+    from app.services.order_create_service import OrderCreateService
+
+    assert not OrderCreateService._should_apply_social_benefit(123, False)
+    assert OrderCreateService._should_apply_social_benefit(123, True)
+    assert not OrderCreateService._should_apply_social_benefit(None, True)
+
+
+@pytest.mark.asyncio
+async def test_staff_payment_access_rejects_orphan_and_cross_store_recharge(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.api import deps, payments
+    from app.core.exceptions import AppException
+
+    monkeypatch.setattr(
+        deps, "get_user_permissions", AsyncMock(return_value={"payment:read"})
+    )
+    user = SimpleNamespace(
+        id=7, role_id=3, role=SimpleNamespace(code="STORE_ADMIN"), store_id=1
+    )
+
+    orphan_db = SimpleNamespace(get=AsyncMock(return_value=None))
+    with pytest.raises(AppException):
+        await payments._authorize_staff_payment_access(
+            orphan_db, user, SimpleNamespace(recharge_order_id=None), None
+        )
+
+    foreign_db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(store_id=2)))
+    with pytest.raises(AppException):
+        await payments._authorize_staff_payment_access(
+            foreign_db, user, SimpleNamespace(recharge_order_id=99), None
+        )
+
+    own_db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(store_id=1)))
+    await payments._authorize_staff_payment_access(
+        own_db, user, SimpleNamespace(recharge_order_id=99), None
+    )
