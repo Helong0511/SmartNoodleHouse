@@ -9,8 +9,46 @@ const STATUS_LABEL = {
   CANCELLED: '已取消'
 }
 
-function genRequestId() {
-  return `fs${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+const FLASH_SALE_REQUESTS_KEY = 'flash_sale_request_ids_v1'
+const FLASH_SALE_REQUEST_TTL = 24 * 60 * 60 * 1000
+
+function requestScope(campaignId, storeId) {
+  const customerId = Number(auth.readStorage('customer_id') || 0)
+  return `${customerId}:${Number(storeId)}:${Number(campaignId)}`
+}
+
+function readRequestMap() {
+  try {
+    const value = wx.getStorageSync(FLASH_SALE_REQUESTS_KEY)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function getRequestId(campaignId, storeId) {
+  const now = Date.now()
+  const scope = requestScope(campaignId, storeId)
+  const entries = Object.entries(readRequestMap())
+    .filter(([, item]) => item && item.id && now - Number(item.createdAt || 0) < FLASH_SALE_REQUEST_TTL)
+    .sort((a, b) => Number(b[1].createdAt || 0) - Number(a[1].createdAt || 0))
+    .slice(0, 49)
+  const cache = Object.fromEntries(entries)
+  if (cache[scope]) return cache[scope].id
+  const id = `fs${now.toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  cache[scope] = { id, createdAt: now }
+  try {
+    wx.setStorageSync(FLASH_SALE_REQUESTS_KEY, cache)
+  } catch (_) {
+    throw new Error('无法保存抢购幂等凭证，已阻止重复提交风险')
+  }
+  return id
+}
+
+function clearRequestId(campaignId, storeId) {
+  const cache = readRequestMap()
+  delete cache[requestScope(campaignId, storeId)]
+  try { wx.setStorageSync(FLASH_SALE_REQUESTS_KEY, cache) } catch (_) {}
 }
 
 /** 列表按钮状态：每人限购 / 已持有一份 / 售罄 都在前端做展示，服务端仍会二次校验 */
@@ -146,8 +184,9 @@ Page({
     try {
       const res = await api.post(`/miniprogram/flash-sales/${campaignId}/claim`, {
         store_id: this.data.storeId,
-        client_request_id: genRequestId()
+        client_request_id: getRequestId(campaignId, this.data.storeId)
       })
+      clearRequestId(campaignId, this.data.storeId)
       if (res && res.already_claimed) {
         wx.showToast({ title: '已抢到，请勿重复抢购', icon: 'none' })
       } else {
