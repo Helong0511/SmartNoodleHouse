@@ -293,6 +293,8 @@ class OrderCreateService:
                 if not OrderCreateService._is_reusable_idempotent_order(order):
                     raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                 await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
+                # 告知 API 层这是幂等重放，不能清理用户在原订单后新建的共享车内容。
+                setattr(order, "_idempotent_replay", True)
                 return order
 
         # 同桌共享购物车启用时，必须锁定 party 并校验版本与餐品快照。
@@ -404,6 +406,7 @@ class OrderCreateService:
                     if not OrderCreateService._is_reusable_idempotent_order(order):
                         raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                     await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
+                    setattr(order, "_idempotent_replay", True)
                     return order
             raise AppException(40901, "订单创建冲突，请重试")
 
