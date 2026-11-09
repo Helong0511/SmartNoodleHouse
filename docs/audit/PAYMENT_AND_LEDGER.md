@@ -304,3 +304,11 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 推荐学习异常必须向 Outbox worker 传播，进入指数退避重试；达到最大尝试次数后进入失败/死信告警，不得仅记录日志后把事件标记为 DONE。
 - `tests/test_paid_side_effects_retry.py` 覆盖事件独立入队、偏好更新不再隐式触发推荐学习、推荐学习异常向 worker 传播。
 - 此项为代码级回归防护；仍需以最新提交对应的 CI 结果作为验收证据。
+
+
+### 2026-11-09 退款推荐学习独立重试边界复核
+
+- 发现退款后的推荐负向学习原先嵌在 `pref_recompute` handler 中，并捕获所有异常只记录日志；Outbox worker 会误将该事件标记 DONE，造成退款推荐画像漏更新。
+- 修复：退款成功事务同步写入独立 `taste_learning_refund` Outbox 事件；偏好重算与推荐学习分离。推荐学习 handler 不吞异常，由 Outbox 退避重试和死信机制负责恢复。
+- `record_full_refund_events` 内部仍以订单 `payment_status=REFUNDED` 为门槛，部分退款事件安全 no-op；其 `order_refund:{order_id}:{product_id}` 事件 ID 保证重试幂等。
+- 回归测试覆盖偏好 handler 不再隐式执行推荐学习，以及退款推荐学习异常必须传播。以该提交对应的 CI 为最终验收依据。
