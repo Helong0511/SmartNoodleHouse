@@ -270,3 +270,14 @@ def test_client_logs_redact_phone_and_identifiers_and_allowlist_extra():
     assert "ORDER-123" not in entry.message
     assert "123" not in entry.message
     assert entry.extra == {"status": 503, "code": "AUTH_STALE"}
+
+
+def test_wechat_order_result_imports_subscription_helper_before_use():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    page = (root / "miniprogram-wechat/packageOrder/result/result.js").read_text(encoding="utf-8")
+    helper = root / "miniprogram-wechat/utils/subscribe.js"
+    assert helper.is_file()
+    assert "const subscribe = require('../../utils/subscribe')" in page
+    assert "subscribe.requestOrderReadySubscribe()" in page
