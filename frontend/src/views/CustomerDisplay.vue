@@ -409,10 +409,21 @@ function tickReadyRemind() {
   processReadyVoice(ready.value, false)
 }
 
-async function load() {
+let loadChain: Promise<void> = Promise.resolve()
+
+function load(): Promise<void> {
+  // WebSocket 与轮询共用串行队列，避免旧快照覆盖新状态。
+  const next = loadChain.then(() => loadOnce(), () => loadOnce())
+  loadChain = next.catch(() => {})
+  return next
+}
+
+async function loadOnce() {
   if (disposed || !storeId.value) return
+  const requestedStoreId = storeId.value
   try {
     const res = await publicApi.get('/orders/display/active', { params: displayParams() })
+    if (disposed || requestedStoreId !== storeId.value) return
     featureDisabled.value = false
     const data = res.data || {}
     const nextReady = (data.ready || []) as DisplayItem[]
@@ -439,9 +450,11 @@ async function load() {
 }
 
 async function loadStoreName() {
-  if (!storeId.value) return
+  if (disposed || !storeId.value) return
+  const requestedStoreId = storeId.value
   try {
-    const res = await publicApi.get(`/miniprogram/stores/${storeId.value}`)
+    const res = await publicApi.get(`/miniprogram/stores/${requestedStoreId}`)
+    if (disposed || requestedStoreId !== storeId.value) return
     storeName.value = res.data?.name || ''
   } catch {
     storeName.value = `门店 #${storeId.value}`
