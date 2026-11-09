@@ -186,14 +186,16 @@ http://127.0.0.1:5173/display?store_id=1          # 本地开发，1 换成实�
 https://你的域名/display?store_id=1               # 生产环境
 ```
 
-生产环境建议在 `.env` 设置访问令牌，并在 URL 带上 `token` 参数：
+生产环境必须在后台对应门店的「门店业务设置」中生成并保存**本店独立叫号屏令牌**，再复制完整 URL。不同门店的令牌不能互换。全局 `DISPLAY_SCREEN_TOKEN` 仅作为开发环境回退，不作为生产通行令牌：
 
 ```bash
-DISPLAY_SCREEN_TOKEN=随机一串
-# 访问：https://你的域名/display?store_id=1&token=随机一串
+# 仅开发环境全局回退令牌；生产请在每家门店设置中生成独立令牌
+DISPLAY_SCREEN_TOKEN=开发随机令牌
+# 生产访问 URL 由门店设置生成：
+# https://你的域名/display?store_id=1&token=该门店独立令牌
 ```
 
-留空 `DISPLAY_SCREEN_TOKEN` 时不校验令牌（仅建议开发环境）。
+生产环境每家门店必须配置独立令牌；令牌缺失、数据库读取失败或令牌不匹配均拒绝 WebSocket 连接。开发环境才允许全局回退或不校验。
 
 **屏上展示**
 
@@ -296,7 +298,7 @@ DISPLAY_SCREEN_TOKEN=随机一串
 | `VITE_API_BASE_URL` | `/api` | `/api` |
 | `ALLOW_*_MOCK` | `true` | 全部 `false` |
 | `ALIPAY_AES_KEY` | 可留空（手输手机号） | **必填**（解密授权手机号） |
-| `DISPLAY_SCREEN_TOKEN` | 可留空 | 建议设置 |
+| `DISPLAY_SCREEN_TOKEN` | 开发环境回退令牌 | 可留空；生产按门店配置独立令牌 |
 | `XPYUN_ENABLED` | `false` 或 `true` | 打印总开关 |
 | `PRINTER_MODE` | `local`（XP-80T WiFi） | `local` 或 `xpyun` |
 | `PRINTER_HOST` | 打印机局域网 IP | 与后端同网段 |
@@ -463,7 +465,7 @@ VITE_API_BASE_URL=/api
 UPLOAD_DIR=/var/www/smart-noodle/uploads
 JSON_LOGS=true
 WEBHOOK_REQUIRE_ALLOWLIST=false  # 只有配置全部已启用渠道的官方出口 CIDR 后才改为 true，并填写 WEBHOOK_IP_ALLOWLIST
-DISPLAY_SCREEN_TOKEN=随机一串
+ # DISPLAY_SCREEN_TOKEN 仅开发环境回退；生产各门店在后台分别设置独立令牌
 PROCESS_ROLE=auto  # systemd 多 Worker 由 Redis Leader 锁选主
 ENABLE_RECOGNITION_WORKER=1
 # WECHAT_* / ALIPAY_* / MEITUAN_* / ELEME_* 见 .env.production.example
@@ -626,7 +628,7 @@ https://你的域名.com/scan?token=桌台token
 - [ ] `.env` 来自 `.env.production.example`，mock 全部为 `false`
 - [ ] `JWT_SECRET`、`FACE_ENCRYPTION_KEY` 已换随机强密钥
 - [ ] `H5_PUBLIC_BASE_URL`、`MINI_PROGRAM_ENV_VERSION=release`
-- [ ] `ALIPAY_AES_KEY`、`DISPLAY_SCREEN_TOKEN` 已配置
+- [ ] `ALIPAY_AES_KEY` 已配置；每家启用叫号屏的门店均已生成并保存独立令牌
 - [ ] 厨房打印机：`XPYUN_ENABLED=true`、`PRINTER_MODE=local`、`PRINTER_HOST` 已填（XP-80T WiFi）
 - [ ] `ALLOW_PRINT_MOCK=false`（生产禁止模拟打印）
 - [ ] `systemctl status smart-noodle` 为 active
@@ -699,5 +701,5 @@ mysqldump -u snh -p smart_noodle_house | gzip > /backup/snh_$(date +%F).sql.gz
 - 支付 / 外卖回调验签（开发模式可模拟）
 - 支付金额由服务端从数据库重新计算
 - 桌台二维码使用不可预测 token
-- 厨房与外卖 WebSocket 需鉴权；顾客叫号屏 WebSocket 为公开频道（建议配置 `DISPLAY_SCREEN_TOKEN`）
+- 厨房与外卖 WebSocket 需鉴权；顾客叫号屏 WebSocket 使用门店独立 opaque token 鉴权，生产禁止全局 token 跨店复用
 - 摄像头密码加密存储；操作日志定期清理
