@@ -1519,3 +1519,55 @@ async def test_milestone_handler_starts_fresh_transaction_after_idempotency_prec
 
     handler.assert_awaited_once()
     assert db.commit.await_count >= 3
+
+
+@pytest.mark.asyncio
+async def test_payment_outbox_worker_loads_handler_registry_after_restart(monkeypatch):
+    """Worker 重启后即使没有任何支付 API 请求，也必须主动加载支付 handler 注册模块。"""
+    import builtins
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=9902,
+        aggregate_type="late_payment",
+        aggregate_id=123,
+        event_kind="auto_refund",
+        locked_by="worker:restart",
+        payload='{"payment_id":123,"order_id":456}',
+        sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    mark_failed = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "_mark_failed", mark_failed)
+
+    original_import = builtins.__import__
+    attempted = []
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "app.services.paid_side_effects":
+            attempted.append(name)
+            raise ImportError("simulated handler module import failure")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    assert await outbox_worker.process_outbox_item(9902) is True
+
+    assert attempted == ["app.services.paid_side_effects"]
+    mark_failed.assert_awaited_once()
+    assert "handler_module_import_failed" in mark_failed.await_args.args[2]
