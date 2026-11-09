@@ -22,18 +22,17 @@ class SensitiveQueryRedactionFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        redacted = _SENSITIVE_QUERY_RE.sub(r"\\1[REDACTED]", message)
+        redacted = _redact_sensitive_query(message)
         if redacted != message:
             record.msg = redacted
             record.args = ()
         if record.exc_info:
-            record.exc_text = _SENSITIVE_QUERY_RE.sub(
-                r"\\1[REDACTED]", logging.Formatter().formatException(record.exc_info)
+            record.exc_text = _redact_sensitive_query(
+                logging.Formatter().formatException(record.exc_info)
             )
         elif record.exc_text:
-            record.exc_text = _SENSITIVE_QUERY_RE.sub(r"\\1[REDACTED]", record.exc_text)
+            record.exc_text = _redact_sensitive_query(record.exc_text)
         return True
-
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
