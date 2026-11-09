@@ -344,5 +344,5 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 发现付款码即时收款在渠道 HTTP 返回后直接使用请求前 ORM 对象执行 `_settle_immediate_payment`；若异步 SUCCESS 回调先一步提交，旧对象仍可能是 PENDING，再次执行 SALE/订单收敛。
 - 修复：即时收款与开发 mock 结算在渠道响应后重新按 Order→Payment 当前读锁定，并用 `populate_existing=True` 刷新订单和支付对象；若回调已将支付单置 PAID/PARTIAL_REFUND/REFUNDED，则即时路径直接退出，不重复执行资金副作用，也不把退款终态降级回 PAID。
 - 即时渠道金额缺失/不匹配时，不再直接改写旧 ORM 对象。改为重新锁定并刷新当前支付单；仅在尚未 PAID/退款终态时转 UNKNOWN，写状态历史并先提交，再向调用方返回金额错误，避免请求异常回滚掉 UNKNOWN，也避免覆盖并发成功回调。
-- 充值即时金额不匹配路径按 RechargeOrder→Payment 当前读锁定；两者任一已 PAID 时不做降级，状态分叉则 fail-closed 报人工核对；未支付时持久化 UNKNOWN 和状态历史。
+- 充值即时金额不匹配路径按 RechargeOrder→Payment 当前读锁定；两者任一已 PAID 时不做降级，状态分叉则 fail-closed 报人工核对；未支付时持久化 UNKNOWN 和状态历史。充值最终入账本身也移除锁前状态短路，并在 RechargeOrder→Payment 锁后刷新 ORM，再判断双边 PAID/终态，避免旧对象触发重复充值或把退款终态覆盖成 PAID。
 - 新增测试覆盖回调先成功时不降级、不重复记账，以及金额不匹配时 UNKNOWN 必须持久化。
