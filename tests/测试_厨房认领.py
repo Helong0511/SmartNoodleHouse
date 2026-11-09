@@ -231,5 +231,5 @@ async def test_stale_takeover_cannot_overwrite_new_claimer(db_session):
         )
     assert ei.value.code == 40028
     await db_session.rollback()
-    refreshed = await db_session.get(Order, order_id)
+    refreshed = await db_session.get(Order, order_id, populate_existing=True)
     assert refreshed.kitchen_claimed_by == winner_operator_id
