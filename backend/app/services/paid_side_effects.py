@@ -4,6 +4,7 @@
   - points_award       → CustomerService.award_points_for_paid_order
   - coupon_mark_used   → CouponService.mark_used
   - pref_update        → PreferenceService.update_from_order
+  - taste_learning     → TasteLearningService.record_paid_order_events
   - milestone_coupon   → CouponService.issue_milestones_after_paid
 
 各副作用函数自身按 order_id / 幂等键去重，故 outbox 重试不会重复入账。
