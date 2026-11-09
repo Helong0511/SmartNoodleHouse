@@ -1662,6 +1662,10 @@ class PaymentService:
         provider: str,
     ) -> None:
         """开发 mock 支付：跳过真实收银台，直接标记支付单已支付。"""
+        from app.core.config import get_settings
+
+        if get_settings().is_production:
+            raise AppException(40301, "生产环境禁止执行 mock 支付结算", status_code=403)
         if payment.status == "PAID":
             return
         old_p = payment.status
