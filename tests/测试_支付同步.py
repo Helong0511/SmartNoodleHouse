@@ -714,3 +714,65 @@ async def test_immediate_settlement_does_not_repeat_when_callback_already_paid(m
     stmt = db.execute.await_args.args[0]
     assert stmt._for_update_arg is not None
     assert stmt.get_execution_options().get("populate_existing") is True
+
+
+@pytest.mark.asyncio
+async def test_immediate_amount_mismatch_does_not_downgrade_concurrent_paid_payment(monkeypatch):
+    current = SimpleNamespace(id=111, status="PAID")
+    monkeypatch.setattr(PaymentService, "_lock_order_then_payment", AsyncMock(return_value=current))
+    db = AsyncMock()
+
+    with patch(
+        "app.services.payment_service.record_payment_status", new_callable=AsyncMock
+    ) as history:
+        returned = await PaymentService._mark_order_payment_unknown_after_amount_mismatch(db, 111)
+
+    assert returned is current
+    assert current.status == "PAID"
+    history.assert_not_awaited()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_immediate_amount_mismatch_persists_unknown_and_status_history(monkeypatch):
+    current = SimpleNamespace(id=112, status="PENDING")
+    monkeypatch.setattr(PaymentService, "_lock_order_then_payment", AsyncMock(return_value=current))
+    db = AsyncMock()
+
+    with patch(
+        "app.services.payment_service.record_payment_status", new_callable=AsyncMock
+    ) as history:
+        returned = await PaymentService._mark_order_payment_unknown_after_amount_mismatch(db, 112)
+
+    assert returned.status == "UNKNOWN"
+    history.assert_awaited_once()
+    assert history.await_args.kwargs["from_status"] == "PENDING"
+    assert history.await_args.kwargs["to_status"] == "UNKNOWN"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks():
+    recharge = SimpleNamespace(id=113, status="PENDING")
+    payment = SimpleNamespace(id=114, status="PENDING")
+    recharge_result = MagicMock()
+    recharge_result.scalar_one_or_none.return_value = recharge
+    payment_result = MagicMock()
+    payment_result.scalar_one_or_none.return_value = payment
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
+
+    with patch(
+        "app.services.payment_service.record_payment_status", new_callable=AsyncMock
+    ) as history:
+        returned = await PaymentService._mark_recharge_payment_unknown_after_amount_mismatch(db, 113, 114)
+
+    assert returned is payment
+    assert payment.status == "UNKNOWN"
+    history.assert_awaited_once()
+    assert db.execute.await_count == 2
+    for call in db.execute.await_args_list:
+        stmt = call.args[0]
+        assert stmt._for_update_arg is not None
+        assert stmt.get_execution_options().get("populate_existing") is True
+    db.commit.assert_awaited_once()
