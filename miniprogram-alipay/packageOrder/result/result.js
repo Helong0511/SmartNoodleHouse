@@ -111,7 +111,7 @@ Page({
     loadError: false, // P2-18：加载失败态
     repaying: false, // P3-17：支付按钮防重复提交
     canSubscribeOrderReady: false,
-    subscribeLoading: false
+    subscribeLoading: false,
     order: {},
     orderItems: [],
     hasPacking: false,
