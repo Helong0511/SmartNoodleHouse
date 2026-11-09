@@ -168,7 +168,7 @@ async function addItem(entry) {
 
 async function setQuantity(sharedItemId, quantity) {
   await auth.ensureLogin()
-  const res = await api.patch(`/miniprogram/table-party/cart/items/${sharedItemId}`, {
+  const res = await api.post(`/miniprogram/table-party/cart/items/${sharedItemId}/quantity`, {
     quantity: Number(quantity) || 0,
     expected_revision: _meta.revision || undefined
   })
