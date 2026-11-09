@@ -58,3 +58,26 @@ export function clearCustomerToken() {
   sessionStorage.removeItem(CUSTOMER_ID_KEY)
   sessionStorage.removeItem(CUSTOMER_ID_LEGACY)
 }
+
+
+/** 员工退出/切换账号时清理同浏览器残留的顾客身份、购物车与桌台上下文。 */
+export function clearCustomerSession() {
+  try {
+    clearCustomerToken()
+  } catch {
+    /* storage may be unavailable in restricted browser contexts */
+  }
+  const keys = [
+    'snh_cart', 'cart', 'snh_cart_store_id',
+    'snh_table_token', 'table_token', 'snh_table',
+    'snh_channel', 'channel', 'snh_store_id',
+    'member_prompt_done', 'h5_login_code',
+  ]
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      for (const key of keys) storage.removeItem(key)
+    } catch {
+      /* ignore storage access failures */
+    }
+  }
+}
