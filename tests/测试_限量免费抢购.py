@@ -475,7 +475,7 @@ async def test_claim_expired_previous_claim_marked_expired(db_session):
 
 @pytest.mark.asyncio
 async def test_verify_creates_zero_amount_non_revenue_order(db_session):
-    """核销生成 0 元免单订单：PAID/FREE/non_revenue，无支付流水、不计营业收入。"""
+    """核销生成 0 元免单订单：订单 PAID、FREE 零元 Payment、non_revenue，不计营业收入。"""
     seed = await _seed(db_session, remaining=2, per_customer_limit=1)
     claim = await FlashSaleService.claim(
         db_session,
@@ -496,7 +496,7 @@ async def test_verify_creates_zero_amount_non_revenue_order(db_session):
 
     order = await db_session.get(Order, int(out["order_id"]))
     assert order.status == "PAID"
-    assert order.payment_status == "FREE"
+    assert order.payment_status == "PAID"
     assert order.payment_method == "FREE"
     assert bool(order.non_revenue) is True
     assert order.total_amount == Decimal("0.00")
@@ -511,7 +511,14 @@ async def test_verify_creates_zero_amount_non_revenue_order(db_session):
         )
         or 0
     )
-    assert payments == 0
+    assert payments == 1
+    free_payment = await db_session.scalar(
+        select(Payment).where(Payment.order_id == int(out["order_id"]))
+    )
+    assert free_payment is not None
+    assert free_payment.status == "PAID"
+    assert free_payment.provider == "FREE"
+    assert free_payment.amount == Decimal("0.00")
 
     item = (
         await db_session.execute(
