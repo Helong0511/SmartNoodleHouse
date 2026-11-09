@@ -440,6 +440,8 @@ jobs:
           done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
       - name: Verify mini-program release environment fails closed
         run: node scripts/test_miniprogram_env_fail_closed.cjs
+      - name: Verify mini-program subscription gesture adapters
+        run: node scripts/test_miniprogram_subscribe_gesture.cjs
       - name: Verify Alipay privacy consent fails closed when platform APIs are absent
         run: node scripts/test_alipay_privacy_fail_closed.cjs
 
