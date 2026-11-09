@@ -9,7 +9,7 @@
 
     <div class="card">
       <div class="label">已选餐品</div>
-      <div v-for="(item, idx) in cart" :key="idx" class="line">
+      <div v-for="(item, idx) in cart" :key="cartItemKey(item, idx)" class="line">
         <img v-if="item.imageUrl" :src="item.imageUrl" class="mini" alt="" />
         <div v-else class="mini placeholder">{{ (item.name || '餐')[0] }}</div>
         <span class="name">
@@ -48,6 +48,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { getCustomerToken, setCustomerToken } from '@/utils/customerAuth'
 import { mediaUrl } from '@/utils/media'
+import { cartItemKey, parseStoredCart } from '@/utils/cart'
 import { readCartStorage } from '@/utils/cart'
 
 const router = useRouter()
