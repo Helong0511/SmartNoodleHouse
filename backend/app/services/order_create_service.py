@@ -143,6 +143,12 @@ class OrderCreateService:
                 raise AppException(40008, "堂食请先扫桌台二维码，或在确认页选择桌号")
             if not store_id or int(store_id) <= 0:
                 raise AppException(40008, "缺少桌台令牌或有效门店")
+            # H5/外带无桌台令牌时，门店 ID 来自请求参数，必须重新验证存在且启用。
+            store = await db.get(Store, int(store_id))
+            if not store:
+                raise AppException(40401, "门店不存在")
+            if int(store.status or 0) != 1:
+                raise AppException(40302, "该门店当前不可下单")
 
         scoped_key = OrderCreateService._scoped_idempotency_key(
             idempotency_key,
