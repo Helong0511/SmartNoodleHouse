@@ -209,6 +209,7 @@ async def verify_flash_sale_claim(
             await ws_manager.notify_order_event(
                 "ORDER_CREATED",
                 {
+                    "id": int(result["order_id"]),
                     "order_id": int(result["order_id"]),
                     "order_no": str(result["order_no"]),
                     "status": "PAID",
