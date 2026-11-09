@@ -1,3 +1,35 @@
+## 2026-11-08 本机补充验证记录（维护者提供的终端输出）
+
+> 此节是 Windows 本机运行证据，不代表 GitHub Actions 最新状态或生产环境验收。对应仓库基线为 main commit 442beb4761b29f5b415830e91e06c97241f74ef3；若代码之后变化，必须重新执行。
+
+| 范围 | 命令/证据 | 结果 |
+|---|---|---|
+| Node/npm | Node 24.14.0；npm 11.19.1 | npm 与 CI pin 对齐 |
+| 前端干净安装 | frontend 执行 npm ci | 成功，安装 189 packages，npm 报告 0 vulnerabilities |
+| 重复导入 | node scripts/check_duplicate_imports.mjs | 通过，扫描 195 个 JS/TS/Vue 文件 |
+| 依赖使用 | node scripts/check_dependency_usage.mjs | 通过，13 个直接依赖，扫描 94 个源码/配置文件 |
+| 依赖树 | npm ls --all | 命令成功；输出含若干 UNMET OPTIONAL DEPENDENCY，属于可选依赖提示，不可直接认定为故障；仍需核对对应功能是否使用 |
+| 前端单测 | npm test | 3 个测试文件、14 项测试通过，0 失败 |
+| 前端构建 | npm run build（vue-tsc -b && vite build） | 成功；存在入口 JS chunk 约 891.98 KB、超过 500 KB 的 Vite warning，属于待优化性能项，不是构建失败 |
+| npm 安全 | npm audit --audit-level=high | 0 vulnerabilities |
+| Rust 锁文件 | cargo metadata --locked --format-version 1 | 成功 |
+| Rust 测试 | cargo test --locked --all-targets | 7 passed、0 failed；benchmark target 的 generate/verify 均 Success |
+| Windows DLL | cargo build --release --locked | 成功；ad_tracking_engine.dll 存在，282,624 bytes |
+
+### 本机输出没有证明的事项
+
+- Python 后端全量测试、Python 依赖审计和完整类型/静态检查。
+- 真实 MySQL 8.x 全量迁移、升级/降级和数据库字符集验证。
+- 真实 Redis 7.x 故障注入（穿透、击穿、雪崩、锁续租/fencing、主从切换、连接池耗尽）。
+- 微信/支付宝开发者工具构建、真机扫码、登录、支付和隐私授权。
+- 美团/饿了么真实沙箱回调、菜单/库存/退款对账。
+- 海康摄像头现场 RTSP、人脸授权、误识别和 TTS 播报。
+- Ubuntu 生产部署、HTTPS、systemd、备份恢复、监控告警和回滚演练。
+
+以上项目必须按实际执行结果继续补充，未执行一律标记“待验证/外部阻塞”，不得标记通过。
+
+---
+
 # Cwm9 测试报告
 
 > 历史执行日期：2026-09-29（归档快照，非当前 main 的测试结论）

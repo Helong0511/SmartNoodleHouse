@@ -1,3 +1,7 @@
+> **文档维护说明（2026-11-08）**：2026-11-08 本机 Windows 验证：cargo metadata --locked 成功；cargo test --locked --all-targets 为 7 passed/0 failed，benchmark target generate/verify 成功；cargo build --release --locked 成功，DLL 282,624 bytes。该证据只对应当时本机 commit，其他平台需按 CI matrix 单独验证。 具体发布事实以当前 Cargo manifest/lock、CI、构建产物和签名校验为准；本机 Windows 结果不代表 Linux/macOS 结果。不得记录真实密钥或生产 token。
+>
+> ---
+>
 # 广告追踪 ID Engine 1.1.0
 
 **Rust 高性能广告 Tracking Token 加密引擎 / Python ctypes / C ABI / 跨平台 / 硬件感知**

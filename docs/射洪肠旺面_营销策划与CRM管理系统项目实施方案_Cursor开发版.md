@@ -1,9 +1,13 @@
+> **文档维护说明（2026-11-08）**：**项目状态勘误**：SmartNoodleHouse 当前仍是上线前开发/集成项目，不能描述为“已上线能力”。本文属于营销/CRM 规划与实施方案，只有经当前代码、迁移、API、后台页面和测试验证的条目才可标记已实现；促销活动、门店参与范围、抢购并发、微信/支付宝通用二维码和通知播报等需求需逐项对应当前实现及验收证据。文中 Canvas 路径、工作包顺序和旧版本号仅在仓库实际存在时有效。 当前实现以 main 代码、CI、数据库迁移和 README 为准。专题设计不等于已生产验收；未验证项标记待验证。禁止记录有效密钥、密码或访问 token。
+>
+> ---
+>
 # 射洪肠旺面 · 营销策划与 CRM 管理系统项目实施方案（Cursor 开发版）
 
 > **文档版本**：v3.2（可执行工作包 + 作战 Canvas 对齐）  
 > **配套 Canvas**：Cursor 旁路作战板 `canvases/crm-exec-playbook.canvas.tsx`（摘要与勾选；细则与验收以本文 §23 为准）。  
 > **执行入口**：先完成 §23 WP-A0（零开发），再按 WP-B1→B3→B2→B4→C1→C2 用 §20 提示词逐包开工。  
-> **文档定位**：在 **SmartNoodleHouse 已上线能力**之上建设营销闭环；禁止从零重建多租户 / 订单 / 支付。  
+> **文档定位**：在 **SmartNoodleHouse 当前主线实现**之上建设营销闭环；禁止从零重建多租户 / 订单 / 支付。  
 > **现网校对**：以 `sql/struct.sql`、`sql/data_sys.sql`、`backend/app/tasks/scheduler.py`、`backend/app/services/retention_service.py`、`frontend` 路由与 `AdminLayout` 菜单为准。  
 > **关联文档**：`docs/架构设计.md`、`docs/多门店管理.md`、`docs/面馆管理系统_提示词库.md`、`docs/数据库设计.md`、菜单落地版 v4。  
 > **结构真源**：`struct.sql` → `data_sys.sql` → `data_custom.sql`（可选 `data_test.sql`）。**禁止 `tenant_id`。**  
