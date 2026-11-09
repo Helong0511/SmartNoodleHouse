@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -216,7 +217,7 @@ async def websocket_endpoint(
             return
         if expected:
             supplied = (auth_token or "").strip()
-            if supplied != expected:
+            if not hmac.compare_digest(supplied, expected):
                 await websocket.close(code=4401, reason="无效令牌")
                 return
             if _looks_like_jwt(supplied):
@@ -240,6 +241,11 @@ async def websocket_endpoint(
             await _ws_loop("display", websocket)
         except WebSocketDisconnect:
             ws_manager.disconnect("display", websocket)
+        return
+
+    if channel not in PROTECTED_CHANNELS:
+        # 未明确列入受保护白名单的频道一律拒绝，新增频道不会意外匿名开放。
+        await websocket.close(code=4403, reason="未知或未授权频道")
         return
 
     if channel in PROTECTED_CHANNELS:
