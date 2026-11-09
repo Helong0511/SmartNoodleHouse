@@ -3,6 +3,7 @@ import { clearCustomerToken } from '@/utils/customerAuth'
 import { clearCartStorage } from '@/utils/cart'
 import { computed, ref } from 'vue'
 import api from '@/api'
+import { clearCustomerSession } from '@/utils/customerAuth'
 import {
   clearStaffToken,
   getStaffSessionMeta,
