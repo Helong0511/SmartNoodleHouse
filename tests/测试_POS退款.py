@@ -324,3 +324,48 @@ async def test_processing_pos_request_with_inflight_refund_never_reissues_provid
     assert out.status == "PROCESSING"
     refund_call.assert_not_awaited()
     db.refresh.assert_awaited_once_with(request)
+
+
+@pytest.mark.asyncio
+async def test_processing_pos_request_without_refund_binding_never_starts_second_execution():
+    """认领事务已提交但首笔退款单尚未绑定时，重复审批必须 fail-closed。"""
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        id=121,
+        store_id=1,
+        order_id=91,
+        amount=money("20.00"),
+        executed_amount=money("0.00"),
+        reason="顾客退款",
+        status="PROCESSING",
+        reviewed_by=8,
+        reviewed_at=None,
+        review_remark=None,
+        payment_id=3,
+        refund_id=None,
+        fail_reason=None,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_lock_result(request))
+    db.refresh = AsyncMock()
+
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock,
+        return_value=True,
+    ), patch("app.services.pos_refund_service.assert_store_access"), patch.object(
+        PosRefundService, "_refundable_pairs", new_callable=AsyncMock
+    ) as allocate, patch(
+        "app.services.pos_refund_service.PaymentService.refund",
+        new_callable=AsyncMock,
+    ) as refund_call:
+        out = await PosRefundService.approve_and_execute(
+            db, user=_user("STORE_ADMIN"), request_id=121
+        )
+
+    assert out is request
+    assert out.status == "PROCESSING"
+    db.refresh.assert_awaited_once_with(request)
+    allocate.assert_not_awaited()
+    refund_call.assert_not_awaited()
