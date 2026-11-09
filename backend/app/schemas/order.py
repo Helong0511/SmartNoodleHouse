@@ -34,6 +34,9 @@ class OrderCreate(BaseModel):
         pattern=r"^(DINE_IN|TAKEAWAY)$",
     )
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
+    # 同桌共享车结算快照：必须与服务端 party revision 完全一致。
+    shared_cart_party_id: int | None = Field(default=None, gt=0)
+    shared_cart_revision: int | None = Field(default=None, ge=1)
     customer_coupon_id: int | None = Field(default=None, description="用户优惠券 ID（满减/折扣）")
     customer_voucher_id: int | None = Field(default=None, description="用户代金券 ID")
     # 余额支付：储值已含赠送，不可再叠会员折扣/券/代金券
