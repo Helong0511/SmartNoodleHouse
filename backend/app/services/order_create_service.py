@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import Option, Order, OrderItem, OrderItemOption, Store
+from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Store
 from app.services.customer_service import CustomerService
 from app.services.order_service import OrderPriceCalculator
 
@@ -152,10 +152,25 @@ class OrderCreateService:
                 select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids))
             )
         ).scalars().all() if item_ids else []
-        option_codes_by_item: dict[int, list[tuple[str, int]]] = {}
+        option_groups_by_id = {}
+        requested_group_ids = {
+            int(option.group_id)
+            for option in options_by_id.values()
+            if getattr(option, "group_id", None) is not None
+        }
+        if requested_group_ids:
+            groups = (
+                await db.execute(select(OptionGroup).where(OptionGroup.id.in_(requested_group_ids)))
+            ).scalars().all()
+            option_groups_by_id = {int(group.id): group for group in groups}
+        option_codes_by_item: dict[int, list[tuple[str, str, int]]] = {}
         for option in existing_options:
             option_codes_by_item.setdefault(int(option.order_item_id), []).append(
-                (str(option.option_code or ""), int(option.quantity or 1))
+                (
+                    str(option.group_name_snapshot or ""),
+                    str(option.option_code or ""),
+                    int(option.quantity or 1),
+                )
             )
 
         for existing, requested in zip(existing_items, items):
@@ -168,9 +183,10 @@ class OrderCreateService:
             requested_codes = []
             for option_id in (requested.get("option_ids") or []):
                 option = options_by_id.get(int(option_id))
-                if option is None:
+                group = option_groups_by_id.get(int(option.group_id)) if option else None
+                if option is None or group is None:
                     raise AppException(40902, "幂等键冲突：规格选项不存在")
-                requested_codes.append((str(option.code or ""), 1))
+                requested_codes.append((str(group.name or ""), str(option.code or ""), 1))
             existing_codes = option_codes_by_item.get(int(existing.id), [])
             if sorted(requested_codes) != sorted(existing_codes):
                 raise AppException(40902, "幂等键冲突：餐品规格不一致")
