@@ -66,4 +66,20 @@ for (const [relativePath, globalName] of [
   assert.equal(unknown.resolveApiBase(), unknown.PROD_API_BASE, relativePath + " gray uses production API");
 }
 
+
+// 配置校验失败必须以 rejected Promise 返回，不能在 api.get() 调用点同步抛出。
+for (const [relativePath, globalName, apiPath] of [
+  ["miniprogram-wechat/config/env.js", "wx", "miniprogram-wechat/utils/api.js"],
+  ["miniprogram-alipay/config/env.js", "my", "miniprogram-alipay/utils/api.js"]
+]) {
+  loadWithFailingEnvironment(relativePath, globalName);
+  const resolvedApi = path.resolve(__dirname, "..", apiPath);
+  delete require.cache[require.resolve(resolvedApi)];
+  const api = require(resolvedApi);
+  await assert.rejects(api.get("/health"), (err) =>
+    err && err.code === "API_BASE_INVALID" && /正式版 API 地址未正确配置/.test(err.message),
+    apiPath + " must reject invalid API base asynchronously"
+  );
+}
+
 console.log("Mini-program environment fail-closed checks passed.");
