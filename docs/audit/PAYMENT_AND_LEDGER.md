@@ -319,3 +319,14 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 发现审批流程先提交 `PosRefundRequest=PROCESSING`，随后才创建渠道退款单并绑定 `refund_id`。在两步之间重复审批请求可能读到 `PROCESSING + refund_id=NULL`，旧逻辑会继续分配退款并可能重复调用渠道。
 - 修复：`PROCESSING` 且尚无 `refund_id` 时直接返回当前申请，不再开始第二次执行。渠道请求前，`PaymentService.refund` 会先在同一事务中持久化退款单并绑定申请，因此此保护覆盖了真正的外部副作用窗口。
 - 增加回归测试，确保该状态不触发退款分配或渠道调用。若进程在认领提交后、创建退款单前崩溃，申请会保持处理中并需后续运维恢复；此路径应由后续认领超时恢复任务处理，不能通过并发重试冒险重复退款。
+
+## POS 退款审批执行权 fencing（2026-11-09）
+
+- `pos_refund_requests.execution_epoch` 是数据库单调递增的执行代际；`execution_token` 是本次审批 worker 的随机 owner token；`execution_lease_until` 仅用于首笔 `PaymentRefund` 创建并绑定前的短租约。
+- 新审批或过期租约接管时，在 POS 申请行锁内递增 epoch、生成新 token 并持久化租约。旧 worker 恢复后必须在 `PaymentService.refund` 的同一数据库事务中重新锁定 POS 申请，并同时匹配 token、epoch、状态及未绑定时的租约有效期；不匹配则拒绝创建退款单。
+- 首笔退款单与 POS `refund_id` 在调用微信/支付宝之前同事务提交。绑定后租约清空，后续多支付方式分摊继续使用同一 token/epoch；若渠道状态仍为 PENDING/PROCESSING/UNKNOWN/ABNORMAL，不允许新 worker 再发起一笔。
+- 旧数据 `PROCESSING + refund_id=NULL + execution_epoch=0` 不具备可证明的租约所有权，继续 fail-closed，不自动接管。必须先人工查渠道退款单/流水，确认未发起退款后再执行受控恢复。
+- 如果进程在退款单绑定事务提交后、渠道请求发送前崩溃，数据库中的退款单仍是 PENDING；该状态不能证明请求未发送。必须通过渠道查单/对账恢复，不得仅凭超时重新创建退款单。
+- 异常收尾先 rollback 并重新读取持久化退款事实：已绑定且仍在途的退款保留 POS PROCESSING；只有未创建/绑定退款单或渠道明确终态失败时才可收敛为 FAILED。旧 epoch worker 不得覆盖新 owner 的状态。
+- 本机制的租约接管安全性依赖 MySQL 行锁与事务提交；Redis 锁仅用于缓存/worker 协调，不参与资金 fencing。
+
