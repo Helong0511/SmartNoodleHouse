@@ -32,3 +32,12 @@ def test_shared_wechat_alipay_files_do_not_drift():
             f"微信/支付宝共享文件内容不一致：{wechat_path} != {alipay_path}；"
             "修改共享逻辑时请同步两端，或抽取为明确的共享源码生成流程。"
         )
+
+
+def test_shared_cart_clients_do_not_send_client_calculated_unit_price():
+    for path in (
+        ROOT / "miniprogram-wechat/utils/sharedCart.js",
+        ROOT / "miniprogram-alipay/utils/sharedCart.js",
+    ):
+        source = path.read_text(encoding="utf-8")
+        assert "unit_price:" not in source
