@@ -330,3 +330,11 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 异常收尾先 rollback 并重新读取持久化退款事实：已绑定且仍在途的退款保留 POS PROCESSING；只有未创建/绑定退款单或渠道明确终态失败时才可收敛为 FAILED。旧 epoch worker 不得覆盖新 owner 的状态。
 - 本机制的租约接管安全性依赖 MySQL 行锁与事务提交；Redis 锁仅用于缓存/worker 协调，不参与资金 fencing。
 
+
+## 2026-11-09 退款聚合的 MySQL RR 快照复核
+
+- 发现退款入口的锁序定位查询会先执行普通 SELECT；在 MySQL `REPEATABLE READ` 下，这可能提前建立事务快照。若随后等待 Order/Payment 行锁，普通 `SUM/COUNT` 仍可能读取锁等待前的旧快照，漏掉刚刚提交的退款状态。
+- 修复：`_lock_order_then_payment` 与退款父行锁查询增加 `populate_existing=True`，确保锁定读刷新当前 Session 中的 ORM 对象；退款创建的在途/已成功金额改为 Order→Payment 锁之后对 `PaymentRefund` 执行 `FOR UPDATE` 当前读并在 Python 汇总。
+- 退款成功收敛同样以当前锁定读汇总同一支付单退款事实；订单净已收在资金状态收敛路径使用 Payment 与 PaymentRefund 当前锁定读，避免旧快照误判部分/全额退款。
+- 新增回归测试验证退款行查询、订单净已收聚合均使用 `FOR UPDATE + populate_existing`，并验证父行锁后刷新 Payment。
+- 锁序保持 Order→Payment→PaymentRefund；不在持有退款行锁后再等待父行锁。普通展示用的 `refundable_amount` 仍是只读估算，最终退款金额由持锁的退款执行路径再次校验。
