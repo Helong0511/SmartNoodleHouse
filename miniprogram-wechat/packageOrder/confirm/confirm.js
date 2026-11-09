@@ -1425,6 +1425,12 @@ Page({
         wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${ptsFail}` })
         return
       }
+      // 收银台成功但服务端尚未确认 PAID：保留购物车与 checkout nonce，交由结果页继续查单。
+      if (!(payOutcome && payOutcome.paid === true)) {
+        wx.showToast({ title: '支付结果确认中，请稍后在订单页查看', icon: 'none', duration: 2500 })
+        wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}` })
+        return
+      }
       auth.saveCart([])
       this.clearCheckoutNonce()
       prefUtil.clearPrefsCache(app)
