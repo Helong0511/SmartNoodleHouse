@@ -172,20 +172,32 @@ async def test_get_phone_by_code_rejects_replay():
     from app.services import wechat_mini_client as wmc
 
     wmc._phone_code_local.clear()
-    with patch.object(wmc, "_mock_allowed", return_value=True), patch(
+    # 手机号授权码必须走官方接口；Mock 登录不能伪造手机号授权结果。
+    # 配置模拟的正式凭据与 HTTP 响应，只验证同一 code 的本地并发/重放防护。
+    class FakeResponse:
+        def json(self):
+            return {"phone_info": {"purePhoneNumber": "13800138000"}}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    with patch(
         "app.services.wechat_mini_client.get_settings",
-        return_value=SimpleNamespace(
-            wechat_app_id="",
-            wechat_app_secret="",
-            is_production=False,
-            is_development=True,
-            allow_auth_mock=True,
-        ),
+        return_value=SimpleNamespace(wechat_app_id="wx-test", wechat_app_secret="secret"),
+    ), patch.object(wmc, "get_access_token", new_callable=AsyncMock, return_value="access-token"), patch(
+        "app.services.wechat_mini_client.httpx.AsyncClient", return_value=FakeClient()
     ), patch(
-        "app.services.webhook_replay.claim_once", new_callable=AsyncMock, return_value=True
+        "app.services.webhook_replay.claim_once", new_callable=AsyncMock, return_value="owner-token"
     ), patch("app.services.webhook_replay.release_claim", new_callable=AsyncMock):
         phone1 = await wmc.get_phone_by_code("once-code-xyz")
-        assert phone1.startswith("138")
+        assert phone1 == "13800138000"
         with pytest.raises(AppException) as ei:
             await wmc.get_phone_by_code("once-code-xyz")
         assert ei.value.code == 40054
