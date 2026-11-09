@@ -89,11 +89,13 @@ async function enrollFaceWelcome() {
   }
   const mode = (challenge && challenge.mode) || 'challenge'
   let token = ''
+  let actionCompleted = false
   if (mode === 'challenge') {
     token = (challenge && challenge.token) || ''
     if (!token) throw new Error('活体挑战获取失败，请稍后重试')
     const ok = await confirmAction(challenge.action_label || challenge.action)
     if (!ok) throw new Error('已取消人脸授权')
+    actionCompleted = ok
   } else {
     const ok = await new Promise((resolve) => {
       my.confirm({
@@ -105,6 +107,7 @@ async function enrollFaceWelcome() {
       })
     })
     if (!ok) throw new Error('已取消人脸授权')
+    actionCompleted = ok
   }
 
   my.showLoading({ content: '采集中' })
@@ -123,7 +126,7 @@ async function enrollFaceWelcome() {
     return await api.post('/miniprogram/face/consent-base64', {
       image_base64: b64,
       liveness_token: token,
-      action_completed: true,
+      action_completed: actionCompleted,
       claimed_action: challenge && challenge.action,
     })
   } catch (e) {
