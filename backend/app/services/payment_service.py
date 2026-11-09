@@ -1753,6 +1753,22 @@ class PaymentService:
 
         if get_settings().is_production:
             raise AppException(40301, "生产环境禁止执行 mock 支付结算", status_code=403)
+        # 支付单创建后会先 commit 再请求渠道；结算前必须重新按 Order→Payment 当前读锁定，
+        # 不能依赖网络请求前留在 Session 中的旧 ORM 对象。
+        locked_payment = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_payment is None or locked_payment.order_id is None:
+            raise AppException(40401, "支付记录或订单关联不存在")
+        payment = locked_payment
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(payment.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            raise AppException(40402, "订单不存在")
         if payment.status == "PAID":
             return
         old_p = payment.status
@@ -1773,6 +1789,22 @@ class PaymentService:
         provider: str,
         provider_trade_no: str,
     ) -> None:
+        # 即时付款码请求在外部渠道调用前已提交支付单；渠道返回期间可能先到异步成功回调。
+        # 因此这里必须重新获取 Order→Payment 当前读锁，防止旧对象重复记 SALE/更新订单状态。
+        locked_payment = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_payment is None or locked_payment.order_id is None:
+            raise AppException(40401, "支付记录或订单关联不存在")
+        payment = locked_payment
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(payment.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            raise AppException(40402, "订单不存在")
         if payment.status == "PAID":
             return
         old_p = payment.status
