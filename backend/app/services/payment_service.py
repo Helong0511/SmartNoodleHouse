@@ -1084,7 +1084,7 @@ class PaymentService:
         await db.flush()
         if pay_data.get("_mock"):
             await cls._settle_mock_payment(db, payment, order, provider_u)
-            pay_data["status"] = "PAID"
+            pay_data["status"] = payment.status
             pay_data["mock_settled"] = True
         elif pay_data.get("immediate_paid"):
             trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
@@ -1095,7 +1095,7 @@ class PaymentService:
                 await cls._mark_order_payment_unknown_after_amount_mismatch(db, int(payment.id))
                 raise
             await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
-            pay_data["status"] = "PAID"
+            pay_data["status"] = payment.status
         else:
             # 渠道已受理、待回调：保持 PENDING，等待回调/查单推进
             if payment.status not in ("PENDING", "REQUESTING"):
@@ -1836,7 +1836,7 @@ class PaymentService:
         ).scalar_one_or_none()
         if order is None:
             raise AppException(40402, "订单不存在")
-        if payment.status == "PAID":
+        if payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             return
         old_p = payment.status
         payment.status = "PAID"
@@ -1872,7 +1872,7 @@ class PaymentService:
         ).scalar_one_or_none()
         if order is None:
             raise AppException(40402, "订单不存在")
-        if payment.status == "PAID":
+        if payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             return
         old_p = payment.status
         payment.status = "PAID"
