@@ -33,27 +33,31 @@ function resolveAuthScope(e) {
 function handleGetAuthorizeSuccess(page, e, onEncrypted) {
   const scope = resolveAuthScope(e)
   // 官方：仅当 authScope === phoneNumber 时再取号；部分基础库不回传 scope，默认视为手机号授权按钮触发
-  if (scope && scope !== 'phoneNumber') {
-    return
-  }
-  if (!my.getPhoneNumber) {
-    my.showToast({ content: '当前支付宝版本不支持获取手机号', type: 'none' })
-    return
-  }
-  my.getPhoneNumber({
-    success: (res) => {
-      const encrypted = normalizePhoneEncrypted(res)
-      if (!encrypted) {
-        my.showToast({ content: '未获取到手机号密文，请稍后重试', type: 'none' })
-        return
-      }
-      if (typeof onEncrypted === 'function') onEncrypted(encrypted)
-    },
-    fail: (err) => {
-      const { localizeNativeErrMsg } = require('./errMsg')
-      const raw = String((err && (err.errorMessage || err.error)) || '获取手机号失败')
-      my.showToast({ content: localizeNativeErrMsg(raw) || raw, type: 'none' })
+  if (scope && scope !== 'phoneNumber') return
+  return privacy.ensurePrivacyConsent().then((agreed) => {
+    if (!agreed) {
+      my.showToast({ content: '请先阅读并同意隐私政策', type: 'none' })
+      return
     }
+    if (!my.getPhoneNumber) {
+      my.showToast({ content: '当前支付宝版本不支持获取手机号', type: 'none' })
+      return
+    }
+    my.getPhoneNumber({
+      success: (res) => {
+        const encrypted = normalizePhoneEncrypted(res)
+        if (!encrypted) {
+          my.showToast({ content: '未获取到手机号密文，请稍后重试', type: 'none' })
+          return
+        }
+        if (typeof onEncrypted === 'function') onEncrypted(encrypted)
+      },
+      fail: (err) => {
+        const { localizeNativeErrMsg } = require('./errMsg')
+        const raw = String((err && (err.errorMessage || err.error)) || '获取手机号失败')
+        my.showToast({ content: localizeNativeErrMsg(raw) || raw, type: 'none' })
+      }
+    })
   })
 }
 
