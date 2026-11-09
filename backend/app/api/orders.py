@@ -75,27 +75,22 @@ async def create_order(
         skip_promotions=bool(data.skip_promotions),
         operator_id=None,
         scheduled_pickup_at=data.scheduled_pickup_at,
+        shared_cart_party_id=data.shared_cart_party_id,
+        shared_cart_revision=data.shared_cart_revision,
         use_social_benefit=bool(data.use_social_benefit),
         social_rule_id=data.social_rule_id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
-    # 一人结全桌：正式下单成功后清空本桌共享草稿
-    try:
-        from app.services.shared_cart_service import SharedCartService
+    # 一人结全桌：共享草稿清理是下单事务的一部分；失败必须回滚订单与库存，
+    # 不能留下已下单但草稿仍可再次结算的状态。
+    from app.services.shared_cart_service import SharedCartService
 
-        # 共享草稿清理使用 savepoint；失败只回滚清理动作，不影响已经创建的订单。
-        async with db.begin_nested():
-            await SharedCartService.clear_after_order(
-                db,
-                store_id=int(order.store_id),
-                table_id=int(order.table_id) if order.table_id else None,
-                customer_id=int(customer.id),
-            )
-    except Exception:
-        import logging
-
-        logging.getLogger("app.order").warning(
-            "订单已创建但共享购物车清理失败 order_id=%s", order.id, exc_info=True
+    async with db.begin_nested():
+        await SharedCartService.clear_after_order(
+            db,
+            store_id=int(order.store_id),
+            table_id=int(order.table_id) if order.table_id else None,
+            customer_id=int(customer.id),
         )
     await db.commit()
     try:
