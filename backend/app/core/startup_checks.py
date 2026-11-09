@@ -387,13 +387,7 @@ def validate_settings(settings: Settings) -> None:
 
     # 生产至少配置一种支付通道（微信 V3 或支付宝）；否则小程序/扫码收款不可用
     if is_prod:
-        # 占位值检测：REPLACE/your-domain 等示例值一旦上线会静默失效
-        _placeholder_re = re.compile(r"replace[_-]|your[-_]domain|your[-_]password|example\.com|<.*>", re.IGNORECASE)
-
-        def _is_placeholder(value: object) -> bool:
-            v = str(value or "").strip()
-            return bool(v) and bool(_placeholder_re.search(v))
-
+        # 通用占位值判断统一使用模块级 _is_placeholder，避免重复定义与作用域遮蔽。
         wechat_required_fields = (
             "wechat_mch_id",
             "wechat_api_v3_key",
