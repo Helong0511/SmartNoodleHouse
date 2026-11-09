@@ -314,12 +314,21 @@ class FlashSaleService:
 
         request_id = (client_request_id or "").strip() or None
         if request_id:
+            if (
+                len(request_id) > 64
+                or not request_id.isascii()
+                or not all(ch.isalnum() or ch in "_-" for ch in request_id)
+            ):
+                raise AppException(40012, "抢购请求标识格式无效")
             replay = await db.scalar(
                 select(FlashSaleClaim).where(FlashSaleClaim.client_request_id == request_id)
             )
             if replay is not None:
+                # 全局唯一请求标识必须绑定顾客、活动和门店，禁止跨活动/门店静默复用旧资格。
                 if int(replay.customer_id) != cid:
                     raise AppException(40301, "请求标识已被占用")
+                if int(replay.campaign_id) != int(camp.id) or int(replay.store_id) != sid:
+                    raise AppException(40909, "抢购请求标识与活动或门店不一致", status_code=409)
                 return await cls._claim_payload(db, replay, already_claimed=True)
 
         held = (
