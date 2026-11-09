@@ -281,22 +281,9 @@ class OrderCreateService:
                     await db.execute(select(_Product).where(_Product.id.in_(pids)))
                 ).scalars().all() if pids else []
                 cids = [int(p.category_id) for p in prods if p.category_id]
-                if social_rule_id:
-                    from app.models import SocialBenefitRule
-
-                    rule = await db.get(SocialBenefitRule, int(social_rule_id))
-                    codes = await SocialBenefitService.active_codes(db, int(customer_id))
-                    if (
-                        rule
-                        and int(rule.status) == 1
-                        and rule.identity_code in codes
-                        and rule.benefit_type == "ORDER_DISCOUNT"
-                        and rule.discount_rate is not None
-                        and (rule.store_id is None or int(rule.store_id) == int(order.store_id))
-                    ):
-                        social_hit = (rule, rule.identity_code)
-                if social_hit is None and use_social_benefit:
-                    # 显式勾选公益：须可命中规则（再与会员折比优）
+                if use_social_benefit or social_rule_id:
+                    # social_rule_id 仅为旧客户端意图标记，不作为规则选择依据；
+                    # 服务端统一校验日期/星期/时段/限次/餐品/分类/折扣率。
                     social_hit = await SocialBenefitService.require_best_rule(
                         db,
                         customer_id=int(customer_id),
