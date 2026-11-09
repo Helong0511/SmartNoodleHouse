@@ -24,12 +24,12 @@ const PROD_API_BASE = 'https://your-domain.com/api'
 /** 本地模拟器（微信开发者工具） */
 const DEV_SIMULATOR_API = 'http://127.0.0.1:8000/api'
 
-/** 本地真机：电脑局域网 IP + 后端 uvicorn --host 0.0.0.0 */
+/** 本地真机：仅开发版显式开启 DEV_USE_LAN 后使用电脑局域网 IP */
 const DEV_LAN_HOST = '192.168.1.110'
 const DEV_USE_LAN = false
 const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api`
 
-/** 体验版是否连生产 API（默认 false） */
+/** 体验版默认使用生产 HTTPS API；禁止上传版回退到内网 HTTP */
 const TRIAL_USE_PROD_API = true
 
 function isDevtools() {
