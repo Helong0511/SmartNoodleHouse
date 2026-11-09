@@ -142,7 +142,10 @@ function clearCustomerSession(app) {
     // 库重置后本地昵称/头像属于已删除顾客，必须清掉，否则会写回新客并跳过注册
     wx.removeStorageSync('nickname')
     wx.removeStorageSync('avatar_url')
+    // 顾客会话切换后不再发送上一账号尚未上报的行为事件。
+    wx.removeStorageSync('behavior_event_queue')
   } catch (_) { }
+  clearRegDraft()
 }
 
 function isStaleCustomerAuthError(err) {
