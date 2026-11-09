@@ -126,7 +126,7 @@ export function readCartStorage(): any[] {
     const raw = localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) throw new TypeError('购物车数据格式错误')
-    return parsed
+    return parseStoredCart(raw)
   } catch {
     try {
       localStorage.removeItem('snh_cart')
