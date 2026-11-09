@@ -64,6 +64,47 @@ def test_idempotent_hit_same_owner_ok():
     )
 
 
+@pytest.mark.asyncio
+async def test_idempotent_replay_rejects_changed_order_items():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    existing = SimpleNamespace(id=10, product_id=1, quantity=2, remark="少辣")
+    rows = [
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [existing])),
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+    ]
+    db = SimpleNamespace(execute=AsyncMock(side_effect=rows))
+    order = SimpleNamespace(id=9)
+
+    with pytest.raises(AppException) as exc:
+        await OrderCreateService._assert_idempotent_order_items_match(
+            db,
+            order,
+            [{"product_id": 2, "quantity": 2, "remark": "少辣", "option_ids": []}],
+        )
+    assert exc.value.code == 40902
+    assert "餐品、数量或备注" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_accepts_same_order_items():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    existing = SimpleNamespace(id=10, product_id=1, quantity=2, remark="少辣")
+    rows = [
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [existing])),
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+    ]
+    db = SimpleNamespace(execute=AsyncMock(side_effect=rows))
+    await OrderCreateService._assert_idempotent_order_items_match(
+        db,
+        SimpleNamespace(id=9),
+        [{"product_id": 1, "quantity": 2, "remark": "少辣", "option_ids": []}],
+    )
+
+
 def test_idempotent_reuse_only_pending_payment_policy():
     """已付/已取消订单不得再被同幂等键复用（客户端须带新 checkout nonce）。"""
     pending = SimpleNamespace(status="PENDING_PAYMENT", payment_status="UNPAID")
