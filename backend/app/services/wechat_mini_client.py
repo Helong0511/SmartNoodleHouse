@@ -110,10 +110,8 @@ async def get_phone_by_code(code: str) -> str:
     settings = get_settings()
     try:
         if not settings.wechat_app_id or not settings.wechat_app_secret:
-            if _mock_allowed():
-                digest = hashlib.md5(code.encode()).hexdigest()[:8]
-                return f"138{digest[:8]}".ljust(11, "0")[:11]
-            raise AppException(50030, "微信小程序未配置，无法解析手机号")
+            # 手机号 mock 必须在 bind_member_phone 中走未验证分支；此处只接受微信官方 code。
+            raise AppException(50030, "微信小程序未配置，无法解析官方手机号授权码")
 
         token = await get_access_token()
         url = f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}"
