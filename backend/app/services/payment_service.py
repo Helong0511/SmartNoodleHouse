@@ -3190,6 +3190,7 @@ class PaymentService:
                                     "store_id": order.store_id if order else None,
                                     "source": "PAYMENT_POLL",
                                 },
+                                customer_id=int(order.customer_id) if order and order.customer_id else None,
                             )
                         except Exception as ws_err:
                             logger.warning("支付查单成功 WS 通知失败: %s", ws_err)
@@ -3716,6 +3717,7 @@ class PaymentService:
                                     "refund_no": row.refund_no,
                                     "store_id": order.store_id if order else None,
                                 },
+                                customer_id=int(order.customer_id) if order and order.customer_id else None,
                             )
                         except Exception as ws_err:
                             logger.warning("退款成功 WS 通知失败: %s", ws_err)
