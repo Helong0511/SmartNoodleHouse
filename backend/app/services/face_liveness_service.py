@@ -119,7 +119,8 @@ async def verify_liveness_challenge(
     settings = get_settings()
     mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
     if mode == "none":
-        return True
+        # 生产环境不允许关闭一次性挑战；none 仅限显式开发环境。
+        return not settings.is_production
 
     if not token:
         return False
@@ -156,9 +157,12 @@ async def verify_liveness_challenge(
         )
         return False
 
-    issued_action = str(payload.get("action") or "")
-    if claimed_action is not None and issued_action:
-        if str(claimed_action).strip().lower() != issued_action.strip().lower():
+    issued_action = str(payload.get("action") or "").strip().lower()
+    claimed = str(claimed_action or "").strip().lower()
+    if not issued_action or not claimed:
+        logger.warning("Liveness challenge rejected: claimed action is required")
+        return False
+    if claimed != issued_action:
             logger.warning(
                 "Liveness challenge action mismatch token=%s issued=%s claimed=%s",
                 token[:8],
