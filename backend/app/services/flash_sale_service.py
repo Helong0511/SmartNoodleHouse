@@ -489,7 +489,7 @@ class FlashSaleService:
 
         - 资格行锁 + 状态校验保证并发核销只生成一单
         - 已核销的重复请求返回原订单，不重复建单
-        - 不写 Payment / 不调用支付状态机，不计入普通营业收入
+        - 写入 0 元 FREE Payment 流水以保持支付进度一致；不调用第三方支付、不计入普通营业收入
         """
         from app.services.status_history import record_order_status
 
