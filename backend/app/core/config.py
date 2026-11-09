@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import List
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -218,10 +219,50 @@ class Settings(BaseSettings):
     # 顾客叫号屏全局开发回退令牌；生产必须在每家门店设置独立 display_screen_token。
     display_screen_token: str = ""
 
+    def _has_production_markers(self) -> bool:
+        """即使 APP_ENV 误写为开发，也不能让远程依赖或正式商户凭据降级安全策略。"""
+        for endpoint in (self.database_url, self.redis_url):
+            raw = str(endpoint or "").strip()
+            if not raw:
+                continue
+            try:
+                host = urlparse(raw).hostname
+            except ValueError:
+                return True
+            if not host:
+                continue
+            normalized = host.strip("[]").rstrip(".").lower()
+            if normalized == "localhost" or normalized.endswith(".localhost"):
+                continue
+            try:
+                import ipaddress
+
+                if ipaddress.ip_address(normalized).is_loopback:
+                    continue
+            except ValueError:
+                # 非 IP 主机名（例如远程数据库域名）按生产依赖处理。
+                pass
+            return True
+
+        has_wechat_merchant = all(
+            str(value or "").strip()
+            for value in (self.wechat_mch_id, self.wechat_api_v3_key, self.wechat_cert_serial_no)
+        )
+        has_alipay_merchant = all(
+            str(value or "").strip()
+            for value in (self.alipay_app_id, self.alipay_private_key, self.alipay_public_key)
+        )
+        has_delivery_credentials = (
+            bool(self.meituan_app_id and self.meituan_app_secret and self.meituan_shop_id)
+            or bool(self.eleme_app_id and self.eleme_app_secret and self.eleme_shop_id)
+        )
+        return has_wechat_merchant or has_alipay_merchant or has_delivery_credentials
+
     @property
     def is_development(self) -> bool:
-        # 仅显式开发环境可放宽；空值、拼写错误和 staging 一律按生产处理。
-        return (self.app_env or "").strip().lower() in ("development", "dev", "local")
+        # 仅显式本地开发且无生产哨兵时放宽；未知环境、远程依赖和正式商户凭据一律 fail-closed。
+        explicit_dev = (self.app_env or "").strip().lower() in ("development", "dev", "local")
+        return explicit_dev and not self._has_production_markers()
 
     @property
     def is_production(self) -> bool:
