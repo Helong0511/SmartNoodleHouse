@@ -55,8 +55,17 @@ function safeExtra(v) {
   }
 }
 
+function remoteReportingAllowed() {
+  // 远程客户端日志只允许开发/体验环境；正式版即使误调用 reportApi 也不得外发。
+  try {
+    return !require('../config/env').isRelease()
+  } catch (_) {
+    return false
+  }
+}
+
 function push(level, message, extra) {
-  if (reporting) return
+  if (!remoteReportingAllowed() || reporting) return
   const msg = String(message || '').slice(0, MAX_MESSAGE)
   if (!msg) return
   queue.push({
@@ -84,6 +93,12 @@ function scheduleFlush() {
 }
 
 function flush() {
+  if (!remoteReportingAllowed()) {
+    queue.length = 0
+    if (flushTimer) clearTimeout(flushTimer)
+    flushTimer = null
+    return
+  }
   if (flushing || !queue.length) return
   flushing = true
   const batch = queue.splice(0, MAX_BATCH)
@@ -145,8 +160,13 @@ function hookConsole() {
 }
 
 function reportApi(level, method, path, detail) {
-  if (String(path || '').indexOf('/client-logs') >= 0) return
-  push(level, `api ${String(method || '').toUpperCase()} ${path}`, detail)
+  if (!remoteReportingAllowed() || String(path || '').indexOf('/client-logs') >= 0) return
+  // 避免将动态订单号、支付单号或 query 参数写入客户端日志。
+  const safePath = String(path || '').split('?')[0].replace(/\/(orders|payments|refunds|recharges)\/[^/]+/g, '/$1/:id').slice(0, 120)
+  const safeDetail = detail && typeof detail === 'object'
+    ? { status: detail.status, code: detail.code }
+    : undefined
+  push(level, `api ${String(method || '').toUpperCase()} ${safePath}`, safeDetail)
 }
 
 const logger = {
