@@ -214,6 +214,7 @@ async def test_stale_takeover_cannot_overwrite_new_claimer(db_session):
     order_id = int(order.id)
     stale_operator_id = int(cook_b.id)
     winner_operator_id = int(cook_c.id)
+    stale_claimer_id = int(cook_a.id)
     await db_session.commit()
 
     # 模拟另一个事务先完成接管，但当前请求仍持有旧的 ORM 认领人快照。
@@ -227,7 +228,7 @@ async def test_stale_takeover_cannot_overwrite_new_claimer(db_session):
     await db_session.commit()
     # 保留请求读取时的旧快照；数据库中已是 winner_operator_id。
     order.status = "COOKING"
-    order.kitchen_claimed_by = int(cook_a.id)
+    order.kitchen_claimed_by = stale_claimer_id
 
     with pytest.raises(AppException) as ei:
         await takeover_kitchen_claim(
