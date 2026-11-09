@@ -1,5 +1,4 @@
 """取消订单迟到支付：不复活订单，必须将逐笔原路退款持久化入队。"""
-from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
