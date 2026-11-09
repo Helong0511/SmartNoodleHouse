@@ -15,7 +15,7 @@ from decimal import Decimal
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.biz_no import BIZ_OT, TABLE_TAKEAWAY, generate_no
+from app.core.biz_no import BIZ_OT, BIZ_PF, TABLE_TAKEAWAY, generate_no
 from app.core.exceptions import AppException
 from app.core.response import naive_local_now
 from app.models import (
@@ -26,6 +26,7 @@ from app.models import (
     MarketingCampaign,
     Order,
     OrderItem,
+    Payment,
     Product,
     Store,
 )
@@ -570,7 +571,7 @@ class FlashSaleService:
             customer_id=int(claim.customer_id),
             store_id=int(claim.store_id),
             status="PAID",
-            payment_status="FREE",
+            payment_status="PAID",
             payment_method="FREE",
             channel="POS",
             dining_type="TAKEAWAY",
@@ -589,6 +590,30 @@ class FlashSaleService:
         )
         db.add(order)
         await db.flush()
+        # 免费营销核销也必须有 PAID 的零元 Payment，保证支付进度、支付流水和订单状态一致。
+        # provider=FREE + non_revenue 标记，不产生 SALE 财务收入，也不发放付费订单积分/券副作用。
+        db.add(
+            Payment(
+                payment_no=generate_no(
+                    BIZ_PF, getattr(store, "store_no", None), None,
+                    table_placeholder=TABLE_TAKEAWAY,
+                ),
+                order_id=int(order.id),
+                customer_id=int(claim.customer_id),
+                operator_id=int(operator_id) if operator_id is not None else None,
+                provider="FREE",
+                channel="POS",
+                amount=Decimal("0.00"),
+                currency="CNY",
+                status="PAID",
+                paid_at=now,
+                callback_raw={
+                    "source": "FLASH_SALE",
+                    "claim_id": int(claim.id),
+                    "non_revenue": True,
+                },
+            )
+        )
         db.add(
             OrderItem(
                 order_id=int(order.id),
