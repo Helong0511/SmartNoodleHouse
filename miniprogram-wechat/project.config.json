@@ -1,5 +1,5 @@
 {
-  "description": "面馆智能经营系统 - 微信小程序。本地调试：urlCheck=false + 勾选不校验合法域名；【上传体验版/正式版前必改】setting.urlCheck=true 并配置 mp.weixin.qq.com 服务器域名。API 地址见 config/env.js。上传前请执行：node scripts/preflight-check.js",
+  "description": "面馆智能经营系统 - 微信小程序。urlCheck=true；开发者工具本地调试如需访问内网 API，请仅在工具内临时关闭域名校验；上传体验版/正式版前必须配置真实 HTTPS 服务器域名。API 地址见 config/env.js。上传前请执行：node scripts/preflight-check.js",
   "packOptions": {
     "ignore": [
       { "type": "file", "value": "config/环境说明.txt" },
