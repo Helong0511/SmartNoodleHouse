@@ -110,6 +110,8 @@ Page({
     loading: true,
     loadError: false, // P2-18：加载失败态
     repaying: false, // P3-17：支付按钮防重复提交
+    canSubscribeOrderReady: false,
+    subscribeLoading: false
     order: {},
     orderItems: [],
     hasPacking: false,
@@ -160,8 +162,12 @@ Page({
   },
 
   onLoad(query) {
+    this._unloaded = false
     this.orderId = query.order_id
     this.pointsEarned = Number(query.points_earned || 0)
+    subscribe.loadTemplates().then((templates) => {
+      if (!this._unloaded) this.setData({ canSubscribeOrderReady: !!(templates && templates.order_ready) })
+    }).catch(() => {})
     this._boot()
   },
 
@@ -180,6 +186,7 @@ Page({
   },
 
   onUnload() {
+    this._unloaded = true
     this._clearPoll()
   },
 
@@ -462,6 +469,19 @@ Page({
     })
   },
 
+  async subscribeOrderReady() {
+    if (this.data.subscribeLoading || !this.data.canSubscribeOrderReady) return
+    // requestSubscribeMessage 必须在用户点击回调中立即调用，不能放到支付网络请求之后。
+    const request = subscribe.requestOrderReadySubscribe()
+    this.setData({ subscribeLoading: true })
+    try {
+      const result = await request
+      wx.showToast({ title: result ? '订阅操作已完成' : '未完成订阅，可稍后重试', icon: 'none' })
+    } finally {
+      this.setData({ subscribeLoading: false })
+    }
+  },
+
   async repay() {
     if (!this.orderId) return
     // P3-17：防重复提交
@@ -485,7 +505,6 @@ Page({
         throw payErr
       }
       wx.hideLoading()
-      await subscribe.requestOrderReadySubscribe()
       await this._refreshWithSync()
     } catch (e) {
       wx.hideLoading()
