@@ -354,6 +354,14 @@ class PosRefundService:
         if not row:
             raise AppException(40404, "退款申请不存在")
         assert_store_access(user, row.store_id)
+        # PROCESSING 但尚未绑定 refund_id，表示首个审批请求已提交认领事务、
+        # 正在创建第一笔渠道退款单。另一个审批请求即使在锁等待后读到该状态，
+        # 也必须直接返回；不能因 refund_id 暂为空而再次分配并发起退款。
+        # PaymentService.refund 会在任何渠道请求发出前，先持久化退款单并绑定 refund_id。
+        if row.status == "PROCESSING" and not row.refund_id:
+            await db.refresh(row)
+            return row
+
         # PROCESSING 且已绑定渠道退款单时，先检查原单状态；未终结的退款绝不重新发起。
         if row.status == "PROCESSING" and row.refund_id:
             from app.models import PaymentRefund
