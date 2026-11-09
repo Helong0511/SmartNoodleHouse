@@ -647,3 +647,23 @@ async def test_lock_order_then_payment_refreshes_locked_payment_from_database():
     assert order_stmt._for_update_arg is not None
     assert payment_stmt._for_update_arg is not None
     assert payment_stmt.get_execution_options().get("populate_existing") is True
+
+
+@pytest.mark.asyncio
+async def test_refund_creation_blocks_inflight_refund_from_current_locked_rows(monkeypatch):
+    payment = SimpleNamespace(
+        id=89, status="PAID", amount=Decimal("10.00"), order_id=90,
+        provider="WECHAT", payment_no="PAY_CURRENT_READ",
+    )
+    inflight = SimpleNamespace(status="UNKNOWN", amount=Decimal("4.00"))
+    load_rows = AsyncMock(return_value=[inflight])
+    monkeypatch.setattr(PaymentService, "_lock_order_then_payment", AsyncMock(return_value=payment))
+    monkeypatch.setattr(PaymentService, "_refund_rows_current", load_rows)
+    db = AsyncMock()
+
+    with pytest.raises(AppException) as exc:
+        await PaymentService.refund(db, payment, Decimal("1.00"), "retry")
+
+    assert exc.value.code == 40054
+    load_rows.assert_awaited_once_with(db, 89)
+    db.add.assert_not_called()
