@@ -115,10 +115,11 @@ def _validate_refund_callback_binding(
         raise AppException(40302, "退款单与原支付记录关联不一致")
     refund_order_id = getattr(refund, "order_id", None)
     payment_order_id = getattr(payment, "order_id", None)
-    # 订单支付必须绑定同一订单；余额充值等非订单支付允许双方 order_id 同时为空。
-    if (refund_order_id is None) != (payment_order_id is None):
-        raise AppException(40302, "退款单与原支付单订单关联不一致")
-    if refund_order_id is not None and int(refund_order_id) != int(payment_order_id):
+    # 当前 PaymentRefund 模型与退款服务仅支持订单退款（order_id NOT NULL）；
+    # 储值充值退款尚未开放，不能因两个关联字段同时为空而绕过订单归属校验。
+    if refund_order_id is None or payment_order_id is None:
+        raise AppException(40302, "退款单与原支付单必须绑定有效订单")
+    if int(refund_order_id) != int(payment_order_id):
         raise AppException(40302, "退款单与原支付单订单关联不一致")
     # 微信退款通知 transaction_id、支付宝异步通知 trade_no 均用于标识原渠道交易。
     # 必须与本地已保存的 provider_trade_no 绑定，不能只依赖商户侧 payment_no。
