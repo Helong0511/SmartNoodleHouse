@@ -3,30 +3,7 @@ const auth = require('../../utils/auth')
 const payUtil = require('../../utils/pay')
 const dineCtx = require('../../utils/context')
 const subscribe = require('../../utils/subscribe')
-
-const RECHARGE_IDEMPOTENCY_KEY = 'recharge_idempotency_v1'
-const RECHARGE_IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000
-
-function getRechargeIdempotencyKey(packageId, storeId) {
-  const customerId = Number(auth.readStorage('customer_id') || 0)
-  const signature = `${customerId}:${Number(packageId)}:${Number(storeId || 0)}`
-  try {
-    const saved = my.getStorageSync({ key: RECHARGE_IDEMPOTENCY_KEY })
-    const value = saved && saved.data
-    if (value && value.signature === signature && Date.now() - value.createdAt < RECHARGE_IDEMPOTENCY_TTL) return value.key
-  } catch (_) {}
-  const key = `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-  try {
-    my.setStorageSync({ key: RECHARGE_IDEMPOTENCY_KEY, data: { signature, key, createdAt: Date.now() } })
-  } catch (error) {
-    throw new Error('无法保存充值幂等凭证，已阻止重复充值风险')
-  }
-  return key
-}
-
-function clearRechargeIdempotencyKey() {
-  try { my.removeStorageSync({ key: RECHARGE_IDEMPOTENCY_KEY }) } catch (_) {}
-}
+const rechargeIdempotency = require('../../utils/rechargeIdempotency')
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -67,8 +44,8 @@ async function confirmRechargePaid(rechargeId, maxTries) {
   return last
 }
 
-function goMemberAfterSuccess() {
-  clearRechargeIdempotencyKey()
+function goMemberAfterSuccess(idempotencyKey) {
+  rechargeIdempotency.clearRechargeIdempotencyKey(idempotencyKey)
   markMemberWalletDirty()
   my.showToast({ content: '充值成功', type: 'success' })
   setTimeout(() => {
@@ -159,18 +136,21 @@ Page({
     this.setData({ loading: true })
     try {
       await auth.ensureLogin()
+      const idempotencyKey = rechargeIdempotency.getRechargeIdempotencyKey(
+        auth.readStorage('customer_id'), packageId, storeId
+      )
       const payRes = await api.post('/wallet/recharge', {
         package_id: packageId,
         store_id: storeId,
         provider: 'ALIPAY',
         channel_type: 'miniprogram',
-        idempotency_key: getRechargeIdempotencyKey(packageId, storeId)
+        idempotency_key: idempotencyKey
       })
       if (payRes && (payRes.status === 'PAID' || payRes.already_paid)) {
         if (payRes.wallet) applyWalletLocal(this, payRes.wallet)
         else await this.bootstrap()
         markMemberWalletDirty(payRes.wallet)
-        goMemberAfterSuccess()
+        goMemberAfterSuccess(idempotencyKey)
         return
       }
       const rechargeId = payRes && payRes.id
@@ -185,7 +165,7 @@ Page({
         if (synced.wallet) applyWalletLocal(this, synced.wallet)
         else await this.bootstrap()
         markMemberWalletDirty(synced.wallet)
-        goMemberAfterSuccess()
+        goMemberAfterSuccess(idempotencyKey)
         return
       }
       // 收银台已成功但查单未落账：仍回会员中心，强制下次刷新

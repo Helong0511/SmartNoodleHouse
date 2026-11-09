@@ -442,6 +442,8 @@ jobs:
         run: node scripts/test_miniprogram_env_fail_closed.cjs
       - name: Verify mini-program subscription gesture adapters
         run: node scripts/test_miniprogram_subscribe_gesture.cjs
+      - name: Verify recharge idempotency survives package/store switching
+        run: node scripts/test_recharge_idempotency_cache.cjs
       - name: Verify Alipay privacy consent fails closed when platform APIs are absent
         run: node scripts/test_alipay_privacy_fail_closed.cjs
 

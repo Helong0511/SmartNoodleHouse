@@ -31,9 +31,16 @@ class RefundCreate(BaseModel):
 
 
 async def _acquire_sync_cooldown(payment_id: int) -> None:
-    """P1-13: per-payment 2s Redis cooldown (SET NX EX 2) to avoid flooding provider query API."""
-    redis_client = await get_redis()
-    acquired = await redis_client.set(pay_sync_key(payment_id), "1", nx=True, ex=2)
+    """每笔支付 2 秒 Redis 冷却；限流存储故障时明确 fail-closed 返回 503。"""
+    try:
+        redis_client = await get_redis()
+        acquired = await redis_client.set(pay_sync_key(payment_id), "1", nx=True, ex=2)
+    except Exception as exc:
+        # Redis 在全局限流检查后仍可能瞬时断连；不能把连接异常裸露为 500。
+        logger.exception("支付主动查单 Redis 冷却服务不可用 payment_id=%s", payment_id)
+        raise AppException(
+            50301, "支付查询限流服务暂不可用，请稍后重试", status_code=503
+        ) from exc
     if not acquired:
         raise AppException(42901, "查询过于频繁，请稍后重试", status_code=429)
 

@@ -612,3 +612,15 @@ async def test_pos_refund_rejects_stale_execution_epoch_before_creating_refund()
     db.flush.assert_not_awaited()
     db.commit.assert_not_awaited()
 
+@pytest.mark.asyncio
+async def test_payment_sync_cooldown_returns_503_when_redis_fails(monkeypatch):
+    from app.api import payments as payment_api
+
+    async def redis_unavailable():
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(payment_api, "get_redis", redis_unavailable)
+    with pytest.raises(AppException) as exc:
+        await payment_api._acquire_sync_cooldown(123)
+    assert exc.value.code == 50301
+    assert exc.value.status_code == 503
