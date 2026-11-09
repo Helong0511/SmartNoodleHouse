@@ -1,3 +1,20 @@
+-- 危险操作保护：本脚本会 TRUNCATE 订单、支付、会员、财务等业务表。
+-- 必须由操作者在 mysql 连接建立时显式设置 @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'。
+-- 仅可用于全新、隔离、已确认无业务数据的初始化数据库。
+DELIMITER //
+DROP PROCEDURE IF EXISTS `_smart_noodle_assert_fresh_init`//
+CREATE PROCEDURE `_smart_noodle_assert_fresh_init`()
+BEGIN
+    IF DATABASE() <> 'smart_noodle_house'
+       OR COALESCE(@SMART_NOODLE_FRESH_INSTALL_CONFIRM, '') <> 'YES' THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = '拒绝执行破坏性初始化：请确认 smart_noodle_house 是全新空库，并显式设置 @SMART_NOODLE_FRESH_INSTALL_CONFIRM=YES';
+    END IF;
+END//
+DELIMITER ;
+CALL `_smart_noodle_assert_fresh_init`();
+DROP PROCEDURE `_smart_noodle_assert_fresh_init`();
+
 -- 危险操作提示：本文件包含多张业务表 TRUNCATE，仅限全新、隔离、确认无业务数据的初始化库执行。
 -- 禁止在已有门店、订单、支付、会员或财务数据的数据库上执行；已有库升级请使用 Alembic。
 -- =============================================================================
