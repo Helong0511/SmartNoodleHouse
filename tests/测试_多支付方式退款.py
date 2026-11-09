@@ -58,14 +58,15 @@ async def test_finalize_refund_keeps_order_when_other_tender_remains():
     db.flush = AsyncMock()
 
     with patch("app.services.payment_service.record_payment_status", AsyncMock()):
-        with patch.object(PaymentService, "order_net_collected", AsyncMock(return_value=money("50.00"))):
-            with patch(
-                "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
-                AsyncMock(return_value=None),
-            ):
-                with patch("app.services.payment_service.apply_order_status", AsyncMock()) as apply, \
-                     patch.object(PaymentService, "_sync_pos_refund_request_on_success", AsyncMock()):
-                    out = await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
+        with patch.object(PaymentService, "_refund_rows_current", AsyncMock(return_value=[row])):
+            with patch.object(PaymentService, "order_net_collected", AsyncMock(return_value=money("50.00"))):
+                with patch(
+                    "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
+                    AsyncMock(return_value=None),
+                ):
+                    with patch("app.services.payment_service.apply_order_status", AsyncMock()) as apply, \
+                         patch.object(PaymentService, "_sync_pos_refund_request_on_success", AsyncMock()):
+                        out = await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
 
     assert out.status == "SUCCESS"
     assert payment.status == "REFUNDED"
