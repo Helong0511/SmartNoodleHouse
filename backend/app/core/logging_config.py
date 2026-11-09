@@ -48,9 +48,7 @@ class JsonFormatter(logging.Formatter):
         if hasattr(record, "request_id"):
             payload["request_id"] = record.request_id
         if record.exc_info:
-            payload["exc"] = _SENSITIVE_QUERY_RE.sub(
-                r"\\1[REDACTED]", self.formatException(record.exc_info)
-            )
+            payload["exc"] = _redact_sensitive_query(self.formatException(record.exc_info))
         return dumps_json(payload)
 
 
