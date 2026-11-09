@@ -1239,9 +1239,13 @@ class PaymentService:
                     db, int(recharge.id), int(payment.id)
                 )
                 raise
-            payment.provider_trade_no = str(trade_no or "")
             await cls._settle_recharge_payment(
-                db, payment=payment, recharge=recharge, provider=provider_u, source="RECHARGE_IMMEDIATE"
+                db,
+                payment=payment,
+                recharge=recharge,
+                provider=provider_u,
+                source="RECHARGE_IMMEDIATE",
+                provider_trade_no=str(trade_no or ""),
             )
             pay_data["status"] = "PAID"
         return payment, pay_data
