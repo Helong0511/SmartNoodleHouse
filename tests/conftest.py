@@ -11,6 +11,9 @@ from sqlalchemy import BigInteger, Integer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool, StaticPool
 
+# 测试必须显式选择开发环境，避免生产 fail-closed 默认值影响测试导入。
+os.environ.setdefault("APP_ENV", "development")
+
 # 添加 backend 到 path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
