@@ -13,9 +13,9 @@
 
   场景              API 自动选择              域名校验怎么做
   ──────────────  ───────────────────────  ──────────────────────────────────
-  ① 本机 IDE 模拟   http://127.0.0.1:8000    IDE「详情→域名信息」勾选忽略 httpRequest
-  ② 真机调试/预览   http://局域网IP:8000      同上勾选忽略；后端 --host 0.0.0.0
-  ③ 正式版 release  PROD_API_BASE（HTTPS）   开放平台配置服务器域名白名单；不可忽略
+  ① 本机 IDE develop http://127.0.0.1:8000   IDE 本地模拟可临时忽略 httpRequest
+  ② 真机 develop     DEV_LAN_API（显式开启）  后端 --host 0.0.0.0；仅开发调试临时忽略
+  ③ trial / release  PROD_API_BASE（HTTPS）   配置服务器域名白名单；不可忽略
 
 【你现在的报错】
   「未配置域名白名单，无权访问域名」（错误码 81）
@@ -32,18 +32,17 @@
   4. 编译运行（普通编译 / 模拟器即可，不必真机）
 
 【真机调试步骤】
-  1. config/env.js 改 DEV_LAN_HOST=你的电脑局域网 IP（ipconfig 看）
+  1. config/env.js 设置 DEV_LAN_HOST=电脑局域网 IP，并显式设置 DEV_USE_LAN=true（默认 false 不走局域网）
   2. 后端必须 --host 0.0.0.0:8000；手机与电脑同一 WiFi；关 VPN 更稳
   3. IDE 仍勾选「忽略 httpRequest…」（真机调试/预览同样依赖此开关）
   4. 点「真机调试」或「预览」用支付宝扫码
-  5. 页面 debug 行应显示 http://192.168.x.x:8000/api（不是 127.0.0.1）
-     若仍是 127.0.0.1：说明被当成 IDE；可设 DEV_USE_LAN=true 强制走局域网
+  5. 页面 debug 行应显示 http://192.168.x.x:8000/api；若仍是 127.0.0.1，检查 DEV_USE_LAN=true 和 develop 环境
 
 【正式上线（暂无商家也可先预留）】
   1. config/env.js：PROD_API_BASE=https://你的域名/api
   2. open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单加该 HTTPS 域名
-  3. 上传/审核后的 release 会自动走 PROD_API_BASE；勿依赖「忽略域名检查」
-  4. 体验版默认仍走本地 API；若体验版要连生产，设 TRIAL_USE_PROD_API=true
+  3. trial / release 均走 PROD_API_BASE；体验版默认 TRIAL_USE_PROD_API=true；勿依赖「忽略域名检查」
+  4. 体验版默认走生产 HTTPS API；如需独立测试环境，将 PROD_API_BASE 指向测试 HTTPS 域名
 
 【个人主体测试】
   ENABLE_ALIPAY_AVATAR=true
