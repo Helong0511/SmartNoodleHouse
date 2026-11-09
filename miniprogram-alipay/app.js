@@ -149,7 +149,7 @@ App({
     // 支付宝：query 可能是对象，也可能是 "token=xx&channel=alipay" 字符串
     const q = normalizeLaunchQuery(options.query)
     let token = (q.token || '').trim()
-    let channel = (q.channel || '').trim()
+    const channel = 'alipay'
 
     // Scheme 的 page 会落到 options.path；query 内 path 须用归一化后的 q（query 可能是字符串）
     if (!token) {
