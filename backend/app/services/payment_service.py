@@ -1258,24 +1258,32 @@ class PaymentService:
         provider_trade_no: str | None = None,
     ) -> dict:
         """充值支付成功：记 SALE（实付）、入账本金/赠送金、充值单 PAID。"""
-        if payment.status == "PAID" or recharge.status == "PAID":
-            if payment.status == "PAID" and recharge.status == "PAID":
-                return {"already_paid": True, "status": "PAID"}
-            raise AppException(50042, "充值支付与充值单状态不一致，已暂停重复入账，请人工核对")
-
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
 
         # 统一充值单锁序：RechargeOrder → Payment，与 _lock_order_then_payment 一致。
         # 回调入口可能已持有充值单锁；反向先锁 Payment 会与并发结算形成死锁环。
         locked_r = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == recharge.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one()
         locked_p = (
-            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
+            await db.execute(
+                select(Payment)
+                .where(Payment.id == payment.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one()
         recharge, payment = locked_r, locked_p
-        if payment.status == "PAID" or recharge.status == "PAID":
+        if (
+            recharge.status == "PAID"
+            or payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED")
+        ):
             if payment.status == "PAID" and recharge.status == "PAID":
                 return {"already_paid": True, "status": "PAID"}
             raise AppException(50042, "充值支付与充值单状态不一致，已暂停重复入账，请人工核对")
@@ -1787,7 +1795,7 @@ class PaymentService:
         ).scalar_one_or_none()
         if recharge is None or payment is None:
             raise AppException(40491, "充值单或支付单不存在")
-        if recharge.status == "PAID" or payment.status == "PAID":
+        if recharge.status == "PAID" or payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             await db.commit()
             if recharge.status != "PAID" or payment.status != "PAID":
                 raise AppException(50042, "充值支付与充值单状态不一致，已暂停自动处理，请人工核对")
