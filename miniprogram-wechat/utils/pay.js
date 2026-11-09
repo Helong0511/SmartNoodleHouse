@@ -3,6 +3,16 @@
 const { getEnvDebugInfo } = require('../config/env')
 
 const PENDING_KEY = 'pending_pay'
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000
+
+function currentCustomerId() {
+  try {
+    const app = getApp()
+    return Number((app && app.globalData && app.globalData.customerId) || wx.getStorageSync('customer_id') || 0) || 0
+  } catch (_) {
+    return 0
+  }
+}
 
 function isMockPay(payData) {
   if (!payData) return false
@@ -17,6 +27,7 @@ function savePending(info) {
       orderId: String(info.orderId),
       paymentNo: info.paymentNo ? String(info.paymentNo) : '',
       provider: info.provider || 'WECHAT',
+      customerId: currentCustomerId(),
       at: Date.now()
     })
   } catch (e) {
@@ -26,7 +37,21 @@ function savePending(info) {
 
 function readPending() {
   try {
-    return wx.getStorageSync(PENDING_KEY) || null
+    const pending = wx.getStorageSync(PENDING_KEY) || null
+    if (!pending) return null
+    const age = Date.now() - Number(pending.at || 0)
+    if (!pending.at || age < 0 || age > PENDING_TTL_MS) {
+      wx.removeStorageSync(PENDING_KEY)
+      return null
+    }
+    const customerId = currentCustomerId()
+    // 无法确认当前顾客身份时暂不查单；旧格式/跨账号记录直接丢弃，避免串查他人订单。
+    if (!customerId) return null
+    if (!pending.customerId || Number(pending.customerId) !== customerId) {
+      wx.removeStorageSync(PENDING_KEY)
+      return null
+    }
+    return pending
   } catch (e) {
     return null
   }
