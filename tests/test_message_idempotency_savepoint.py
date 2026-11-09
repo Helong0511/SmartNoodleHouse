@@ -34,6 +34,7 @@ async def test_unique_race_isolated_inside_savepoint_without_poisoning_outer_tra
     )
     monkeypatch.setattr(idempotency, "_redis_mark", AsyncMock())
     # Model the race window: another worker inserted after our preflight check.
+    original_scalar = db_session.scalar
     monkeypatch.setattr(db_session, "scalar", AsyncMock(return_value=None))
 
     acquired = await idempotency.try_acquire(
@@ -44,6 +45,7 @@ async def test_unique_race_isolated_inside_savepoint_without_poisoning_outer_tra
     )
 
     assert acquired is False
+    monkeypatch.setattr(db_session, "scalar", original_scalar)
 
     # A failed duplicate insert must not leave the outer Session in PendingRollback.
     existing_count = await db_session.scalar(
