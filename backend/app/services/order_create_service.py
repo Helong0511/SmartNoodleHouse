@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import Order, Store
+from app.models import Option, Order, OrderItem, OrderItemOption, Store
 from app.services.customer_service import CustomerService
 from app.services.order_service import OrderPriceCalculator
 
@@ -97,6 +97,62 @@ class OrderCreateService:
                 raise AppException(40902, "幂等键冲突：桌台不一致")
 
     @staticmethod
+    async def _assert_idempotent_order_items_match(
+        db: AsyncSession, order: Order, items: list[dict]
+    ) -> None:
+        """幂等重放必须匹配原订单的餐品、数量、备注和规格，防止同 key 偷换购物车。"""
+        existing_items = (
+            await db.execute(
+                select(OrderItem)
+                .where(OrderItem.order_id == int(order.id))
+                .order_by(OrderItem.id)
+            )
+        ).scalars().all()
+        if len(existing_items) != len(items):
+            raise AppException(40902, "幂等键冲突：订单餐品数量不一致")
+
+        requested_option_ids = [
+            int(option_id)
+            for item in items
+            for option_id in (item.get("option_ids") or [])
+        ]
+        options_by_id = {}
+        if requested_option_ids:
+            options = (
+                await db.execute(select(Option).where(Option.id.in_(set(requested_option_ids))))
+            ).scalars().all()
+            options_by_id = {int(option.id): option for option in options}
+
+        item_ids = [int(item.id) for item in existing_items]
+        existing_options = (
+            await db.execute(
+                select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids))
+            )
+        ).scalars().all() if item_ids else []
+        option_codes_by_item: dict[int, list[tuple[str, int]]] = {}
+        for option in existing_options:
+            option_codes_by_item.setdefault(int(option.order_item_id), []).append(
+                (str(option.option_code or ""), int(option.quantity or 1))
+            )
+
+        for existing, requested in zip(existing_items, items):
+            if (
+                int(existing.product_id) != int(requested.get("product_id") or 0)
+                or int(existing.quantity) != int(requested.get("quantity") or 0)
+                or (existing.remark or "") != (requested.get("remark") or "")
+            ):
+                raise AppException(40902, "幂等键冲突：餐品、数量或备注不一致")
+            requested_codes = []
+            for option_id in (requested.get("option_ids") or []):
+                option = options_by_id.get(int(option_id))
+                if option is None:
+                    raise AppException(40902, "幂等键冲突：规格选项不存在")
+                requested_codes.append((str(option.code or ""), 1))
+            existing_codes = option_codes_by_item.get(int(existing.id), [])
+            if sorted(requested_codes) != sorted(existing_codes):
+                raise AppException(40902, "幂等键冲突：餐品规格不一致")
+
+    @staticmethod
     async def create_order(
         db: AsyncSession,
         *,
@@ -173,6 +229,7 @@ class OrderCreateService:
                 # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
                 if not OrderCreateService._is_reusable_idempotent_order(order):
                     raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
+                await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
                 return order
 
         dtype = (dining_type or "").strip().upper()
@@ -261,6 +318,7 @@ class OrderCreateService:
                     )
                     if not OrderCreateService._is_reusable_idempotent_order(order):
                         raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
+                    await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
                     return order
             raise AppException(40901, "订单创建冲突，请重试")
 
