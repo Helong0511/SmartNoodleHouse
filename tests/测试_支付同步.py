@@ -685,10 +685,11 @@ async def test_remaining_amount_can_use_current_locked_payment_and_refund_facts(
     paid.assert_awaited_once_with(db, 91, current_read=True)
 
 
+@pytest.mark.parametrize("settled_status", ["PAID", "PARTIAL_REFUND", "REFUNDED"])
 @pytest.mark.asyncio
-async def test_immediate_settlement_does_not_repeat_when_callback_already_paid(monkeypatch):
+async def test_immediate_settlement_does_not_downgrade_terminal_callback_state(monkeypatch, settled_status):
     stale_payment = SimpleNamespace(id=101, order_id=102, status="PENDING")
-    current_payment = SimpleNamespace(id=101, order_id=102, status="PAID")
+    current_payment = SimpleNamespace(id=101, order_id=102, status=settled_status)
     current_order = SimpleNamespace(id=102, status="PAID", order_no="O102")
     lock = AsyncMock(return_value=current_payment)
     monkeypatch.setattr(PaymentService, "_lock_order_then_payment", lock)
@@ -710,7 +711,7 @@ async def test_immediate_settlement_does_not_repeat_when_callback_already_paid(m
     record.assert_not_awaited()
     finalize.assert_not_awaited()
     assert stale_payment.status == "PENDING"
-    assert current_payment.status == "PAID"
+    assert current_payment.status == settled_status
     stmt = db.execute.await_args.args[0]
     assert stmt._for_update_arg is not None
     assert stmt.get_execution_options().get("populate_existing") is True
