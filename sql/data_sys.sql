@@ -1,9 +1,29 @@
+-- 危险操作保护：本脚本会 TRUNCATE 订单、支付、会员、财务等业务表。
+-- 必须由操作者在 mysql 连接建立时显式设置 @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'。
+-- 仅可用于全新、隔离、已确认无业务数据的初始化数据库。
+-- 先固定目标库，再创建/执行保护过程；禁止依赖调用者的隐式默认数据库。
+USE `smart_noodle_house`;
+DELIMITER //
+DROP PROCEDURE IF EXISTS `_smart_noodle_assert_fresh_init`//
+CREATE PROCEDURE `_smart_noodle_assert_fresh_init`()
+BEGIN
+    IF COALESCE(DATABASE(), '') <> 'smart_noodle_house'
+       OR COALESCE(@SMART_NOODLE_FRESH_INSTALL_CONFIRM, '') <> 'YES' THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = '拒绝执行破坏性初始化：请确认 smart_noodle_house 是全新空库，并显式设置 @SMART_NOODLE_FRESH_INSTALL_CONFIRM=YES';
+    END IF;
+END//
+DELIMITER ;
+CALL `_smart_noodle_assert_fresh_init`();
+DROP PROCEDURE `_smart_noodle_assert_fresh_init`();
+
+-- 危险操作提示：本文件包含多张业务表 TRUNCATE，仅限全新、隔离、确认无业务数据的初始化库执行。
+-- 禁止在已有门店、订单、支付、会员或财务数据的数据库上执行；已有库升级请使用 Alembic。
 -- =============================================================================
 -- 系统必要种子（平台运行必需）
 -- 前置：已执行 sql/struct.sql
 -- 顺序：struct.sql → data_sys.sql → data_custom.sql（门店经营数据）→ 可选 data_test.sql
 -- =============================================================================
-USE `smart_noodle_house`;
 -- 设置字符集
 SET NAMES utf8mb4;
 -- 禁用外键检查

@@ -24,7 +24,7 @@ _RAND_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 # 门店/桌位占位与右补，不用 0（避免与字母 O 混淆）
 _PAD = "X"
 
-BizCode = Literal["OT", "OD", "PW", "PA", "RW", "RA", "CU", "VI"]
+BizCode = Literal["OT", "OD", "PW", "PA", "RW", "RA", "PF", "CU", "VI"]
 
 BIZ_OT = "OT"  # 堂食订单
 BIZ_OD = "OD"  # 外卖订单
@@ -32,6 +32,7 @@ BIZ_PW = "PW"  # 微信支付
 BIZ_PA = "PA"  # 支付宝支付
 BIZ_RW = "RW"  # 微信退款
 BIZ_RA = "RA"  # 支付宝退款
+BIZ_PF = "PF"  # 免费/营销核销支付凭证
 BIZ_CU = "CU"  # 顾客
 BIZ_VI = "VI"  # 访客
 

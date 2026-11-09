@@ -17,7 +17,7 @@ from app.schemas.order import PaymentCreate, PosCashPay, PosScanPay
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
 from app.services.payment_service import PaymentService
-from app.services.store_scope import assert_order_store_access, require_bound_store
+from app.services.store_scope import assert_order_store_access, assert_store_access, require_bound_store
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/payments", tags=["支付"])
@@ -36,6 +36,35 @@ async def _acquire_sync_cooldown(payment_id: int) -> None:
     acquired = await redis_client.set(pay_sync_key(payment_id), "1", nx=True, ex=2)
     if not acquired:
         raise AppException(42901, "查询过于频繁，请稍后重试", status_code=429)
+
+
+async def _authorize_staff_payment_access(
+    db: AsyncSession, user, payment: Payment, order: Order | None
+) -> None:
+    """员工访问支付记录必须同时满足权限与所属门店范围；充值单按 recharge_order_id 校验。"""
+    if user.role.code != "SUPER_ADMIN":
+        from app.api.deps import get_user_permissions
+
+        perms = await get_user_permissions(db, user.role_id, user_id=user.id)
+        if "payment:read" not in perms:
+            raise AppException(40300, "缺少权限: payment:read", status_code=403)
+
+    if order is not None:
+        assert_order_store_access(user, order)
+        return
+
+    recharge_order_id = getattr(payment, "recharge_order_id", None)
+    if recharge_order_id:
+        from app.models import RechargeOrder
+
+        recharge = await db.get(RechargeOrder, int(recharge_order_id))
+        if not recharge:
+            raise AppException(40490, "充值订单不存在", status_code=404)
+        assert_store_access(user, recharge.store_id)
+        return
+
+    # 悬空支付记录不能因为 order=None 而绕过权限/门店边界。
+    raise AppException(40301, "支付记录缺少有效订单关联，拒绝访问", status_code=403)
 
 
 async def _wechat_openid_for_customer(db: AsyncSession, customer_id: int) -> str | None:
@@ -200,6 +229,9 @@ async def sync_payment(
     if not payment:
         raise AppException(40490, "支付记录不存在", status_code=404)
     order = await db.get(Order, payment.order_id)
+    if customer is None and user is None:
+        raise AppException(40101, "请先登录后再同步支付", status_code=401)
+
     if customer:
         from app.services.order_access import assert_customer_owns_order, assert_dining_session_owner
 
@@ -209,13 +241,8 @@ async def sync_payment(
         await assert_dining_session_owner(db, order, customer.id, action="同步支付")
         if payment.customer_id is None or int(payment.customer_id) != int(customer.id):
             raise AppException(40301, "无权同步此支付", status_code=403)
-    if user is not None and order:
-        from app.api.deps import get_user_permissions
-
-        perms = await get_user_permissions(db, user.role_id)
-        if user.role.code != "SUPER_ADMIN" and "payment:read" not in perms:
-            raise AppException(40300, "缺少权限: payment:read", status_code=403)
-        assert_order_store_access(user, order)
+    if user is not None:
+        await _authorize_staff_payment_access(db, user, payment, order)
     # P1-13: per-payment Redis cooldown before querying provider
     await _acquire_sync_cooldown(payment.id)
     before = payment.status
@@ -914,15 +941,9 @@ async def get_payment(payment_no: str, request: Request, db: DbSession, auth: St
         raise AppException(40490, "支付记录不存在", status_code=404)
     if customer and payment.customer_id != customer.id:
         raise AppException(40301, "无权查看此支付", status_code=403)
+    order = await db.get(Order, payment.order_id) if payment.order_id else None
     if user is not None:
-        from app.api.deps import get_user_permissions
-
-        perms = await get_user_permissions(db, user.role_id)
-        if user.role.code != "SUPER_ADMIN" and "payment:read" not in perms:
-            raise AppException(40300, "缺少权限: payment:read", status_code=403)
-        order = await db.get(Order, payment.order_id)
-        if order:
-            assert_order_store_access(user, order)
+        await _authorize_staff_payment_access(db, user, payment, order)
     refunds = list(
         (
             await db.execute(

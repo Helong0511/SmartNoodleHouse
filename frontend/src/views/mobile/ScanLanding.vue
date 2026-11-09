@@ -107,9 +107,50 @@ function isAlipay() {
   return /AlipayClient|AliApp/i.test(ua())
 }
 
-function tryOpen(url: string) {
-  if (!url) return
-  window.location.href = url
+const WECHAT_LINK_HOSTS = new Set([
+  'wxaurl.cn',
+  'weixin.qq.com',
+  'mp.weixin.qq.com',
+  'open.weixin.qq.com',
+  'servicewechat.com',
+])
+const ALIPAY_LINK_HOSTS = new Set([
+  'qr.alipay.com',
+  'render.alipay.com',
+  'openauth.alipay.com',
+  'mclient.alipay.com',
+  'mobilecodec.alipay.com',
+])
+
+function safeRedirectTarget(raw: string, kind: 'wechat' | 'alipay' | 'h5'): string | null {
+  try {
+    const target = new URL(String(raw || '').trim())
+    if (kind === 'h5') {
+      return target.protocol === 'https:' && target.hostname === window.location.hostname
+        ? target.href
+        : null
+    }
+    if (kind === 'wechat') {
+      if (target.protocol === 'https:' && WECHAT_LINK_HOSTS.has(target.hostname.toLowerCase())) return target.href
+      if (target.protocol === 'weixin:' && target.hostname.toLowerCase() === 'dl') return target.href
+      return null
+    }
+    if (target.protocol === 'https:' && ALIPAY_LINK_HOSTS.has(target.hostname.toLowerCase())) return target.href
+    if (target.protocol === 'alipays:' && target.hostname.toLowerCase() === 'platformapi') return target.href
+    return null
+  } catch {
+    return null
+  }
+}
+
+function tryOpen(url: string, kind: 'wechat' | 'alipay' | 'h5'): boolean {
+  const safe = safeRedirectTarget(url, kind)
+  if (!safe) {
+    autoHint.value = '跳转地址无效或不在可信平台域名白名单内，请联系门店核对配置'
+    return false
+  }
+  window.location.href = safe
+  return true
 }
 
 async function copyText(text: string, okMsg: string) {
@@ -137,13 +178,11 @@ function openWechat() {
   const link = info.value.wechat_url_link
   const scheme = info.value.wechat_scheme
   if (link) {
-    tryOpen(link)
-    return
+    if (tryOpen(link, 'wechat')) return
   }
   // 仅系统浏览器可安全使用明文 Scheme 打开 develop
   if (!isWechat() && scheme) {
-    tryOpen(scheme)
-    return
+    if (tryOpen(scheme, 'wechat')) return
   }
   guideWechatInApp()
 }
@@ -162,15 +201,19 @@ function guideWechatInApp() {
 
 function openAlipay() {
   if (!info.value?.alipay_scheme) return
-  tryOpen(info.value.alipay_scheme)
+  tryOpen(info.value.alipay_scheme, 'alipay')
 }
 
 function openH5() {
   if (!info.value) return
-  const url = info.value.h5_order_url
-  const channel = isAlipay() ? 'alipay' : 'wechat'
-  const sep = url.includes('?') ? '&' : '?'
-  window.location.href = `${url}${sep}channel=${channel}`
+  const target = safeRedirectTarget(info.value.h5_order_url, 'h5')
+  if (!target) {
+    autoHint.value = 'H5 点餐地址必须为当前站点的 HTTPS 地址'
+    return
+  }
+  const next = new URL(target)
+  next.searchParams.set('channel', isAlipay() ? 'alipay' : 'wechat')
+  window.location.href = next.href
 }
 
 function copyPageUrl() {

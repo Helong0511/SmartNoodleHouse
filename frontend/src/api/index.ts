@@ -169,7 +169,7 @@ function isCustomerApiUrl(url: string, clientHint: string): boolean {
 /** 强制顾客 token 的 API（即便后台员工已登录，也不允许员工态抢占） */
 function isForceCustomerUrl(url: string): boolean {
   return (
-    url.includes('/miniprogram') || url.includes('/orders/mine') || /\/orders\/\d+\/reorder/.test(url)
+    url.includes('/miniprogram') || url.includes('/orders/mine') || url.includes('/payments/orders/') || /\/orders\/\d+\/reorder/.test(url)
   )
 }
 
@@ -221,6 +221,10 @@ api.interceptors.request.use((config) => {
     token = staffToken || customerToken
   }
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // 将本次请求实际使用的令牌类型显式标记；401 处理不再根据当前 URL 猜测员工/顾客身份。
+  config.headers['X-Token-Kind'] = token
+    ? (customerToken && token === customerToken ? 'customer' : 'staff')
+    : (forceCustomer || isCustomerApi ? 'customer' : 'staff')
   return config
 })
 
@@ -282,20 +286,12 @@ api.interceptors.response.use(
     reportApiLog('ERROR', cfg.method || 'GET', url, { status, message: msg, code: bizCode })
     if (status === 401) {
       const reqUrl = String(cfg.url || '')
-      const clientHint = String(cfg.headers?.['X-Client'] || '').toLowerCase()
-      const onAdmin =
-        location.pathname.startsWith('/admin') ||
-        (!location.pathname.startsWith('/scan') &&
-          !location.pathname.startsWith('/order') &&
-          !location.pathname.startsWith('/member') &&
-          !location.pathname.startsWith('/display') &&
-          !location.pathname.startsWith('/kitchen') &&
-          location.pathname !== '/')
-      const isCustApi = isCustomerApiUrl(reqUrl, clientHint)
+      const tokenKind = String(cfg.headers?.['X-Token-Kind'] || '').toLowerCase()
+      const isCustApi = tokenKind === 'customer'
       // H5 顾客路径：先静默 refresh 再重放一次（对齐小程序）
       if (
         isCustApi &&
-        !onAdmin &&
+        
         !(cfg as { __customerRefreshed?: boolean }).__customerRefreshed &&
         !/auth\/refresh/.test(reqUrl) &&
         getCustomerToken()
@@ -308,7 +304,7 @@ api.interceptors.response.use(
           return api.request(cfg)
         }
       }
-      if (isCustApi && !onAdmin) {
+      if (isCustApi) {
         clearCustomerToken()
         if (
           !location.pathname.startsWith('/scan') &&

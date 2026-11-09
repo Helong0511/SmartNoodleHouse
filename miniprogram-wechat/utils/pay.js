@@ -1,10 +1,13 @@
 /** 微信小程序支付：mock 环境跳过收银台，生产调 wx.requestPayment；支持待确认查单 */
 
+const { getEnvDebugInfo } = require('../config/env')
+
 const PENDING_KEY = 'pending_pay'
 
 function isMockPay(payData) {
   if (!payData) return false
-  return !!(payData.mock_settled || payData._mock)
+  const env = getEnvDebugInfo()
+  return !!(env && env.isDevtools && !env.isRelease && (payData.mock_settled || payData._mock))
 }
 
 function savePending(info) {

@@ -52,6 +52,7 @@ class ConnectionManager:
         store_id: int | None = None,
         is_super_admin: bool = False,
         user_key: str | None = None,
+        customer_id: int | None = None,
     ):
         from app.services import ws_conn_quota
 
@@ -70,6 +71,9 @@ class ConnectionManager:
             keys.append(channel)  # 超管看全量
         if store_id is not None:
             keys.append(f"{channel}:{store_id}")
+        if channel == "orders" and customer_id is not None:
+            # 顾客只订阅自己的订单事件，不加入门店全量订单频道。
+            keys.append(f"{channel}:customer:{int(customer_id)}")
         if not keys:
             # 无门店且非超管：拒绝由上层处理；兜底不入频道
             keys = []
@@ -85,6 +89,7 @@ class ConnectionManager:
             "keys": keys,
             "ip": ip,
             "user_key": user_key,
+            "customer_id": customer_id,
             "last_seen": time.monotonic(),
             "quota_reserved": True,
         }
@@ -166,6 +171,7 @@ class ConnectionManager:
         data: dict,
         store_id: int | None = None,
         msg_id: str | None = None,
+        customer_id: int | None = None,
     ):
         # P1-8：Redis Pub/Sub 回环时跳过已投递的消息
         if not self._should_deliver(msg_id):
@@ -178,6 +184,8 @@ class ConnectionManager:
         targets |= set(self.active.get(channel, set()))
         if store_id is not None:
             targets |= set(self.active.get(f"{channel}:{store_id}", set()))
+        if channel == "orders" and customer_id is not None:
+            targets |= set(self.active.get(f"{channel}:customer:{int(customer_id)}", set()))
         dead = []
         for ws in targets:
             try:
@@ -195,26 +203,43 @@ class ConnectionManager:
         store_id: int | None = None,
         *,
         local_only: bool = False,
+        customer_id: int | None = None,
     ):
         """local_only=True：仅本进程推送（Redis 订阅回调使用，避免回环）。"""
         import uuid
 
         # P1-8：非 local_only 时生成 msg_id，供 Redis 回环去重
         msg_id = None if local_only else str(uuid.uuid4())
-        await self.local_broadcast(channel, event, data, store_id=store_id, msg_id=msg_id)
+        await self.local_broadcast(
+            channel, event, data, store_id=store_id, msg_id=msg_id, customer_id=customer_id
+        )
         if not local_only:
-            await publish_ws_event(channel, event, data, store_id=store_id, msg_id=msg_id)
+            await publish_ws_event(
+                channel, event, data, store_id=store_id, msg_id=msg_id, customer_id=customer_id
+            )
 
-    async def notify_order_event(self, event: str, order_data: dict):
+    async def notify_order_event(
+        self, event: str, order_data: dict, *, customer_id: int | None = None
+    ):
         store_id = order_data.get("store_id")
+        target_customer_id = customer_id or order_data.get("customer_id")
         await self.broadcast("kitchen", event, order_data, store_id=store_id)
-        await self.broadcast("orders", event, order_data, store_id=store_id)
+        await self.broadcast(
+            "orders", event, order_data, store_id=store_id,
+            customer_id=int(target_customer_id) if target_customer_id else None,
+        )
         await self.broadcast("display", event, order_data, store_id=store_id)
 
 
 ws_manager = ConnectionManager()
 
 
-async def on_redis_ws_message(channel: str, event: str, data: dict, store_id: int | None, msg_id: str | None = None):
-    # P1-8：传入 msg_id 供 local_broadcast 去重；local_only=True 不再回发 Redis
-    await ws_manager.local_broadcast(channel, event, data, store_id=store_id, msg_id=msg_id)
+async def on_redis_ws_message(
+    channel: str, event: str, data: dict, store_id: int | None,
+    msg_id: str | None = None, customer_id: int | None = None,
+):
+    # P1-8：传入 msg_id 供 local_broadcast 去重；local_only=True 不再回发 Redis。
+    # customer_id 只用于定向投递顾客自己的订单事件。
+    await ws_manager.local_broadcast(
+        channel, event, data, store_id=store_id, msg_id=msg_id, customer_id=customer_id
+    )

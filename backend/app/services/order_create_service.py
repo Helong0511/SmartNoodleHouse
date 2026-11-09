@@ -17,6 +17,11 @@ from app.services.order_service import OrderPriceCalculator
 
 class OrderCreateService:
     @staticmethod
+    def _should_apply_social_benefit(customer_id: int | None, use_social_benefit: bool) -> bool:
+        """公益折扣必须由顾客显式勾选；旧版 social_rule_id 仅兼容接收，不参与资格判断。"""
+        return customer_id is not None and bool(use_social_benefit)
+
+    @staticmethod
     def _is_reusable_idempotent_order(order: Order) -> bool:
         """仅待支付未结清订单可被幂等键复用。"""
         return (order.status or "") == "PENDING_PAYMENT" and (order.payment_status or "") in (
@@ -52,8 +57,9 @@ class OrderCreateService:
         if len(combined) <= 64:
             return combined
         # 不可直接截断：相同长前缀会碰撞并错误复用他人/另一购物车的订单。
-        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        return f"{scope}sha256:{digest}"[:64]
+        digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+        # 超长键直接返回完整 256-bit 摘要；scope 已参与哈希，不再截断摘要位数。
+        return digest
 
     @staticmethod
     def _assert_idempotent_order_match(
@@ -137,6 +143,12 @@ class OrderCreateService:
                 raise AppException(40008, "堂食请先扫桌台二维码，或在确认页选择桌号")
             if not store_id or int(store_id) <= 0:
                 raise AppException(40008, "缺少桌台令牌或有效门店")
+            # H5/外带无桌台令牌时，门店 ID 来自请求参数，必须重新验证存在且启用。
+            store = await db.get(Store, int(store_id))
+            if not store:
+                raise AppException(40401, "门店不存在")
+            if int(store.status or 0) != 1:
+                raise AppException(40302, "该门店当前不可下单")
 
         scoped_key = OrderCreateService._scoped_idempotency_key(
             idempotency_key,
@@ -271,7 +283,7 @@ class OrderCreateService:
 
             # 公益与券互斥；与会员折比补贴，取更优（折扣更低者）
             social_hit = None
-            if customer_id and (use_social_benefit or social_rule_id):
+            if OrderCreateService._should_apply_social_benefit(customer_id, use_social_benefit):
                 if customer_coupon_id or customer_voucher_id:
                     raise AppException(40008, "公益折扣不可与优惠券同享，请取消券后重试")
                 pids = [int(i["product_id"]) for i in items]
@@ -281,22 +293,9 @@ class OrderCreateService:
                     await db.execute(select(_Product).where(_Product.id.in_(pids)))
                 ).scalars().all() if pids else []
                 cids = [int(p.category_id) for p in prods if p.category_id]
-                if social_rule_id:
-                    from app.models import SocialBenefitRule
-
-                    rule = await db.get(SocialBenefitRule, int(social_rule_id))
-                    codes = await SocialBenefitService.active_codes(db, int(customer_id))
-                    if (
-                        rule
-                        and int(rule.status) == 1
-                        and rule.identity_code in codes
-                        and rule.benefit_type == "ORDER_DISCOUNT"
-                        and rule.discount_rate is not None
-                        and (rule.store_id is None or int(rule.store_id) == int(order.store_id))
-                    ):
-                        social_hit = (rule, rule.identity_code)
-                if social_hit is None and use_social_benefit:
-                    # 显式勾选公益：须可命中规则（再与会员折比优）
+                if use_social_benefit:
+                    # social_rule_id 不作为规则选择依据；
+                    # 服务端统一校验日期/星期/时段/限次/餐品/分类/折扣率。
                     social_hit = await SocialBenefitService.require_best_rule(
                         db,
                         customer_id=int(customer_id),

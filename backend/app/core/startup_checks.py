@@ -12,6 +12,16 @@ from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
+_PLACEHOLDER_RE = re.compile(
+    r"replace[_-]|your[-_]domain|your[-_]password|example[.]com|<.*>",
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder(value: object) -> bool:
+    raw = str(value or "").strip()
+    return bool(raw) and bool(_PLACEHOLDER_RE.search(raw))
+
 
 def _is_loopback_host(hostname: str | None) -> bool:
     """识别 localhost、IPv4/IPv6 回环地址，避免字符串判断漏过 IPv6。"""
@@ -165,23 +175,33 @@ def validate_settings(settings: Settings) -> None:
         errors.append(f"APP_ENV 非法: {getattr(settings, 'app_env', None)!r}，仅允许 development/staging/production")
     # 测试用 SimpleNamespace 可能无 app_env；生产路径以 is_production 为准
 
-    jwt = (getattr(settings, "jwt_secret", None) or "").strip()
-    if jwt.lower() in {x.lower() for x in _DANGEROUS_JWT} or len(jwt) < 32:
-        msg = "JWT_SECRET 过弱或为空，必须为至少 32 字符的高熵随机串"
-        (errors if is_prod else warnings).append(msg)
-    elif _entropy_score(jwt) < 20:
-        msg = "JWT_SECRET 熵过低（重复字符过多），请更换高熵随机串"
-        (errors if is_prod else warnings).append(msg)
-
     alg = (getattr(settings, "jwt_algorithm", None) or "HS256").strip().upper()
-    if alg not in ("HS256",):
-        msg = f"JWT_ALGORITHM 仅允许 HS256，当前为 {alg!r}"
+    if alg not in ("HS256", "RS256", "EDDSA"):
+        msg = f"JWT_ALGORITHM 仅允许 HS256/RS256/EdDSA，当前为 {alg!r}"
         (errors if is_prod else warnings).append(msg)
+    elif alg == "HS256":
+        jwt = (getattr(settings, "jwt_secret", None) or "").strip()
+        if jwt.lower() in {x.lower() for x in _DANGEROUS_JWT} or len(jwt) < 32:
+            msg = "JWT_SECRET 过弱或为空，必须为至少 32 字符的高熵随机串"
+            (errors if is_prod else warnings).append(msg)
+        elif _entropy_score(jwt) < 20:
+            msg = "JWT_SECRET 熵过低（重复字符过多），请更换高熵随机串"
+            (errors if is_prod else warnings).append(msg)
+        elif is_prod and _is_placeholder(jwt):
+            errors.append("生产配置 JWT_SECRET 仍为示例占位值，必须替换为真实随机密钥")
+    else:
+        for label in ("jwt_private_key", "jwt_public_key"):
+            key = (getattr(settings, label, None) or "").strip()
+            if not key or (is_prod and _is_placeholder(key)):
+                msg = f"JWT_ALGORITHM={alg} 时生产必须配置真实 {label.upper()}"
+                (errors if is_prod else warnings).append(msg)
 
     face = (getattr(settings, "face_encryption_key", None) or "").strip()
     if face in _DANGEROUS_FACE or len(face) < 32:
         msg = "FACE_ENCRYPTION_KEY 为默认值/过短/空，必须更换"
         (errors if is_prod else warnings).append(msg)
+    elif is_prod and _is_placeholder(face):
+        errors.append("生产配置 FACE_ENCRYPTION_KEY 仍为示例占位值，必须替换")
     elif _entropy_score(face) < 20:
         msg = "FACE_ENCRYPTION_KEY 熵过低，请更换高熵随机串"
         (errors if is_prod else warnings).append(msg)
@@ -227,11 +247,15 @@ def validate_settings(settings: Settings) -> None:
         errors.append("生产环境须独立配置 SECRET_ENCRYPTION_KEY（勿仅依赖 FACE_ENCRYPTION_KEY）")
     elif is_prod and secret_enc and len(secret_enc) < 32:
         errors.append("SECRET_ENCRYPTION_KEY 须至少 32 字符")
+    elif is_prod and _is_placeholder(secret_enc):
+        errors.append("生产配置 SECRET_ENCRYPTION_KEY 仍为示例占位值，必须替换")
+    for label in ("s3_secret_key", "face_encryption_key_previous", "secret_encryption_key_previous"):
+        value = getattr(settings, label, None)
+        if value and _is_placeholder(value):
+            errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换")
 
-    if is_prod and bool(getattr(settings, "enable_customer_display", False)) and not (
-        getattr(settings, "display_screen_token", None) or ""
-    ).strip():
-        errors.append("已开启大厅叫号屏时，生产环境须配置 DISPLAY_SCREEN_TOKEN")
+    # 生产叫号屏使用数据库中的门店级独立令牌，在连接时按 store_id fail-closed 校验；
+    # DISPLAY_SCREEN_TOKEN 仅保留给开发环境回退，不再作为生产全局通行令牌。
 
     cors = (getattr(settings, "cors_origins", None) or "").lower()
     if is_prod and ("localhost" in cors or "127.0.0.1" in cors):
@@ -363,13 +387,7 @@ def validate_settings(settings: Settings) -> None:
 
     # 生产至少配置一种支付通道（微信 V3 或支付宝）；否则小程序/扫码收款不可用
     if is_prod:
-        # 占位值检测：REPLACE/your-domain 等示例值一旦上线会静默失效
-        _placeholder_re = re.compile(r"replace[_-]|your[-_]domain|your[-_]password|example\.com|<.*>", re.IGNORECASE)
-
-        def _is_placeholder(value: object) -> bool:
-            v = str(value or "").strip()
-            return bool(v) and bool(_placeholder_re.search(v))
-
+        # 通用占位值判断统一使用模块级 _is_placeholder，避免重复定义与作用域遮蔽。
         wechat_required_fields = (
             "wechat_mch_id",
             "wechat_api_v3_key",

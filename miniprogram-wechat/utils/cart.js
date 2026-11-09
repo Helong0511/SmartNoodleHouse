@@ -140,7 +140,9 @@ function collectOptionIds(product, selected, multi) {
 
 /** 补齐旧购物车条目字段 */
 function normalizeItem(item) {
-  const qty = item.quantity || 1
+  // 购物车持久化数据可能被篡改；数量统一限制为 1..999 的整数。
+  const parsedQty = Number(item.quantity)
+  const qty = Number.isFinite(parsedQty) ? Math.max(1, Math.min(999, Math.floor(parsedQty))) : 1
   if (item.unit_price == null) {
     const unitFen = qty > 0 ? Math.trunc(toFen(item.subtotal) / qty) : 0
     item.unit_price = Number(fromFen(unitFen))
@@ -169,7 +171,8 @@ function mergeCartItem(cart, entry) {
   const idx = list.findIndex((x) => itemKey(x) === key)
   if (idx >= 0) {
     const cur = normalizeItem(list[idx])
-    const add = entry.quantity || 1
+    const parsedAdd = Number(entry.quantity)
+    const add = Number.isFinite(parsedAdd) ? Math.max(1, Math.min(999, Math.floor(parsedAdd))) : 1
     cur.quantity = Math.min(999, (cur.quantity || 1) + add)
     cur.subtotal = fromFen(toFen(cur.unit_price) * cur.quantity)
     if (entry.no_member_discount != null) cur.no_member_discount = !!entry.no_member_discount

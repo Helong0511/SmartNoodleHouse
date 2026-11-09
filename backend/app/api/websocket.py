@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -181,6 +182,7 @@ async def websocket_endpoint(
     role = None
     is_super = False
     user_key: str | None = None
+    customer_id: int | None = None
 
     if channel == "display":
         if not store_id or int(store_id) <= 0:
@@ -198,25 +200,31 @@ async def websocket_endpoint(
             await websocket.close(code=4403, reason="本店未开通大厅叫号屏")
             return
         global_token = (settings.display_screen_token or "").strip()
-        # P2-2 优先使用门店级 display token（store_settings），降级到全局 token
-        expected = global_token
+        # 生产环境必须使用本门店独立令牌；不允许用一个全局 token 订阅任意门店。
+        expected = ""
         try:
-            from app.services.system_settings_service import SystemSettingsService
+            from app.models import StoreSetting
 
             async with AsyncSessionLocal() as db:
-                store_tok = await SystemSettingsService.effective_setting(
-                    db, "display_screen_token", store_id=int(store_id), fallback=global_token
+                store_tok = await db.scalar(
+                    select(StoreSetting.setting_value).where(
+                        StoreSetting.store_id == int(store_id),
+                        StoreSetting.setting_key == "display_screen_token",
+                    )
                 )
-                expected = (store_tok or "").strip() or global_token
+            expected = (store_tok or "").strip()
         except Exception:
-            pass
-        # 生产强制（与 startup_checks 一致）；开发可空
+            # 数据库不可用时生产必须拒绝；不能降级为全局令牌或匿名连接。
+            expected = ""
+        if not expected and settings.is_development:
+            # 全局环境变量仅作为本地开发便利回退，不用于生产门店鉴权。
+            expected = global_token
         if settings.is_production and not expected:
-            await websocket.close(code=4401, reason="未配置 DISPLAY_SCREEN_TOKEN")
+            await websocket.close(code=4401, reason="本门店未配置独立叫号屏令牌")
             return
         if expected:
             supplied = (auth_token or "").strip()
-            if supplied != expected:
+            if not hmac.compare_digest(supplied, expected):
                 await websocket.close(code=4401, reason="无效令牌")
                 return
             if _looks_like_jwt(supplied):
@@ -242,6 +250,11 @@ async def websocket_endpoint(
             ws_manager.disconnect("display", websocket)
         return
 
+    if channel not in PROTECTED_CHANNELS:
+        # 未明确列入受保护白名单的频道一律拒绝，新增频道不会意外匿名开放。
+        await websocket.close(code=4403, reason="未知或未授权频道")
+        return
+
     if channel in PROTECTED_CHANNELS:
         if not auth_token:
             await websocket.close(code=4401, reason="未登录")
@@ -259,6 +272,7 @@ async def websocket_endpoint(
                         await websocket.close(code=4401, reason="无效令牌")
                         return
                     user_key = f"customer:{customer.id}"
+                    customer_id = int(customer.id)
                 elif typ != "staff":
                     await websocket.close(code=4401, reason="无效令牌类型")
                     return
@@ -299,6 +313,7 @@ async def websocket_endpoint(
             store_id=effective_store,
             is_super_admin=is_super and effective_store is None,
             user_key=user_key,
+            customer_id=customer_id,
         )
     except PermissionError as e:
         await websocket.close(code=4429, reason=str(e)[:120])

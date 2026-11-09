@@ -108,6 +108,7 @@ import {
   checkCategoryRequire,
   collectOptionIds,
   mergeCartItem,
+  readCartStorage,
 } from '@/utils/cart'
 
 const route = useRoute()
@@ -118,7 +119,7 @@ const showProduct = ref(false)
 const currentProduct = ref<any>(null)
 const selectedOptions = reactive<Record<number, number>>({})
 const multiOptions = reactive<Record<number, number[]>>({})
-const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
+const cart = ref<any[]>(readCartStorage())
 const thumbPx = ref(thumbSizePx())
 const heroHeight = ref(Math.min(typeof window !== 'undefined' ? window.innerWidth : 375, 480))
 

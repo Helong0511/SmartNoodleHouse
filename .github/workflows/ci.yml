@@ -438,6 +438,10 @@ jobs:
             echo "Checking $file"
             node --check --input-type=module < "$file"
           done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
+      - name: Verify mini-program release environment fails closed
+        run: node scripts/test_miniprogram_env_fail_closed.cjs
+      - name: Verify Alipay privacy consent fails closed when platform APIs are absent
+        run: node scripts/test_alipay_privacy_fail_closed.cjs
 
   rust-ad-tracking:
     name: rust-ad-tracking (${{ matrix.toolchain }})

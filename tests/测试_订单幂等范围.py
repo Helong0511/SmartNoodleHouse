@@ -156,3 +156,24 @@ async def test_http_create_order_returns_40903_envelope():
         assert body.get("data") is None
     finally:
         app.dependency_overrides.clear()
+
+
+def test_long_idempotency_keys_hash_full_scope_without_truncation():
+    """超长幂等键把完整 scope 纳入 256-bit 摘要，不截断摘要位数。"""
+    raw = "k" * 512
+    values = [
+        OrderCreateService._scoped_idempotency_key(
+            raw, channel="WECHAT", customer_id=1, store_id=10, operator_id=None
+        ),
+        OrderCreateService._scoped_idempotency_key(
+            raw, channel="WECHAT", customer_id=2, store_id=10, operator_id=None
+        ),
+        OrderCreateService._scoped_idempotency_key(
+            raw, channel="POS", customer_id=None, store_id=3, operator_id=9
+        ),
+        OrderCreateService._scoped_idempotency_key(
+            raw, channel="POS", customer_id=None, store_id=3, operator_id=10
+        ),
+    ]
+    assert all(len(value) == 64 for value in values)
+    assert len(set(values)) == len(values)

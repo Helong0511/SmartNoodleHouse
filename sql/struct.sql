@@ -1,5 +1,5 @@
--- 删除数据库
-DROP DATABASE IF EXISTS `smart_noodle_house`;
+-- 安全说明：本脚本不删除现有数据库，避免误操作造成生产数据丢失。
+-- 全新环境请先确认目标库为空；已有库升级必须使用 Alembic，不要重放初始化种子。
 -- 创建数据库
 CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- 切换数据库

@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import List
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,7 +23,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: str = "development"
+    # 默认按生产环境执行；只有显式 development/dev/local 才开放开发能力。
+    app_env: str = "production"
     app_name: str = "SmartNoodleHouse"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
@@ -214,16 +216,57 @@ class Settings(BaseSettings):
     dev_lan_host: str = ""
     # 桌台码跳转小程序版本：develop | trial | release；留空则 development→develop，production→release
     mini_program_env_version: str = ""
-    # 顾客叫号屏访问令牌（留空=不校验；生产建议设置后写入屏端 URL ?token=）
+    # 顾客叫号屏全局开发回退令牌；生产必须在每家门店设置独立 display_screen_token。
     display_screen_token: str = ""
 
-    @property
-    def is_production(self) -> bool:
-        return self.app_env.lower() in ("production", "prod")
+    def _has_production_markers(self) -> bool:
+        """即使 APP_ENV 误写为开发，也不能让远程依赖或正式商户凭据降级安全策略。"""
+        for endpoint in (self.database_url, self.redis_url):
+            raw = str(endpoint or "").strip()
+            if not raw:
+                continue
+            try:
+                host = urlparse(raw).hostname
+            except ValueError:
+                return True
+            if not host:
+                continue
+            normalized = host.strip("[]").rstrip(".").lower()
+            if normalized == "localhost" or normalized.endswith(".localhost"):
+                continue
+            try:
+                import ipaddress
+
+                if ipaddress.ip_address(normalized).is_loopback:
+                    continue
+            except ValueError:
+                # 非 IP 主机名（例如远程数据库域名）按生产依赖处理。
+                pass
+            return True
+
+        has_wechat_merchant = all(
+            str(value or "").strip()
+            for value in (self.wechat_mch_id, self.wechat_api_v3_key, self.wechat_cert_serial_no)
+        )
+        has_alipay_merchant = all(
+            str(value or "").strip()
+            for value in (self.alipay_app_id, self.alipay_private_key, self.alipay_public_key)
+        )
+        has_delivery_credentials = (
+            bool(self.meituan_app_id and self.meituan_app_secret and self.meituan_shop_id)
+            or bool(self.eleme_app_id and self.eleme_app_secret and self.eleme_shop_id)
+        )
+        return has_wechat_merchant or has_alipay_merchant or has_delivery_credentials
 
     @property
     def is_development(self) -> bool:
-        return self.app_env.lower() in ("development", "dev", "local")
+        # 仅显式本地开发且无生产哨兵时放宽；未知环境、远程依赖和正式商户凭据一律 fail-closed。
+        explicit_dev = (self.app_env or "").strip().lower() in ("development", "dev", "local")
+        return explicit_dev and not self._has_production_markers()
+
+    @property
+    def is_production(self) -> bool:
+        return not self.is_development
 
     @property
     def resolved_mini_program_env_version(self) -> str:

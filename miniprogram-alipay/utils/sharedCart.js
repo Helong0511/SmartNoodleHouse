@@ -89,7 +89,6 @@ function applyPayload(payload) {
     product_id: it.product_id,
     name: it.name,
     quantity: it.quantity || 1,
-    unit_price: it.unit_price,
     subtotal: it.subtotal,
     option_ids: it.option_ids || [],
     option_text: it.option_text || '',
@@ -160,7 +159,6 @@ async function addItem(entry) {
     option_ids: entry.option_ids || [],
     option_text: entry.option_text || '',
     remark: entry.remark || '',
-    unit_price: entry.unit_price != null ? String(entry.unit_price) : undefined,
     expected_revision: _meta.revision || undefined
   }
   const res = await api.post('/miniprogram/table-party/cart/items', body)

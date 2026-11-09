@@ -1,4 +1,4 @@
-const { resolveApiBase } = require('../config/env')
+const { resolveApiBase, assertApiBaseConfigured } = require('../config/env')
 const { localizeNativeErrMsg } = require('./errMsg')
 
 const DEFAULT_API_BASE = resolveApiBase()
@@ -14,13 +14,14 @@ function getAppSafe() {
 /** 优先 globalData，否则用 config/env 默认值（Tab 页冷启动时 getApp 可能暂不可用） */
 function resolveBaseUrl() {
   const app = getAppSafe()
-  if (app && app.globalData) {
-    const configured = String(app.globalData.apiBase || '').trim()
-    if (configured) return configured
-    app.globalData.apiBase = DEFAULT_API_BASE
-    return DEFAULT_API_BASE
-  }
-  return DEFAULT_API_BASE
+  const configured = app && app.globalData
+    ? String(app.globalData.apiBase || '').trim()
+    : ''
+  const base = configured || DEFAULT_API_BASE
+  // 首次真实请求时校验；配置错误不会在 App 模块加载阶段造成白屏。
+  assertApiBaseConfigured(base)
+  if (app && app.globalData) app.globalData.apiBase = base
+  return base
 }
 
 function authHeader() {

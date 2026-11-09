@@ -20,16 +20,10 @@ router = APIRouter(prefix="/settings", tags=["系统设置"])
 
 
 def _mask_secret(value: str, *, show_tail: int = 0) -> str:
-    """生产侧仅显示「已配置」；开发可看尾部便于排查。"""
+    """任何环境都不回显密钥片段；仅返回是否已配置。"""
     if not value or not str(value).strip():
         return ""
-    s = str(value).strip()
-    settings = get_settings()
-    if settings.is_production or show_tail <= 0:
-        return "****已配置****"
-    if len(s) <= show_tail + 2:
-        return "****"
-    return s[:2] + "****" + s[-show_tail:]
+    return "****已配置****"
 
 
 def _mask_db_url(url: str) -> str:

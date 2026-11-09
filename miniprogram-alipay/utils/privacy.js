@@ -16,13 +16,44 @@ function clearPrivacySafetyTimer(app) {
   app.globalData.privacySafetyTimer = null
 }
 
+function hasPrivacyAgreed() {
+  try {
+    const stored = my.getStorageSync({ key: 'privacy_agreed_v1' })
+    const value = stored && Object.prototype.hasOwnProperty.call(stored, 'data')
+      ? stored.data
+      : stored
+    const timestamp = Number(value)
+    return value === true || (Number.isFinite(timestamp) && timestamp > 0)
+  } catch (_) {
+    return false
+  }
+}
+
 function setupPrivacy() {
-  if (!my.getPrivacySetting) return Promise.resolve({ needAuthorization: false })
+  // 平台接口缺失/调用失败时必须走自有隐私提示，不能把“无法检测”当作“已同意”。
+  if (!my.getPrivacySetting) return Promise.resolve({ needAuthorization: true, unsupported: true })
   return new Promise((resolve) => {
     my.getPrivacySetting({
-      success: (res) => resolve(res || { needAuthorization: false }),
-      fail: () => resolve({ needAuthorization: false })
+      success: (res) => resolve(res || { needAuthorization: true }),
+      fail: () => resolve({ needAuthorization: true, checkFailed: true })
     })
+  })
+}
+
+function ensurePrivacyConsent() {
+  if (hasPrivacyAgreed()) return Promise.resolve(true)
+  const app = getAppSafe()
+  if (!app || !app.globalData) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    app.globalData.privacyResolve = (payload) => {
+      resolve(!!(payload && payload.event === 'agree'))
+    }
+    app.globalData.needPrivacyPopup = true
+    clearPrivacySafetyTimer(app)
+    app.globalData.privacySafetyTimer = setTimeout(() => {
+      if (app.globalData.privacyResolve) finishPrivacyReject()
+    }, PRIVACY_RESOLVE_TIMEOUT_MS)
+    if (!tryShowPrivacyPopup()) showPrivacyPopup()
   })
 }
 
@@ -34,7 +65,12 @@ function onNeedPrivacyAuthorization(handler) {
 
 function openPrivacyContract() {
   if (!my.openPrivacyContract) {
-    my.showToast({ content: '请升级支付宝版本', type: 'none' })
+    my.showModal({
+      title: '查看隐私政策',
+      content: '当前支付宝版本未提供直接打开隐私政策的接口。请在支付宝小程序首页点击右上角“…”并查看“隐私保护指引”，阅读后再返回本页选择是否同意。',
+      showCancel: false,
+      confirmButtonText: '知道了'
+    })
     return Promise.resolve(false)
   }
   return new Promise((resolve) => {
@@ -159,6 +195,8 @@ function bindAppPrivacyHandler(app) {
 
 module.exports = {
   setupPrivacy,
+  hasPrivacyAgreed,
+  ensurePrivacyConsent,
   onNeedPrivacyAuthorization,
   openPrivacyContract,
   showPrivacyPopup,

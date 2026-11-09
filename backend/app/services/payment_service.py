@@ -36,19 +36,21 @@ logger = logging.getLogger(__name__)
 
 def _wechat_callback_receipt_identity(data: dict, parsed: dict) -> tuple[str, ...]:
     """构造稳定的微信通知身份；签名头 nonce 是每次 HTTP 请求随机值，不能用于回调幂等。"""
-    notification_id = str(data.get("id") or "").strip()
+    notification_id = str(data.get("id") or parsed.get("id") or "").strip()
+    event_type = str(data.get("event_type") or parsed.get("event_type") or "").strip().upper()
     if parsed.get("is_refund"):
+        # 微信通知 id 是官方稳定事件标识；success_time/create_time 不是幂等身份。
         return (
-            f"{notification_id}" if notification_id else "",
+            notification_id,
             str(parsed.get("refund_no") or data.get("out_refund_no") or "").strip(),
-            str(data.get("event_type") or parsed.get("refund_status") or "").strip().upper(),
-            str(data.get("success_time") or data.get("create_time") or "").strip(),
+            str(parsed.get("refund_id") or data.get("refund_id") or "").strip(),
+            event_type or str(parsed.get("refund_status") or "").strip().upper(),
         )
     return (
         notification_id,
         str(data.get("out_trade_no") or parsed.get("payment_no") or "").strip(),
         str(data.get("transaction_id") or parsed.get("provider_trade_no") or "").strip(),
-        str(data.get("event_type") or parsed.get("status") or "").strip().upper(),
+        event_type or str(parsed.get("status") or "").strip().upper(),
     )
 
 
@@ -79,6 +81,19 @@ def _validate_duplicate_paid_callback(provider_u: str, payment: Payment, parsed:
     stored_trade_no = str(getattr(payment, "provider_trade_no", "") or "").strip()
     if not callback_trade_no or not stored_trade_no or callback_trade_no != stored_trade_no:
         raise AppException(40302, "重复支付回调渠道交易号与原支付记录不匹配")
+
+
+def _require_provider_amount(pay_data: dict, expected_amount: Decimal) -> None:
+    """即时收款必须有渠道实际金额；缺失或不一致时禁止本地入账。"""
+    raw_amount = pay_data.get("provider_amount")
+    if raw_amount is None:
+        raise AppException(50041, "渠道支付结果缺少实际金额，无法安全确认收款")
+    try:
+        provider_amount = money(Decimal(str(raw_amount)))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise AppException(50041, "渠道支付金额格式非法，无法确认收款") from exc
+    if provider_amount != money(expected_amount):
+        raise AppException(50041, f"支付金额不一致：渠道 {provider_amount} ≠ 本地 {money(expected_amount)}")
 
 
 def _validate_refund_callback_binding(
@@ -718,10 +733,8 @@ class PaymentService:
                 logger.exception(
                     "财务分录 SALE 写入失败 payment_id=%s order_id=%s", payment.id, order.id
                 )
-                from app.core.config import get_settings
-
-                if get_settings().is_production:
-                    raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
+                # 资金确认与财务分录必须同事务成功；任何环境都不允许静默确认。
+                raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
 
         paid = await cls.paid_amount(db, order.id)
         remaining = money(order.total_amount) - paid
@@ -1008,24 +1021,13 @@ class PaymentService:
             pay_data["mock_settled"] = True
         elif pay_data.get("immediate_paid"):
             trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
-            # 金额必须与本地支付单一致，禁止仅因 SUCCESS 入账
-            raw_amt = pay_data.get("provider_amount")
-            if raw_amt is not None:
-                try:
-                    pa = money(Decimal(str(raw_amt)))
-                    if pa != money(payment.amount):
-                        payment.status = "UNKNOWN"
-                        await db.flush()
-                        raise AppException(
-                            50041,
-                            f"支付金额不一致：渠道 {pa} ≠ 本地 {money(payment.amount)}",
-                        )
-                except AppException:
-                    raise
-                except Exception:
-                    payment.status = "UNKNOWN"
-                    await db.flush()
-                    raise AppException(50041, "支付金额校验失败")
+            # 渠道实际金额必须存在且精确匹配；缺失时也不能按 SUCCESS 入账。
+            try:
+                _require_provider_amount(pay_data, payment.amount)
+            except AppException:
+                payment.status = "UNKNOWN"
+                await db.flush()
+                raise
             await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
             pay_data["status"] = "PAID"
         else:
@@ -1164,6 +1166,12 @@ class PaymentService:
             pay_data["mock_settled"] = True
         elif pay_data.get("immediate_paid"):
             trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
+            try:
+                _require_provider_amount(pay_data, payment.amount)
+            except AppException:
+                payment.status = "UNKNOWN"
+                await db.flush()
+                raise
             payment.provider_trade_no = str(trade_no or "")
             await cls._settle_recharge_payment(
                 db, payment=payment, recharge=recharge, provider=provider_u, source="RECHARGE_IMMEDIATE"
@@ -1183,8 +1191,10 @@ class PaymentService:
         provider_trade_no: str | None = None,
     ) -> dict:
         """充值支付成功：记 SALE（实付）、入账本金/赠送金、充值单 PAID。"""
-        if payment.status == "PAID" and recharge.status == "PAID":
-            return {"already_paid": True, "status": "PAID"}
+        if payment.status == "PAID" or recharge.status == "PAID":
+            if payment.status == "PAID" and recharge.status == "PAID":
+                return {"already_paid": True, "status": "PAID"}
+            raise AppException(50042, "充值支付与充值单状态不一致，已暂停重复入账，请人工核对")
 
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
@@ -1198,8 +1208,10 @@ class PaymentService:
             await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
         ).scalar_one()
         recharge, payment = locked_r, locked_p
-        if payment.status == "PAID" and recharge.status == "PAID":
-            return {"already_paid": True, "status": "PAID"}
+        if payment.status == "PAID" or recharge.status == "PAID":
+            if payment.status == "PAID" and recharge.status == "PAID":
+                return {"already_paid": True, "status": "PAID"}
+            raise AppException(50042, "充值支付与充值单状态不一致，已暂停重复入账，请人工核对")
 
         old_p = payment.status
         payment.status = "PAID"
@@ -1225,10 +1237,7 @@ class PaymentService:
             )
         except Exception as exc:
             logger.exception("充值财务 SALE 失败 payment_id=%s", payment.id)
-            from app.core.config import get_settings
-
-            if get_settings().is_production:
-                raise AppException(50010, "财务分录写入失败，充值未确认，请重试") from exc
+            raise AppException(50010, "财务分录写入失败，充值未确认，请重试") from exc
 
         await BalanceService.credit_topup(db, recharge=recharge, payment_id=payment.id)
         recharge.status = "PAID"
@@ -1653,6 +1662,10 @@ class PaymentService:
         provider: str,
     ) -> None:
         """开发 mock 支付：跳过真实收银台，直接标记支付单已支付。"""
+        from app.core.config import get_settings
+
+        if get_settings().is_production:
+            raise AppException(40301, "生产环境禁止执行 mock 支付结算", status_code=403)
         if payment.status == "PAID":
             return
         old_p = payment.status
@@ -1770,6 +1783,10 @@ class PaymentService:
             pay_amount = rounded
             if pay_amount <= 0:
                 raise AppException(40051, "抹零后金额非法")
+            # 抹零是门店承担的折让：同步更新订单应收与优惠金额，避免留下无法结清的分币差额。
+            order.discount_amount = money((order.discount_amount or Decimal("0")) + round_down_amount)
+            order.total_amount = money(order.total_amount - round_down_amount)
+            await db.flush()
 
         # 实收校验：至少覆盖本笔入账；找零由服务端计算且不得为负
         if received_amount is not None and money(received_amount) < pay_amount:
@@ -2467,10 +2484,7 @@ class PaymentService:
                         logger.exception(
                             "财务分录 REFUND 写入失败 refund_id=%s order_id=%s", row.id, order.id
                         )
-                        from app.core.config import get_settings
-
-                        if get_settings().is_production:
-                            raise AppException(50010, "财务分录写入失败，退款未确认，请重试") from exc
+                        raise AppException(50010, "财务分录写入失败，退款未确认，请重试") from exc
                 else:
                     # 余额支付退款：回补钱包，不记财务 REFUND（原支付未记 SALE）
                     if order.customer_id:
@@ -2942,6 +2956,17 @@ class PaymentService:
 
         query_status = str(result.get("status") or "PROCESSING").strip().upper()
         if query_status == "SUCCESS":
+            # SUCCESS 必须同时绑定本地退款单、原支付单和原渠道交易号；缺任一项都不能入账。
+            if (
+                not result_refund_no
+                or result_refund_no != str(refund.refund_no)
+                or not result_payment_no
+                or result_payment_no != str(payment.payment_no)
+                or not result_trade_no
+                or not local_trade_no
+                or result_trade_no != local_trade_no
+            ):
+                raise AppException(50302, "渠道退款查询缺少或不匹配完整退款/原支付身份，拒绝入账")
             if provider_u == "ALIPAY":
                 amount_raw = result.get("amount")
                 if amount_raw is None:
@@ -3182,6 +3207,7 @@ class PaymentService:
                                     "store_id": order.store_id if order else None,
                                     "source": "PAYMENT_POLL",
                                 },
+                                customer_id=int(order.customer_id) if order and order.customer_id else None,
                             )
                         except Exception as ws_err:
                             logger.warning("支付查单成功 WS 通知失败: %s", ws_err)
@@ -3334,10 +3360,8 @@ class PaymentService:
                     payment.payment_no,
                     e,
                 )
-                # 失败仍置本地 CLOSED，由 poll_pending_payments 兜底查单
-                await cls._close_pending_payment(
-                    db, payment, reason=f"关单撤销失败: {e}"[:200]
-                )
+                # 渠道状态未知时保持 PENDING；由 poll_pending_payments 重试查单/关单。
+                # 绝不能因网络异常把可能已扣款的交易本地标记 CLOSED。
         return late_paid
 
     @classmethod
@@ -3710,6 +3734,7 @@ class PaymentService:
                                     "refund_no": row.refund_no,
                                     "store_id": order.store_id if order else None,
                                 },
+                                customer_id=int(order.customer_id) if order and order.customer_id else None,
                             )
                         except Exception as ws_err:
                             logger.warning("退款成功 WS 通知失败: %s", ws_err)

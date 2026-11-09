@@ -10,7 +10,6 @@
       <button
         id="agree-btn"
         class="btn-agree"
-        open-type="agreePrivacyAuthorization"
         onAgreePrivacyAuthorization="onAgree"
       >同意</button>
     </view>

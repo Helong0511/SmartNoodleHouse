@@ -202,6 +202,32 @@ async def verify_flash_sale_claim(
     )
     await db.commit()
     if not result["already_verified"]:
+        # 免费核销订单已提交后通知 KDS/订单屏/顾客端；推送失败不回滚已核销订单。
+        try:
+            from app.services.websocket_manager import ws_manager
+
+            await ws_manager.notify_order_event(
+                "ORDER_CREATED",
+                {
+                    "id": int(result["order_id"]),
+                    "order_id": int(result["order_id"]),
+                    "order_no": str(result["order_no"]),
+                    "status": "PAID",
+                    "store_id": int(result["store_id"]),
+                    "table_id": None,
+                    "table_no": None,
+                    "dining_type": "TAKEAWAY",
+                    "total_amount": "0.00",
+                    "payment_method": "FREE",
+                },
+                customer_id=int(result["customer_id"]),
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger("app.flash_sale").warning(
+                "免费抢购订单 WS 通知失败 order_id=%s", result["order_id"], exc_info=True
+            )
         # 核销事务已提交后才允许播报；播报失败只记日志，不回滚核销
         await FlashSaleService.announce_verified(
             db,

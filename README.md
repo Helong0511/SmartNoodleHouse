@@ -60,20 +60,29 @@
 
 ## 数据库初始化与升级
 
-全新隔离环境初始化前，先检查 SQL 文件是否含清库操作，并确认目标数据库不是生产数据：
+**初始化 SQL 仅允许用于全新、隔离、确认无业务数据的空库。** `sql/data_sys.sql` 会对订单、支付、会员、财务等业务表执行 `TRUNCATE`；禁止对任何已有营业数据的数据库执行。执行前先完成并验证备份，并再次核对 MySQL 连接主机和目标库名。
+
+全新空库初始化：
 
 ```bash
+# 仅全新空库：struct.sql 创建数据库结构
 mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
+
+# data_sys.sql 有显式确认保护；必须选中目标库并设置本次连接确认标记
+mysql --database=smart_noodle_house --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
+mysql --database=smart_noodle_house -u root -p < sql/data_custom.sql
+
+# 管理员强密码通过安全渠道注入，不要写入脚本或文档
+export ADMIN_INITIAL_PASSWORD='通过安全渠道设置的强随机密码'
 python scripts/初始化管理员.py
+unset ADMIN_INITIAL_PASSWORD
 ```
 
-- sql/struct.sql：结构真源和 canonical schema。
-- sql/data_sys.sql：系统必要种子；包含清理/重建种子数据操作，必须确认目标库。
-- sql/data_custom.sql：门店经营种子。
-- sql/data_test.sql：仅测试环境。
-- 已有数据库升级使用 backend/Alembic 迁移；执行前备份并在隔离副本演练。禁止对生产库直接运行全新初始化脚本。
+- `sql/struct.sql`：全新空库结构初始化；不会删除数据库，但不替代已有库的 Alembic 迁移。
+- `sql/data_sys.sql`：**破坏性初始化种子**，包含全表 TRUNCATE；仅在全新空库执行，且必须显式设置确认标记。
+- `sql/data_custom.sql`：全新门店经营种子，仅用于初始化流程。
+- `sql/data_test.sql`：仅测试环境，禁止用于生产。
+- **已有数据库升级（包括生产营业库）只执行 Alembic 迁移**：`cd backend && alembic upgrade head`。迁移前必须完成备份，并在隔离副本演练；禁止重跑初始化 SQL 或重新灌入种子。
 
 ## 生产环境 MySQL / Redis 连接示例
 

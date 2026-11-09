@@ -232,6 +232,7 @@ function showStoreTag(o: any) {
 }
 
 let ws: WebSocket | null = null
+let disposed = false
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let ageTimer: ReturnType<typeof setInterval> | null = null
@@ -694,25 +695,28 @@ function stopPoll() {
 }
 
 function startPoll() {
-  if (pollTimer) return
+  if (disposed || pollTimer) return
   pollTimer = setInterval(() => load(), 8000)
   connStatus.value = 'polling'
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return
+  if (disposed || reconnectTimer) return
   const delay = Math.min(15000, 1000 * Math.pow(2, reconnectAttempt++))
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    connectWs()
+    if (!disposed) connectWs()
   }, delay)
 }
 
 function connectWs() {
-  try {
-    ws?.close()
-  } catch {
-    /* */
+  if (disposed) return
+  const previous = ws
+  ws = null
+  if (previous) {
+    // 主动替换连接时不允许旧连接 onclose 再创建一条重连链。
+    previous.onclose = null
+    try { previous.close() } catch { /* */ }
   }
   connStatus.value = 'connecting'
   const params: Record<string, string> = {}
@@ -727,6 +731,7 @@ function connectWs() {
     stopPoll()
   }
   ws.onmessage = async (ev) => {
+    if (disposed) return
     let event = ''
     let data: Record<string, any> = {}
     try {
@@ -741,9 +746,11 @@ function connectWs() {
     tryAlertFromWsEvent(event, data, beforeIds)
   }
   ws.onerror = () => {
+    if (disposed) return
     connStatus.value = 'offline'
   }
   ws.onclose = () => {
+    if (disposed) return
     connStatus.value = 'offline'
     startPoll()
     scheduleReconnect()
@@ -785,6 +792,7 @@ function tickClock() {
 let unbindVoice: (() => void) | null = null
 
 onMounted(async () => {
+  disposed = false
   if (standalone.value) document.title = '厨房 KDS'
   voiceUnlocked.value = isVoiceUnlocked()
   unbindVoice = bindAutoVoiceUnlock((ok) => {
@@ -806,6 +814,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   unbindVoice?.()
   ws?.close()
   stopPoll()

@@ -11,7 +11,7 @@ class OrderItemCreate(BaseModel):
 
     product_id: int
     quantity: int = Field(ge=1, le=MAX_ORDER_ITEM_QUANTITY)
-    option_ids: list[int] = []
+    option_ids: list[int] = Field(default_factory=list, max_length=20)
     remark: str | None = Field(default=None, max_length=200)
 
 
@@ -23,7 +23,7 @@ class OrderCreate(BaseModel):
     store_id: int | None = None
     table_token: str | None = Field(default=None, max_length=64, description="扫码桌台凭证（对应 DiningTable.qr_token）")
     customer_id: int | None = None
-    items: list[OrderItemCreate] = Field(..., min_length=1)
+    items: list[OrderItemCreate] = Field(..., min_length=1, max_length=100)
     remark: str | None = Field(default=None, max_length=500)
     channel: str | None = Field(default=None, max_length=32)
     # 堂食默认；打包外带时计餐品餐盒费 box_price
@@ -72,7 +72,7 @@ class PosOrderCreate(BaseModel):
     store_id: int | None = None
     table_id: int | None = Field(default=None, description="堂食必选桌台 ID")
     customer_id: int | None = Field(default=None, description="可选：绑定会员后计折扣/积分/里程碑")
-    items: list[OrderItemCreate] = Field(..., min_length=1)
+    items: list[OrderItemCreate] = Field(..., min_length=1, max_length=100)
     remark: str | None = Field(default=None, max_length=500)
     need_pack: bool = False
     dining_type: str | None = Field(
@@ -104,7 +104,7 @@ class PosAddItems(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[OrderItemCreate] = Field(..., min_length=1)
+    items: list[OrderItemCreate] = Field(..., min_length=1, max_length=100)
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128, description="加菜幂等键")
 
 
