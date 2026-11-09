@@ -178,3 +178,23 @@
 - 2026-09-29 全量测试结果：**791 passed, 8 skipped, 0 failed**（8 skipped 为真实 MySQL/Redis/平台凭证依赖，非隐藏失败），见 [TEST_REPORT.md](file:///e:/SmartNoodleHouse/docs/audit/TEST_REPORT.md)。
 - 后续如运行测试发现失败项，将立即新增条目并按优先级修复；不得通过放宽断言/跳过验签宣称通过。
 - 新发现的真实问题（非伪问题）随时纳入台账；外部依赖阻塞项见 BLK-001~005 与 [REMAINING_ISSUES.md](file:///e:/SmartNoodleHouse/docs/audit/REMAINING_ISSUES.md)。
+
+---
+
+## 2026-11-09 增量审计闭环记录
+
+本节只记录本轮新增或重新核验的事项；前文 2026-09 历史状态不自动代表当前 commit 已重新验收。
+
+| 编号 | 模块 | 优先级 | 本轮处理 | 关联证据 | 状态 |
+|---|---|---|---|---|---|
+| T-609 | POS 退款执行 fencing | P0 | 数据库 owner token + 单调 epoch + 租约；首笔退款单绑定前校验；旧 worker 无法创建退款或覆盖新执行者状态 | pos_refund_service.py、payment_service.py、0051_pos_refund_execution_fencing.py、测试_POS退款.py、测试_支付同步.py | 已修复+CI通过 |
+| T-610 | POS 组合支付退款累计 | P1 | 同一 POS 申请跨现金/微信等多笔退款复用同一 fencing claim；按成功退款单累计并幂等收敛 | 测试_POS退款.py mixed-payment regression | 已修复+CI通过 |
+| T-611 | Redis 推荐缓存 generation fencing | P1 | 真实 Redis 7.4 验证 owner 锁、旧 owner 拒绝写回、generation 失效和旧代际拒绝 | 测试_Redis真实服务集成.py | 已修复+CI通过 |
+| T-612 | 充值幂等键被档位切换覆盖 | P2 | 微信/支付宝改为顾客/档位/门店多 key 映射；成功只清当前 key；storage 读写故障 fail-closed | 双端 utils/rechargeIdempotency.js、scripts/test_recharge_idempotency_cache.cjs | 已修复+CI通过 |
+| T-613 | 支付主动查单 Redis 冷却异常 | P2 | Redis 瞬时断连时明确返回 503，保留 fail-closed 限流策略 | api/payments.py、测试_支付同步.py | 已修复+CI通过 |
+| T-614 | 普通请求体缺少全局 ASGI 上限 | P1 | 注册 7MiB 全局 RequestBodyLimitMiddleware；webhook 保留更严格 512KiB | main.py、request_body_limit.py、test_request_body_limit.py | 已修复+CI通过 |
+| T-615 | 审查报告状态过时 | P2 | 重新读取当前代码，标记已修复项、外部阻塞项和人脸基础挑战边界 | 代码审查报告_2026-11-08.md、小程序专项审查报告_2026-11-08.md | 已更新 |
+
+### 本轮 CI 证据
+
+代码提交 443c1e201212cb6044ebea5038b359e439a18ebd 对应 Actions run 42590160163：12/12 jobs success；后端 2020 passed、16 skipped，覆盖率 60.35%。这不是生产环境验收；外部平台和运维阻塞项见 REMAINING_ISSUES.md。

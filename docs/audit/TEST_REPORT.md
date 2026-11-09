@@ -185,3 +185,23 @@ python -m pytest tests/ -q --tb=line --no-header
 ## 10. 结论
 
 以上 **791 passed / 8 skipped / 0 failed** 仅为 2026-09-29 的历史 SQLite 测试记录。后续 CI 已加入 MySQL 8、Redis 7、前端构建/测试和依赖安全审计；当前 main 的实际通过情况必须按对应 commit 的 Actions 检查读取。生产沙箱联调、生产 schema 演练、备份恢复、告警接入与全链路容量验收仍属外部上线阻塞项。
+
+---
+
+## 2026-11-09 GitHub Actions 代码增量验证
+
+### 本轮代码提交
+
+- SHA：443c1e201212cb6044ebea5038b359e439a18ebd
+- Actions run：42590160163
+- 结果：12/12 jobs success
+- 后端：2020 passed, 16 skipped in 678.90s
+- 覆盖率：60.35%（CI 门槛 35%）
+- 双端小程序：JS 语法、正式环境 fail-closed、订阅授权手势、支付宝隐私 API fail-closed，以及充值幂等 A→B→A / 精确清理 / TTL / storage failure 专项测试通过。
+- MySQL 8：空库 Alembic upgrade、downgrade 再 upgrade、schema/字符集检查通过。
+- Redis 7.4：真实 Lua owner 锁、generation fencing、失效和旧缓存拒绝测试通过。
+- 其他：前端 Node 24/26 构建、依赖锁一致性、Python/Rust 依赖安全审计、Windows Rust DLL 构建通过。
+
+### 结果边界
+
+以上结果只证明该 SHA 在 CI 环境中的自动化验证通过。16 个 skipped 仍须结合测试名称确认其是否为外部平台/真实凭证依赖；生产 MySQL 现有数据迁移、微信/支付宝官方沙箱、外卖平台回调、备份恢复、监控告警和预生产容量压测仍需人工验收。后续文档-only 提交也必须查看最新 PR head 的 Actions，不能沿用旧 SHA 的绿灯。
