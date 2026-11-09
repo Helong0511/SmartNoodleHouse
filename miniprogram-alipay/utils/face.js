@@ -4,6 +4,7 @@ const api = require('./api')
 const auth = require('./auth')
 const { appendDevApiHint, resolveApiBase } = require('../config/env')
 const clientConfig = require('./clientConfig')
+const privacy = require('./privacy')
 
 function friendlyNetError(err) {
   const raw = String((err && err.message) || err || '')
@@ -72,6 +73,9 @@ function takeFrontCameraBase64() {
  * 开启人脸迎宾：challenge → 引导动作 → 前置摄像头 → 提交授权
  */
 async function enrollFaceWelcome() {
+  if (!(await privacy.ensurePrivacyConsent())) {
+    throw new Error('请先阅读并同意隐私政策，再开启人脸迎宾')
+  }
   await clientConfig.loadClientConfig()
   if (!clientConfig.isFaceWelcomeEnabled()) {
     throw new Error('人脸迎宾功能未开启')
