@@ -22,7 +22,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: str = "development"
+    # 默认按生产环境执行；只有显式 development/dev/local 才开放开发能力。
+    app_env: str = "production"
     app_name: str = "SmartNoodleHouse"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
@@ -218,12 +219,13 @@ class Settings(BaseSettings):
     display_screen_token: str = ""
 
     @property
-    def is_production(self) -> bool:
-        return self.app_env.lower() in ("production", "prod")
+    def is_development(self) -> bool:
+        # 仅显式开发环境可放宽；空值、拼写错误和 staging 一律按生产处理。
+        return (self.app_env or "").strip().lower() in ("development", "dev", "local")
 
     @property
-    def is_development(self) -> bool:
-        return self.app_env.lower() in ("development", "dev", "local")
+    def is_production(self) -> bool:
+        return not self.is_development
 
     @property
     def resolved_mini_program_env_version(self) -> str:
