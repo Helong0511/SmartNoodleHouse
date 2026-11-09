@@ -683,3 +683,34 @@ async def test_remaining_amount_can_use_current_locked_payment_and_refund_facts(
 
     assert remaining == Decimal("13.00")
     paid.assert_awaited_once_with(db, 91, current_read=True)
+
+
+@pytest.mark.asyncio
+async def test_immediate_settlement_does_not_repeat_when_callback_already_paid(monkeypatch):
+    stale_payment = SimpleNamespace(id=101, order_id=102, status="PENDING")
+    current_payment = SimpleNamespace(id=101, order_id=102, status="PAID")
+    current_order = SimpleNamespace(id=102, status="PAID", order_no="O102")
+    lock = AsyncMock(return_value=current_payment)
+    monkeypatch.setattr(PaymentService, "_lock_order_then_payment", lock)
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = current_order
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=order_result)
+
+    with patch(
+        "app.services.payment_service.record_payment_status", new_callable=AsyncMock
+    ) as record, patch.object(
+        PaymentService, "_finalize_tender", new_callable=AsyncMock
+    ) as finalize:
+        await PaymentService._settle_immediate_payment(
+            db, stale_payment, SimpleNamespace(id=102), "WECHAT", "wx_trade_102"
+        )
+
+    lock.assert_awaited_once_with(db, 101)
+    record.assert_not_awaited()
+    finalize.assert_not_awaited()
+    assert stale_payment.status == "PENDING"
+    assert current_payment.status == "PAID"
+    stmt = db.execute.await_args.args[0]
+    assert stmt._for_update_arg is not None
+    assert stmt.get_execution_options().get("populate_existing") is True
