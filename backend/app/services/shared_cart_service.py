@@ -411,6 +411,66 @@ class SharedCartService:
         return await SharedCartService.cart_payload(db, party=party, viewer_id=int(customer.id))
 
     @staticmethod
+    async def validate_checkout(
+        db: AsyncSession,
+        *,
+        store_id: int,
+        table_id: int,
+        customer_id: int,
+        party_id: int | None,
+        expected_revision: int | None,
+        items: list[dict],
+    ) -> None:
+        """下单前锁定共享车并核对 revision 与完整餐品快照，防止过期/伪造结算。"""
+        if not party_id or expected_revision is None:
+            raise AppException(40920, "共享购物车版本缺失，请刷新同桌购物车后再结算", status_code=409)
+        party = await SharedCartService.get_open_party(
+            db, store_id=int(store_id), table_id=int(table_id)
+        )
+        if not party or int(party.id) != int(party_id):
+            raise AppException(40920, "共享购物车已变化，请刷新后重新结算", status_code=409)
+        party = await SharedCartService._lock_party(db, int(party.id))
+        SharedCartService._check_revision(party, expected_revision)
+        await SharedCartService._require_member(
+            db, party=party, customer_id=int(customer_id)
+        )
+
+        rows = (
+            await db.execute(
+                select(SharedCartItem)
+                .where(SharedCartItem.party_id == int(party.id))
+                .order_by(SharedCartItem.id.asc())
+            )
+        ).scalars().all()
+
+        def signature(item: dict | SharedCartItem) -> tuple:
+            if isinstance(item, dict):
+                product_id = item.get("product_id")
+                quantity = item.get("quantity")
+                option_ids = item.get("option_ids") or []
+                remark = item.get("remark")
+            else:
+                product_id = item.product_id
+                quantity = item.quantity
+                option_ids = item.option_ids or []
+                remark = item.remark
+            return (
+                int(product_id or 0),
+                int(quantity or 0),
+                tuple(sorted(int(value) for value in option_ids)),
+                str(remark or ""),
+            )
+
+        shared_signatures = sorted(signature(row) for row in rows)
+        submitted_signatures = sorted(signature(item) for item in items)
+        if shared_signatures != submitted_signatures:
+            raise AppException(
+                40921,
+                "提交的餐品与同桌共享购物车不一致，请刷新后重新结算",
+                status_code=409,
+            )
+
+    @staticmethod
     async def add_item(
         db: AsyncSession,
         *,
