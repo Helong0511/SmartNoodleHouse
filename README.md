@@ -49,7 +49,7 @@
 ```bash
 # 仅全新空库：执行前请确认目标库中没有任何需要保留的数据
 mysql -u root -p < sql/struct.sql
-mysql --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
+mysql --database=smart_noodle_house --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
 mysql -u root -p < sql/data_custom.sql
 
 # 初始化管理员密码通过环境变量提供，不要把真实密码写入命令历史或文档
@@ -417,17 +417,21 @@ FLUSH PRIVILEGES;
 sudo systemctl enable redis-server && sudo systemctl start redis-server
 ```
 
-**生产**按顺序执行（勿执行 `sql/data_test.sql`）：
+**仅全新空库初始化**按顺序执行（严禁用于已有营业库；勿执行 `sql/data_test.sql`）：
 
 ```bash
 cd /var/www/smart-noodle
+# 仅用于新建的空库；已有数据库升级只执行 backend 中的 Alembic 迁移
 mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data_sys.sql
-mysql -u root -p < sql/data_custom.sql
+mysql --database=smart_noodle_house --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
+mysql --database=smart_noodle_house -u root -p < sql/data_custom.sql
 
-export ADMIN_INITIAL_PASSWORD='超管强密码'
+export ADMIN_INITIAL_PASSWORD='通过安全渠道设置的强随机密码'
 python3 scripts/初始化管理员.py
+unset ADMIN_INITIAL_PASSWORD
 ```
+
+已有数据库（包括生产营业库）禁止执行上述初始化 SQL 或重灌种子；完成并验证备份后，只执行 `cd backend && alembic upgrade head`。
 
 ### 三、部署代码与后端 `.env`
 
