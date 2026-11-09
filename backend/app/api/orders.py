@@ -83,14 +83,20 @@ async def create_order(
     try:
         from app.services.shared_cart_service import SharedCartService
 
-        await SharedCartService.clear_after_order(
-            db,
-            store_id=int(order.store_id),
-            table_id=int(order.table_id) if order.table_id else None,
-            customer_id=int(customer.id),
-        )
+        # 共享草稿清理使用 savepoint；失败只回滚清理动作，不影响已经创建的订单。
+        async with db.begin_nested():
+            await SharedCartService.clear_after_order(
+                db,
+                store_id=int(order.store_id),
+                table_id=int(order.table_id) if order.table_id else None,
+                customer_id=int(customer.id),
+            )
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("app.order").warning(
+            "订单已创建但共享购物车清理失败 order_id=%s", order.id, exc_info=True
+        )
     await db.commit()
     try:
         await ws_manager.notify_order_event(
