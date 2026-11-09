@@ -227,6 +227,8 @@ class OrderCreateService:
         operator_id: int | None = None,
         skip_promotions: bool = False,
         scheduled_pickup_at: str | None = None,
+        shared_cart_party_id: int | None = None,
+        shared_cart_revision: int | None = None,
         use_social_benefit: bool = False,
         social_rule_id: int | None = None,
     ) -> Order:
@@ -292,6 +294,21 @@ class OrderCreateService:
                     raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                 await OrderCreateService._assert_idempotent_order_items_match(db, order, items)
                 return order
+
+        # 同桌共享购物车启用时，必须锁定 party 并校验版本与餐品快照。
+        if table_id and (channel or "").strip().upper() in ("WECHAT", "ALIPAY"):
+            from app.services.shared_cart_service import SharedCartService, is_takeaway_table
+
+            if not is_takeaway_table(table) and await SharedCartService.is_enabled(db, int(store_id)):
+                await SharedCartService.validate_checkout(
+                    db,
+                    store_id=int(store_id),
+                    table_id=int(table_id),
+                    customer_id=int(customer_id),
+                    party_id=shared_cart_party_id,
+                    expected_revision=shared_cart_revision,
+                    items=items,
+                )
 
         dtype = (dining_type or "").strip().upper()
         if dtype not in ("DINE_IN", "TAKEAWAY"):
