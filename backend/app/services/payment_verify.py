@@ -194,6 +194,8 @@ class WechatPayVerifier:
             ):
                 raise ValueError("微信退款回调币种必须为 CNY")
         return {
+            # 微信外层通知 id 是稳定的官方通知身份，供 DB/Redis 幂等键使用。
+            "id": data.get("id"),
             "event_type": event_type,
             "out_trade_no": inner.get("out_trade_no"),
             "transaction_id": inner.get("transaction_id"),
