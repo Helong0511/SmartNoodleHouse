@@ -148,7 +148,7 @@ async def test_verify_liveness_challenge_success():
             face_liveness_mode="challenge", face_liveness_challenge_timeout=30
         ),
     ):
-        ok = await verify_liveness_challenge("valid_token", action_completed=True)
+        ok = await verify_liveness_challenge("valid_token", action_completed=True, claimed_action="blink", customer_id=1)
     assert ok is True
     fake_redis.eval.assert_awaited_once()
 
