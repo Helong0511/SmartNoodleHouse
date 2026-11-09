@@ -3,20 +3,19 @@
 /** 金额 → 分（整数），避免 float 累加误差 */
 function toFen(v) {
   if (v == null || v === '') return 0
-  if (typeof v === 'number') {
-    if (!Number.isFinite(v)) return 0
-    return Math.round(v * 100)
-  }
   const s = String(v).trim().replace(/,/g, '')
-  const m = s.match(/^([+-]?)(\d+)(?:\.(\d*))?$/)
+  const m = s.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?$/)
   if (!m) {
     const n = Number(s)
     return Number.isFinite(n) ? Math.round(n * 100) : 0
   }
   const sign = m[1] === '-' ? -1 : 1
   const yuan = parseInt(m[2], 10) || 0
-  const frac = (m[3] || '').padEnd(2, '0').slice(0, 2)
-  return sign * (yuan * 100 + (parseInt(frac, 10) || 0))
+  const fraction = m[3] || ''
+  const cents = parseInt(fraction.padEnd(2, '0').slice(0, 2), 10) || 0
+  // 字符串与数字统一按第三位小数四舍五入，避免 "0.005" 被截断成 0 分。
+  const roundUp = fraction.length > 2 && fraction.charAt(2) >= '5' ? 1 : 0
+  return sign * (yuan * 100 + cents + roundUp)
 }
 
 function fromFen(fen) {
