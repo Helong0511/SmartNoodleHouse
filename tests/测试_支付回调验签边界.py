@@ -350,11 +350,14 @@ def test_refund_callback_rejects_payment_without_order_binding():
         _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
 
 
-def test_refund_callback_allows_non_order_recharge_when_both_order_ids_are_null():
+def test_refund_callback_rejects_non_order_recharge_when_both_order_ids_are_null():
+    # 当前 PaymentRefund.order_id 为 NOT NULL，且退款服务要求先取得真实订单；
+    # 充值退款尚未实现，两个关联均为空不能被当成合法回调绑定。
     payment, refund, parsed = _refund_binding_objects()
     payment.order_id = None
     refund.order_id = None
-    _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+    with pytest.raises(AppException, match="必须绑定有效订单"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
 
 
 def test_refund_callback_rejects_cross_order_refund_record():
