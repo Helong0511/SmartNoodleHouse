@@ -180,6 +180,7 @@ watch(soundOn, (on) => {
 const voiceUnlocked = ref(isVoiceUnlocked())
 
 let ws: WebSocket | null = null
+let disposed = false
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -409,7 +410,7 @@ function tickReadyRemind() {
 }
 
 async function load() {
-  if (!storeId.value) return
+  if (disposed || !storeId.value) return
   try {
     const res = await publicApi.get('/orders/display/active', { params: displayParams() })
     featureDisabled.value = false
@@ -455,26 +456,27 @@ function stopPoll() {
 }
 
 function startPoll() {
-  if (pollTimer) return
+  if (disposed || pollTimer) return
   pollTimer = setInterval(() => load(), 8000)
   connStatus.value = 'polling'
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return
+  if (disposed || reconnectTimer) return
   const delay = Math.min(15000, 1000 * 2 ** reconnectAttempt++)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    connectWs()
+    if (!disposed) connectWs()
   }, delay)
 }
 
 function connectWs() {
-  if (!storeId.value) return
-  try {
-    ws?.close()
-  } catch {
-    /* */
+  if (disposed || !storeId.value) return
+  const previous = ws
+  ws = null
+  if (previous) {
+    previous.onclose = null
+    try { previous.close() } catch { /* */ }
   }
   connStatus.value = 'connecting'
   const params: Record<string, string | number> = { store_id: storeId.value }
@@ -486,11 +488,15 @@ function connectWs() {
     connStatus.value = 'online'
     stopPoll()
   }
-  ws.onmessage = () => load()
+  ws.onmessage = () => {
+    if (!disposed) void load()
+  }
   ws.onerror = () => {
+    if (disposed) return
     connStatus.value = 'offline'
   }
   ws.onclose = () => {
+    if (disposed) return
     connStatus.value = 'offline'
     startPoll()
     scheduleReconnect()
@@ -532,6 +538,7 @@ function tickClock() {
 let unbindVoice: (() => void) | null = null
 
 onMounted(async () => {
+  disposed = false
   unbindVoice = bindAutoVoiceUnlock((ok) => {
     if (ok) voiceUnlocked.value = true
   })
@@ -549,6 +556,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   unbindVoice?.()
   stopPoll()
   for (const id of overdueTimers.keys()) clearOverdueTimer(id)
