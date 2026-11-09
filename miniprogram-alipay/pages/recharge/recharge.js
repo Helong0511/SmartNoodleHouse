@@ -15,7 +15,11 @@ function getRechargeIdempotencyKey(packageId, storeId) {
     if (value && value.signature === signature && Date.now() - value.createdAt < RECHARGE_IDEMPOTENCY_TTL) return value.key
   } catch (_) {}
   const key = `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-  try { my.setStorageSync({ key: RECHARGE_IDEMPOTENCY_KEY, data: { signature, key, createdAt: Date.now() } }) } catch (_) {}
+  try {
+    my.setStorageSync({ key: RECHARGE_IDEMPOTENCY_KEY, data: { signature, key, createdAt: Date.now() } })
+  } catch (error) {
+    throw new Error('无法保存充值幂等凭证，已阻止重复充值风险')
+  }
   return key
 }
 
