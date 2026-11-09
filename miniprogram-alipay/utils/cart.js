@@ -4,7 +4,7 @@
 function toFen(v) {
   if (v == null || v === '') return 0
   const s = String(v).trim().replace(/,/g, '')
-  const m = s.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?$/)
+  const m = s.match(/^([+-]?)(\d+)(?:\.(\d*))?$/)
   if (!m) {
     const n = Number(s)
     return Number.isFinite(n) ? Math.round(n * 100) : 0
