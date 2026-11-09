@@ -172,7 +172,7 @@ Page({
     const cart = auth.getCart() || []
     return cart.map((c) => {
       const opts = (c.option_ids || []).slice().map(String).sort().join('.')
-      return `${c.product_id}x${c.quantity || 1}:${opts}`
+      return `${c.product_id}x${c.quantity || 1}:${opts}:${String(c.remark || '')}`
     }).sort().join('|')
   },
 
@@ -1372,6 +1372,8 @@ Page({
         return
       }
       await auth.ensureLogin()
+      const sharedCart = require('../../utils/sharedCart')
+      const sharedMeta = sharedCart.isActive() ? sharedCart.getMeta() : {}
       const order = await api.post('/orders', {
         store_id: this.submitStoreId(),
         table_token: tableToken,
@@ -1381,6 +1383,8 @@ Page({
         remark: remarkText,
         scheduled_pickup_at: this._scheduledPickupIso() || undefined,
         idempotency_key: this.makeIdempotencyKey(cart),
+        shared_cart_party_id: sharedMeta.party_id || undefined,
+        shared_cart_revision: sharedMeta.revision || undefined,
         skip_promotions: this.data.payMethod === 'BALANCE',
         use_social_benefit: this.data.payMethod !== 'BALANCE' && !!this.data.useSocialBenefit,
         customer_coupon_id: (this.data.payMethod === 'BALANCE' || this.data.useSocialBenefit)
@@ -1392,7 +1396,8 @@ Page({
         items: cart.map((c) => ({
           product_id: c.product_id,
           quantity: c.quantity || 1,
-          option_ids: c.option_ids || []
+          option_ids: c.option_ids || [],
+          remark: c.remark || undefined
         }))
       })
       const payRes = await api.post(`/payments/orders/${order.id}/pay`, {
