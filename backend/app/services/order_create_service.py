@@ -173,13 +173,17 @@ class OrderCreateService:
                 )
             )
 
-        for existing, requested in zip(existing_items, items):
-            if (
-                int(existing.product_id) != int(requested.get("product_id") or 0)
-                or int(existing.quantity) != int(requested.get("quantity") or 0)
-                or (existing.remark or "") != (requested.get("remark") or "")
-            ):
-                raise AppException(40902, "幂等键冲突：餐品、数量或备注不一致")
+        existing_signatures = []
+        for existing in existing_items:
+            existing_signatures.append((
+                int(existing.product_id),
+                int(existing.quantity),
+                existing.remark or "",
+                tuple(sorted(option_codes_by_item.get(int(existing.id), []))),
+            ))
+
+        requested_signatures = []
+        for requested in items:
             requested_codes = []
             for option_id in (requested.get("option_ids") or []):
                 option = options_by_id.get(int(option_id))
@@ -187,9 +191,16 @@ class OrderCreateService:
                 if option is None or group is None:
                     raise AppException(40902, "幂等键冲突：规格选项不存在")
                 requested_codes.append((str(group.name or ""), str(option.code or ""), 1))
-            existing_codes = option_codes_by_item.get(int(existing.id), [])
-            if sorted(requested_codes) != sorted(existing_codes):
-                raise AppException(40902, "幂等键冲突：餐品规格不一致")
+            requested_signatures.append((
+                int(requested.get("product_id") or 0),
+                int(requested.get("quantity") or 0),
+                requested.get("remark") or "",
+                tuple(sorted(requested_codes)),
+            ))
+
+        # 按规范化签名比较，不依赖用户在购物车中调整餐品行顺序。
+        if sorted(existing_signatures) != sorted(requested_signatures):
+            raise AppException(40902, "幂等键冲突：餐品、数量、备注或规格不一致")
 
     @staticmethod
     async def create_order(
