@@ -24,7 +24,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
-import { calcUnitPrice, readCartStorage } from '@/utils/cart'
+import { calcUnitPrice, cartItemKey, readCartStorage } from '@/utils/cart'
 import { mediaUrl } from '@/utils/media'
 
 const router = useRouter()
