@@ -4,6 +4,24 @@ const payUtil = require('../../utils/pay')
 const dineCtx = require('../../utils/context')
 const subscribe = require('../../utils/subscribe')
 
+const RECHARGE_IDEMPOTENCY_KEY = 'recharge_idempotency_v1'
+const RECHARGE_IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000
+
+function getRechargeIdempotencyKey(packageId, storeId) {
+  const signature = `${Number(packageId)}:${Number(storeId || 0)}`
+  try {
+    const saved = wx.getStorageSync(RECHARGE_IDEMPOTENCY_KEY)
+    if (saved && saved.signature === signature && Date.now() - saved.createdAt < RECHARGE_IDEMPOTENCY_TTL) return saved.key
+  } catch (_) {}
+  const key = `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  try { wx.setStorageSync(RECHARGE_IDEMPOTENCY_KEY, { signature, key, createdAt: Date.now() }) } catch (_) {}
+  return key
+}
+
+function clearRechargeIdempotencyKey() {
+  try { wx.removeStorageSync(RECHARGE_IDEMPOTENCY_KEY) } catch (_) {}
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -43,6 +61,7 @@ async function confirmRechargePaid(rechargeId, maxTries) {
 }
 
 function goMemberAfterSuccess() {
+  clearRechargeIdempotencyKey()
   markMemberWalletDirty()
   wx.showToast({ title: '充值成功', icon: 'success' })
   setTimeout(() => {
@@ -118,7 +137,7 @@ Page({
         store_id: storeId,
         provider: 'WECHAT',
         channel_type: 'miniprogram',
-        idempotency_key: `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+        idempotency_key: getRechargeIdempotencyKey(packageId, storeId)
       })
       if (payRes && (payRes.status === 'PAID' || payRes.already_paid || payRes.mock_settled)) {
         if (payRes.wallet) applyWalletLocal(this, payRes.wallet)
