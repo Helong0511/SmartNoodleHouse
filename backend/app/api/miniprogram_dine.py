@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
-from typing import Literal
 from sqlalchemy import select
 
 from app.api.deps import CurrentCustomer, DbSession
