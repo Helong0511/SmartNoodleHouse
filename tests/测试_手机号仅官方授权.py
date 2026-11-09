@@ -109,6 +109,7 @@ async def test_mock_debug_credential_binds_fixed_phone_in_dev():
         return cust
 
     with patch.object(mp, "get_settings", return_value=fake_settings), \
+         patch.object(mp, "dev_mode_allowed", return_value=True), \
          patch.object(mp.CustomerService, "save_unverified_phone", side_effect=fake_save), \
          patch.object(mp.CustomerService, "refresh_profile_status", new=Mock()), \
          patch.object(mp.CustomerService, "build_member_profile", new=AsyncMock(return_value={})), \
@@ -133,7 +134,8 @@ async def test_mock_debug_credential_binds_fixed_phone_in_dev():
 async def test_mock_debug_credential_rejected_in_production():
     """生产环境 mock:debug 凭据拒绝（40054），不访问 DB。"""
     fake_settings = SimpleNamespace(is_development=False)
-    with patch.object(mp, "get_settings", return_value=fake_settings):
+    with patch.object(mp, "get_settings", return_value=fake_settings), \
+         patch.object(mp, "dev_mode_allowed", return_value=False):
         with pytest.raises(AppException) as exc:
             await mp.bind_member_phone(
                 mp.PhoneBindRequest(phone_code="mock:debug"),
