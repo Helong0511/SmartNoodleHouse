@@ -395,8 +395,9 @@ Page({
         complete = !!(catalog && catalog.complete)
         if (catalog && catalog.items) {
           this._lastProductItems = catalog.items
-          if (app.globalData) {
-            app.globalData._sharedCatalog = {
+          const gd = appGlobal()
+          if (gd) {
+            gd._sharedCatalog = {
               storeId: sid,
               items: catalog.items,
               categories: (catalog && catalog.categories) || categories,
