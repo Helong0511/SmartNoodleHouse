@@ -48,8 +48,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { getCustomerToken, setCustomerToken } from '@/utils/customerAuth'
 import { mediaUrl } from '@/utils/media'
-import { cartItemKey, parseStoredCart } from '@/utils/cart'
-import { readCartStorage } from '@/utils/cart'
+import { cartItemKey, readCartStorage } from '@/utils/cart'
 
 const router = useRouter()
 const remark = ref('')
