@@ -545,6 +545,7 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
         no_existing_result, winner_result,
     ])
     monkeypatch.setattr(PaymentService, "_lock_order_then_payment", AsyncMock(return_value=payment))
+    monkeypatch.setattr(PaymentService, "_refund_rows_current", AsyncMock(return_value=[]))
     db.scalar = AsyncMock(side_effect=[0, Decimal("0.00")])
     db.get = AsyncMock(return_value=order)
     db.flush = AsyncMock(
@@ -624,3 +625,25 @@ async def test_payment_sync_cooldown_returns_503_when_redis_fails(monkeypatch):
         await payment_api._acquire_sync_cooldown(123)
     assert exc.value.code == 50301
     assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_lock_order_then_payment_refreshes_locked_payment_from_database():
+    payment = SimpleNamespace(id=88, order_id=99, recharge_order_id=None, status="REFUNDED")
+    peek_result = MagicMock()
+    peek_result.first.return_value = (99, None)
+    order_result = MagicMock()
+    payment_result = MagicMock()
+    payment_result.scalar_one_or_none.return_value = payment
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[peek_result, order_result, payment_result])
+
+    locked = await PaymentService._lock_order_then_payment(db, 88)
+
+    assert locked is payment
+    assert db.execute.await_count == 3
+    order_stmt = db.execute.await_args_list[1].args[0]
+    payment_stmt = db.execute.await_args_list[2].args[0]
+    assert order_stmt._for_update_arg is not None
+    assert payment_stmt._for_update_arg is not None
+    assert payment_stmt.get_execution_options().get("populate_existing") is True
