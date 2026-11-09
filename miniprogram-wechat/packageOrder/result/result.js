@@ -6,6 +6,7 @@ const dineCtx = require('../../utils/context')
 const tracker = require('../../utils/tracker')
 const clientConfig = require('../../utils/clientConfig')
 const orderActions = require('../../utils/orderActions')
+const subscribe = require('../../utils/subscribe')
 const app = getApp()
 
 // 轻量评价标签（与后端 feedback_service.VERDICT_WHITELIST 对齐）
