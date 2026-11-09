@@ -281,8 +281,8 @@ class OrderCreateService:
                     await db.execute(select(_Product).where(_Product.id.in_(pids)))
                 ).scalars().all() if pids else []
                 cids = [int(p.category_id) for p in prods if p.category_id]
-                if use_social_benefit or social_rule_id:
-                    # social_rule_id 仅为旧客户端意图标记，不作为规则选择依据；
+                if use_social_benefit:
+                    # social_rule_id 不作为规则选择依据；
                     # 服务端统一校验日期/星期/时段/限次/餐品/分类/折扣率。
                     social_hit = await SocialBenefitService.require_best_rule(
                         db,
