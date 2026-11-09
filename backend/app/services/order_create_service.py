@@ -71,6 +71,10 @@ class OrderCreateService:
         operator_id: int | None,
         dining_type: str | None = None,
         table_id: int | None = None,
+        remark: str | None = None,
+        customer_coupon_id: int | None = None,
+        customer_voucher_id: int | None = None,
+        scheduled_pickup_at: str | None = None,
     ) -> None:
         """命中幂等订单后必须再次校验归属，禁止直接 return 他人订单。"""
         ch = (channel or "").strip().upper()
@@ -95,6 +99,25 @@ class OrderCreateService:
             order_tid = getattr(order, "table_id", None)
             if order_tid is not None and int(order_tid) != int(table_id):
                 raise AppException(40902, "幂等键冲突：桌台不一致")
+        if (getattr(order, "remark", None) or "") != (remark or ""):
+            raise AppException(40902, "幂等键冲突：订单备注不一致")
+        if getattr(order, "customer_coupon_id", None) != customer_coupon_id:
+            raise AppException(40902, "幂等键冲突：优惠券不一致")
+        if getattr(order, "customer_voucher_id", None) != customer_voucher_id:
+            raise AppException(40902, "幂等键冲突：代金券不一致")
+        requested_pickup = None
+        if scheduled_pickup_at:
+            try:
+                requested_pickup = datetime.fromisoformat(scheduled_pickup_at)
+            except ValueError as exc:
+                raise AppException(40061, "预约取餐时间格式不正确") from exc
+            if requested_pickup.tzinfo is not None:
+                requested_pickup = requested_pickup.replace(tzinfo=None)
+        existing_pickup = getattr(order, "scheduled_pickup_at", None)
+        if existing_pickup is not None and existing_pickup.tzinfo is not None:
+            existing_pickup = existing_pickup.replace(tzinfo=None)
+        if existing_pickup != requested_pickup:
+            raise AppException(40902, "幂等键冲突：预约取餐时间不一致")
 
     @staticmethod
     async def _assert_idempotent_order_items_match(
@@ -223,8 +246,12 @@ class OrderCreateService:
                     store_id=store_id,
                     channel=channel,
                     operator_id=operator_id,
-                    dining_type=dining_type,
+                    dining_type=dining_type or ("TAKEAWAY" if need_pack else "DINE_IN"),
                     table_id=table_id,
+                    remark=remark,
+                    customer_coupon_id=customer_coupon_id,
+                    customer_voucher_id=customer_voucher_id,
+                    scheduled_pickup_at=scheduled_pickup_at,
                 )
                 # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
                 if not OrderCreateService._is_reusable_idempotent_order(order):
@@ -315,6 +342,12 @@ class OrderCreateService:
                         store_id=store_id,
                         channel=channel,
                         operator_id=operator_id,
+                        dining_type=dining_type or ("TAKEAWAY" if need_pack else "DINE_IN"),
+                        table_id=table_id,
+                        remark=remark,
+                        customer_coupon_id=customer_coupon_id,
+                        customer_voucher_id=customer_voucher_id,
+                        scheduled_pickup_at=scheduled_pickup_at,
                     )
                     if not OrderCreateService._is_reusable_idempotent_order(order):
                         raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
