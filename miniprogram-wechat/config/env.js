@@ -30,7 +30,7 @@ const DEV_USE_LAN = false
 const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api`
 
 /** 体验版是否连生产 API（默认 false） */
-const TRIAL_USE_PROD_API = false
+const TRIAL_USE_PROD_API = true
 
 function isDevtools() {
   try {
@@ -83,8 +83,9 @@ function appendDevApiHint(text, apiBase) {
 }
 
 function resolveDevApiBase() {
-  if (DEV_USE_LAN || !isDevtools()) return DEV_LAN_API
-  return DEV_SIMULATOR_API
+  if (isDevtools()) return DEV_SIMULATOR_API
+  // 真机只有显式开启 DEV_USE_LAN 才走局域网；false 时绝不偷偷回退到内网 HTTP。
+  return DEV_USE_LAN ? DEV_LAN_API : DEV_SIMULATOR_API
 }
 
 function resolveApiBase() {
