@@ -311,22 +311,13 @@ def decrypt_phone_response(encrypted_b64: str) -> str:
     if not raw:
         raise AppException(40054, "缺少支付宝手机号密文")
 
-    settings = get_settings()
-    if _mock_allowed() and not (settings.alipay_aes_key or "").strip():
-        mock = re.search(r"1\d{10}", raw)
-        if mock:
-            logger.warning("开发环境未配置 ALIPAY_AES_KEY，从密文占位解析手机号（仅联调）")
-            return mock.group(0)
-        raise AppException(40054, "开发环境请配置 ALIPAY_AES_KEY 或改用手动输入手机号")
-
+    # 本函数只处理支付宝官方 AES 密文。测试手机号/mock:debug 必须由 API 层
+    # 转入 phone_verified=0 的未验证保存分支，绝不能在此伪装成官方授权号码。
     cipher_text, plain_mobile = _extract_cipher_from_envelope(raw)
     if plain_mobile:
-        # 只有显式开启开发调试 Mock 时才接受明文占位手机号；其余环境必须验证 AES 密文。
-        if not _mock_allowed():
-            raise AppException(40054, "支付宝手机号必须为 AES 加密报文，拒绝明文响应")
-        return plain_mobile
+        raise AppException(40054, "支付宝手机号必须为官方 AES 加密报文，拒绝明文响应")
     if not cipher_text:
-        raise AppException(40054, "未能从支付宝响应中解析手机号")
+        raise AppException(40054, "未能从支付宝响应中解析有效 AES 密文")
 
     plain = decrypt_alipay_content(cipher_text)
     return _parse_plain_phone_payload(plain)
