@@ -369,3 +369,82 @@ async def test_processing_pos_request_without_refund_binding_never_starts_second
     db.refresh.assert_awaited_once_with(request)
     allocate.assert_not_awaited()
     refund_call.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_recovery_preserves_processing_when_refund_row_is_already_persisted():
+    """异常发生在退款单提交之后时，POS 申请不能被错误标为 FAILED。"""
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        id=130,
+        status="PROCESSING",
+        refund_id=990,
+        execution_token="owner-current",
+        execution_epoch=7,
+        execution_lease_until=None,
+        executed_amount=money("0.00"),
+        amount=money("20.00"),
+        fail_reason=None,
+    )
+    refund = SimpleNamespace(status="PENDING")
+    db = AsyncMock()
+    db.rollback = AsyncMock()
+    db.get = AsyncMock(return_value=refund)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch.object(PosRefundService, "_lock_request", new_callable=AsyncMock, return_value=request):
+        out = await PosRefundService._recover_execution_error(
+            db,
+            request_id=130,
+            claim_token="owner-current",
+            claim_epoch=7,
+            amount_total=money("20.00"),
+            error=RuntimeError("local persistence interrupted after refund row commit"),
+        )
+
+    assert out is request
+    assert request.status == "PROCESSING"
+    assert "待确认" in request.fail_reason
+    db.rollback.assert_awaited_once()
+    db.get.assert_awaited_once()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stale_pos_refund_owner_cannot_overwrite_new_execution_state():
+    """租约接管后，旧 worker 的异常收尾不得覆盖新 epoch 的状态。"""
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        id=131,
+        status="PROCESSING",
+        refund_id=None,
+        execution_token="new-owner",
+        execution_epoch=9,
+        execution_lease_until=None,
+        executed_amount=money("0.00"),
+        amount=money("20.00"),
+        fail_reason=None,
+    )
+    db = AsyncMock()
+    db.rollback = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch.object(PosRefundService, "_lock_request", new_callable=AsyncMock, return_value=request):
+        out = await PosRefundService._recover_execution_error(
+            db,
+            request_id=131,
+            claim_token="old-owner",
+            claim_epoch=8,
+            amount_total=money("20.00"),
+            error=RuntimeError("stale worker resumed"),
+        )
+
+    assert out is request
+    assert request.status == "PROCESSING"
+    assert request.execution_token == "new-owner"
+    assert request.execution_epoch == 9
+    db.get.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
