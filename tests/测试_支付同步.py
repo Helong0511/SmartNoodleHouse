@@ -777,3 +777,53 @@ async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks
         assert stmt._for_update_arg is not None
         assert stmt.get_execution_options().get("populate_existing") is True
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
+    stale_recharge = SimpleNamespace(id=121, status="PENDING")
+    stale_payment = SimpleNamespace(id=122, status="PENDING")
+    current_recharge = SimpleNamespace(id=121, status="PAID")
+    current_payment = SimpleNamespace(id=122, status="PAID")
+    recharge_result = MagicMock()
+    recharge_result.scalar_one.return_value = current_recharge
+    payment_result = MagicMock()
+    payment_result.scalar_one.return_value = current_payment
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
+
+    result = await PaymentService._settle_recharge_payment(
+        db, payment=stale_payment, recharge=stale_recharge,
+        provider="WECHAT", source="TEST_REPLAY",
+    )
+
+    assert result == {"already_paid": True, "status": "PAID"}
+    assert db.execute.await_count == 2
+    for call in db.execute.await_args_list:
+        stmt = call.args[0]
+        assert stmt._for_update_arg is not None
+        assert stmt.get_execution_options().get("populate_existing") is True
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recharge_settlement_never_downgrades_refunded_payment():
+    stale_recharge = SimpleNamespace(id=123, status="PENDING")
+    stale_payment = SimpleNamespace(id=124, status="PENDING")
+    current_recharge = SimpleNamespace(id=123, status="PENDING")
+    current_payment = SimpleNamespace(id=124, status="REFUNDED")
+    recharge_result = MagicMock()
+    recharge_result.scalar_one.return_value = current_recharge
+    payment_result = MagicMock()
+    payment_result.scalar_one.return_value = current_payment
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
+
+    with pytest.raises(AppException) as exc:
+        await PaymentService._settle_recharge_payment(
+            db, payment=stale_payment, recharge=stale_recharge,
+            provider="WECHAT", source="TEST_REPLAY",
+        )
+
+    assert exc.value.code == 50042
+    assert current_payment.status == "REFUNDED"
