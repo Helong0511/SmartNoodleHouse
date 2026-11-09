@@ -163,10 +163,6 @@ App({
       try {
         const scene = String(sceneRaw)
         token = parseTableTokenFromScan(scene)
-        if (!channel) {
-          const nested = normalizeLaunchQuery(scene)
-          if (nested.channel) channel = nested.channel
-        }
       } catch (_) { }
     }
 
