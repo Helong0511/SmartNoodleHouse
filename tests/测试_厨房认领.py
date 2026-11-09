@@ -209,20 +209,27 @@ async def test_stale_takeover_cannot_overwrite_new_claimer(db_session):
         kitchen_claimed_at=datetime.now(timezone.utc),
     )
     db_session.add_all([store, cook_a, cook_b, cook_c, order])
+    # async session 默认 commit 后 expire_on_commit；先缓存标量主键，
+    # 避免在提交后直接读取过期 ORM 属性触发 MissingGreenlet。
+    order_id = int(order.id)
+    stale_operator_id = int(cook_b.id)
+    winner_operator_id = int(cook_c.id)
     await db_session.commit()
 
     # 模拟另一个事务先完成接管，但当前请求仍持有旧的 ORM 认领人快照。
     await db_session.execute(
         update(Order)
-        .where(Order.id == order.id)
-        .values(kitchen_claimed_by=cook_c.id)
+        .where(Order.id == order_id)
+        .values(kitchen_claimed_by=winner_operator_id)
         .execution_options(synchronize_session=False)
     )
     await db_session.flush()
 
     with pytest.raises(AppException) as ei:
-        await takeover_kitchen_claim(db_session, order, operator_id=cook_b.id)
+        await takeover_kitchen_claim(
+            db_session, order, operator_id=stale_operator_id
+        )
     assert ei.value.code == 40028
     await db_session.rollback()
-    refreshed = await db_session.get(Order, order.id)
-    assert refreshed.kitchen_claimed_by == cook_c.id
+    refreshed = await db_session.get(Order, order_id)
+    assert refreshed.kitchen_claimed_by == winner_operator_id
