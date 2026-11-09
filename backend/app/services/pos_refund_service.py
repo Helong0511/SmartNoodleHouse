@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -335,6 +336,58 @@ class PosRefundService:
         ).scalar_one_or_none()
 
     @classmethod
+    async def _recover_execution_error(
+        cls,
+        db: AsyncSession,
+        *,
+        request_id: int,
+        claim_token: str,
+        claim_epoch: int,
+        amount_total: Decimal,
+        error: Exception,
+    ) -> PosRefundRequest | None:
+        """异常后以持久化退款事实恢复状态；旧执行者不得覆盖新 owner 的状态。"""
+        await db.rollback()
+        row = await cls._lock_request(db, request_id)
+        if row is None:
+            return None
+        if (
+            str(getattr(row, "execution_token", "") or "") != claim_token
+            or int(getattr(row, "execution_epoch", 0) or 0) != int(claim_epoch)
+        ):
+            # 已被更高 epoch 接管；旧 worker 只能退出，不能再写 FAILED/PROCESSING。
+            return row
+
+        from app.models import PaymentRefund
+
+        linked_refund = (
+            await db.get(PaymentRefund, int(row.refund_id))
+            if getattr(row, "refund_id", None)
+            else None
+        )
+        if linked_refund and linked_refund.status in (
+            "PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"
+        ):
+            # 退款单已提交：外部渠道可能已受理，必须保持处理中并交给查单/回调。
+            row.status = "PROCESSING"
+            row.fail_reason = "退款单已持久化，渠道结果待确认；系统将继续查单"[:255]
+        elif linked_refund and linked_refund.status == "SUCCESS":
+            cls._finalize_persisted_execution_state(row, amount_total)
+            if row.status != "SUCCESS":
+                row.fail_reason = f"部分退款成功 ¥{money(row.executed_amount or 0)}，剩余请重试"[:255]
+        else:
+            # 没有已绑定退款单，或渠道明确终态失败；PaymentService 的安全边界保证
+            # 外部请求前先提交退款单及关联，因此此时可标记失败并由新审批重新执行。
+            row.status = "FAILED"
+            row.fail_reason = (
+                f"退款执行失败（已退 ¥{money(row.executed_amount or 0)}）: {error}"
+            )[:255]
+        row.execution_lease_until = None
+        await db.flush()
+        await db.commit()
+        return row
+
+    @classmethod
     async def approve_and_execute(
         cls,
         db: AsyncSession,
@@ -359,8 +412,13 @@ class PosRefundService:
         # 也必须直接返回；不能因 refund_id 暂为空而再次分配并发起退款。
         # PaymentService.refund 会在任何渠道请求发出前，先持久化退款单并绑定 refund_id。
         if row.status == "PROCESSING" and not row.refund_id:
-            await db.refresh(row)
-            return row
+            # 旧数据没有 epoch/lease，无法证明旧 worker 已停止；继续 fail-closed，需人工核实。
+            # 新流程只有租约过期后才允许接管，接管时递增 epoch，旧 worker 将被 PaymentService 拒绝。
+            lease_until = getattr(row, "execution_lease_until", None)
+            epoch = int(getattr(row, "execution_epoch", 0) or 0)
+            if epoch <= 0 or lease_until is None or ensure_local_aware(lease_until) > now_local():
+                await db.refresh(row)
+                return row
 
         # PROCESSING 且已绑定渠道退款单时，先检查原单状态；未终结的退款绝不重新发起。
         if row.status == "PROCESSING" and row.refund_id:
@@ -417,6 +475,13 @@ class PosRefundService:
         reason = row.reason
         amount_total = money(row.amount)
         alloc_snapshot = [(int(p.id), money(amt), (p.provider or "").upper()) for p, amt in alloc]
+        # 每次执行/接管都递增 fencing epoch；租约只保护“首笔退款单绑定前”的空窗。
+        # 一旦退款单绑定，后续安全性由 PaymentRefund 状态和同一 token/epoch 约束。
+        claim_token = uuid.uuid4().hex
+        claim_epoch = int(getattr(row, "execution_epoch", 0) or 0) + 1
+        row.execution_epoch = claim_epoch
+        row.execution_token = claim_token
+        row.execution_lease_until = now_local() + timedelta(seconds=120)
         # 认领后立刻释放申请单行锁（PaymentService.refund 也会 commit）
         row.status = "PROCESSING"
         row.fail_reason = None
@@ -436,6 +501,8 @@ class PosRefundService:
                     reason,
                     operator_id=user.id,
                     pos_refund_request_id=request_id,
+                    pos_refund_execution_token=claim_token,
+                    pos_refund_execution_epoch=claim_epoch,
                 )
                 # 回调可能与退款申请响应并发到达。按 PaymentRefund → POS request 锁序，
                 # 重新读取并锁定渠道退款事实，避免用过期 PROCESSING 覆盖刚提交的 SUCCESS。
@@ -488,27 +555,20 @@ class PosRefundService:
                     await db.commit()
                     raise AppException(50030, row.fail_reason)
         except AppException as e:
-            row = await cls._lock_request(db, request_id)
-            if row and row.status not in ("SUCCESS", "REJECTED", "CANCELLED"):
-                row.status = "FAILED"
-                if executed > 0 and amount_total - executed > 0:
-                    if not row.fail_reason:
-                        row.fail_reason = f"部分退款成功 ¥{executed}，剩余请重试"[:255]
-                elif not row.fail_reason:
-                    row.fail_reason = (getattr(e, "message", None) or str(e))[:255]
-                await db.flush()
-                await db.commit()
+            await cls._recover_execution_error(
+                db, request_id=request_id, claim_token=claim_token,
+                claim_epoch=claim_epoch, amount_total=amount_total, error=e,
+            )
             raise
         except Exception as e:
-            row = await cls._lock_request(db, request_id)
-            if row and row.status not in ("SUCCESS", "REJECTED", "CANCELLED"):
-                row.status = "FAILED"
-                row.fail_reason = (
-                    f"退款失败（已退 ¥{executed}）: {e}" if executed > 0 else f"退款执行失败: {e}"
-                )[:255]
-                await db.flush()
-                await db.commit()
-                raise AppException(50030, row.fail_reason) from e
+            recovered = await cls._recover_execution_error(
+                db, request_id=request_id, claim_token=claim_token,
+                claim_epoch=claim_epoch, amount_total=amount_total, error=e,
+            )
+            if recovered and recovered.status not in ("SUCCESS", "REJECTED", "CANCELLED"):
+                raise AppException(50030, recovered.fail_reason or "退款执行结果待核实") from e
+            if recovered and recovered.status == "SUCCESS":
+                return recovered
             raise AppException(50030, f"退款执行失败: {e}") from e
 
         row = await cls._lock_request(db, request_id)
