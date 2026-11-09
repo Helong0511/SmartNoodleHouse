@@ -154,7 +154,8 @@ async def test_multi_item_stock_deduction_uses_stable_product_lock_order(monkeyp
 )
 @pytest.mark.asyncio
 async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypatch, items):
-    from app.services.order_lifecycle import _deduct_order_stock, _restore_order_stock
+    from app.services.order_lifecycle import _restore_order_stock
+    from app.services.stock_service import deduct_for_order_items
     result = MagicMock()
     result.scalars.return_value.all.return_value = items
     db = AsyncMock()
@@ -176,7 +177,11 @@ async def test_order_restore_and_rededuct_use_stable_product_lock_order(monkeypa
     order = SimpleNamespace(id=88, store_id=7)
 
     await _restore_order_stock(db, order)
-    await _deduct_order_stock(db, order)
+    await deduct_for_order_items(
+        db,
+        [{"product_id": item.product_id, "quantity": item.quantity} for item in items],
+        store_id=order.store_id,
+    )
 
     expected = [(2, 3, 7), (9, 3, 7)]
     assert restore_calls == expected
