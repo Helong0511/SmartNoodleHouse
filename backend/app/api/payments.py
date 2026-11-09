@@ -229,6 +229,9 @@ async def sync_payment(
     if not payment:
         raise AppException(40490, "支付记录不存在", status_code=404)
     order = await db.get(Order, payment.order_id)
+    if customer is None and user is None:
+        raise AppException(40101, "请先登录后再同步支付", status_code=401)
+
     if customer:
         from app.services.order_access import assert_customer_owns_order, assert_dining_session_owner
 
