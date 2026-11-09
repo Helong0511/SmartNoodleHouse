@@ -19,7 +19,10 @@ function clearPrivacySafetyTimer(app) {
 function hasPrivacyAgreed() {
   try {
     const stored = my.getStorageSync({ key: 'privacy_agreed_v1' })
-    return !!(stored && (stored.data || stored))
+    const value = stored && Object.prototype.hasOwnProperty.call(stored, 'data')
+      ? stored.data
+      : stored
+    return value === true || value === 1 || value === '1'
   } catch (_) {
     return false
   }
