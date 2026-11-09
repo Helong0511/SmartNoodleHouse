@@ -302,17 +302,15 @@ function buildDisplayScreenToken(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** 本店叫号屏完整地址：/display?store_id=&token= */
+/** 本店叫号屏链接：令牌放 URL fragment，不进入 HTTP request / Referer / 代理访问日志。 */
 function displayScreenUrl(item: any): string {
   const sid = Number(props.storeId || 0)
   if (!sid) return ''
   const token = String(item?.strValue || '').trim()
   if (!token) return ''
-  const q = new URLSearchParams({
-    store_id: String(sid),
-    token,
-  })
-  return `${window.location.origin}/display?${q.toString()}`
+  const q = new URLSearchParams({ store_id: String(sid) })
+  const fragment = new URLSearchParams({ token })
+  return `${window.location.origin}/display?${q.toString()}#${fragment.toString()}`
 }
 
 async function copyDisplayUrl(item: any) {
