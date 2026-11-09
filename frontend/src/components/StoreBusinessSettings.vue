@@ -153,7 +153,7 @@
                   <el-button size="small" @click="copyDisplayUrl(item)">复制</el-button>
                   <el-button size="small" type="primary" link @click="openDisplayUrl(item)">打开</el-button>
                 </div>
-                <p class="display-url-hint">保存本店参数后生效；叫号屏浏览器用此地址全屏打开</p>
+                <p class="display-url-hint">生产环境每家门店必须使用独立令牌；保存本店参数后生效，叫号屏浏览器用此地址全屏打开</p>
               </div>
               <p v-else-if="!props.storeId" class="display-url-hint warn">请先选择门店后再生成地址</p>
             </div>
