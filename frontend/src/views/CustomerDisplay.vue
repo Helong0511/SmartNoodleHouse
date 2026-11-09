@@ -457,7 +457,9 @@ async function loadStoreName() {
     if (disposed || requestedStoreId !== storeId.value) return
     storeName.value = res.data?.name || ''
   } catch {
-    storeName.value = `门店 #${storeId.value}`
+    if (!disposed && requestedStoreId === storeId.value) {
+      storeName.value = `门店 #${requestedStoreId}`
+    }
   }
 }
 
