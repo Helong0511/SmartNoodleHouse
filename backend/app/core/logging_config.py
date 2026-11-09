@@ -34,6 +34,7 @@ class SensitiveQueryRedactionFilter(logging.Filter):
             record.exc_text = _redact_sensitive_query(record.exc_text)
         return True
 
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         from app.core.response import dumps_json, now_local, serialize_dt
