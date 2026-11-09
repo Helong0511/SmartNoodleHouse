@@ -223,7 +223,11 @@ async def test_stale_takeover_cannot_overwrite_new_claimer(db_session):
         .values(kitchen_claimed_by=winner_operator_id)
         .execution_options(synchronize_session=False)
     )
-    await db_session.flush()
+    # 提交模拟的并发赢家，保证随后 CAS 失败后的 rollback 不会撤销赢家的认领。
+    await db_session.commit()
+    # 保留请求读取时的旧快照；数据库中已是 winner_operator_id。
+    order.status = "COOKING"
+    order.kitchen_claimed_by = int(cook_a.id)
 
     with pytest.raises(AppException) as ei:
         await takeover_kitchen_claim(
