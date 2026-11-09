@@ -91,3 +91,81 @@ async def test_login_guard_fails_closed_when_redis_is_unavailable(monkeypatch):
         with pytest.raises(AppException) as exc:
             await operation("audit-test-user", "127.0.0.1")
         assert exc.value.status_code == 503
+
+def test_wechat_refund_receipt_identity_does_not_depend_on_success_time():
+    from app.services.payment_service import _wechat_callback_receipt_identity
+
+    first = {
+        "id": "wx-notify-001",
+        "event_type": "REFUND.SUCCESS",
+        "success_time": "2026-11-08T10:00:00+08:00",
+    }
+    second = {
+        **first,
+        "success_time": "2026-11-08T10:00:05+08:00",
+    }
+    parsed = {
+        "is_refund": True,
+        "refund_no": "RF-001",
+        "refund_id": "provider-refund-001",
+    }
+    assert _wechat_callback_receipt_identity(first, parsed) == _wechat_callback_receipt_identity(second, parsed)
+
+
+def test_refund_success_requires_all_provider_identity_fields():
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.core.exceptions import AppException
+    from app.services.payment_service import PaymentService
+
+    payment = SimpleNamespace(
+        id=1, order_id=9, payment_no="PAY-001", provider_trade_no="WX-TRADE-001"
+    )
+    refund = SimpleNamespace(
+        id=2, payment_id=1, order_id=9, refund_no="REF-001", amount=Decimal("3.00")
+    )
+    with pytest.raises(AppException):
+        PaymentService._validate_refund_query_result(
+            provider="ALIPAY",
+            payment=payment,
+            refund=refund,
+            result={"status": "SUCCESS", "amount": "3.00"},
+        )
+    assert PaymentService._validate_refund_query_result(
+        provider="ALIPAY",
+        payment=payment,
+        refund=refund,
+        result={
+            "status": "SUCCESS",
+            "refund_no": "REF-001",
+            "payment_no": "PAY-001",
+            "provider_trade_no": "WX-TRADE-001",
+            "amount": "3.00",
+        },
+    ) == "SUCCESS"
+
+
+def test_intrusion_probe_ignores_user_agent_and_rejects_prefix_exemption_bypass():
+    from starlette.requests import Request
+
+    from app.core.intrusion_detection import _is_exempt, detect_intrusion
+
+    assert not _is_exempt("/api/payments/wechat/notify-evil")
+    assert _is_exempt("/api/payments/wechat/notify/extra")
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/search",
+            "raw_path": b"/api/search",
+            "query_string": b"q=hello",
+            "headers": [(b"user-agent", b"scanner union select")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("localhost", 80),
+            "scheme": "http",
+        }
+    )
+    assert detect_intrusion(request) == (False, "")
