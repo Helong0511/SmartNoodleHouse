@@ -83,7 +83,8 @@ async def test_idempotent_replay_rejects_changed_order_items():
             [{"product_id": 2, "quantity": 2, "remark": "少辣", "option_ids": []}],
         )
     assert exc.value.code == 40902
-    assert "餐品、数量或备注" in exc.value.message
+    assert "餐品、数量、备注" in exc.value.message
+    assert "规格" in exc.value.message
 
 
 @pytest.mark.asyncio
