@@ -645,6 +645,7 @@ async def test_lock_order_then_payment_refreshes_locked_payment_from_database():
     order_stmt = db.execute.await_args_list[1].args[0]
     payment_stmt = db.execute.await_args_list[2].args[0]
     assert order_stmt._for_update_arg is not None
+    assert order_stmt.get_execution_options().get("populate_existing") is True
     assert payment_stmt._for_update_arg is not None
     assert payment_stmt.get_execution_options().get("populate_existing") is True
 
@@ -667,3 +668,17 @@ async def test_refund_creation_blocks_inflight_refund_from_current_locked_rows(m
     assert exc.value.code == 40054
     load_rows.assert_awaited_once_with(db, 89)
     db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_remaining_amount_can_use_current_locked_payment_and_refund_facts(monkeypatch):
+    order = SimpleNamespace(
+        id=91, total_amount=Decimal("20.00"), payment_status="PARTIAL_PAID", status="PENDING_PAYMENT"
+    )
+    paid = AsyncMock(return_value=Decimal("7.00"))
+    monkeypatch.setattr(PaymentService, "paid_amount", paid)
+
+    remaining = await PaymentService.remaining_amount(AsyncMock(), order, current_read=True)
+
+    assert remaining == Decimal("13.00")
+    paid.assert_awaited_once_with(paid.await_args.args[0], 91, current_read=True)
