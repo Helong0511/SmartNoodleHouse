@@ -468,6 +468,7 @@ Page({
     this._socialHint = null
     this._socialIdentityCodes = []
     try {
+      const sid = this.submitStoreId() || this.storeId()
       await clientConfig.loadClientConfig(true, sid).catch(() => { })
       if (!clientConfig.isSocialBenefitEnabled()) {
         this.setData({ hasSocialBenefit: false, useSocialBenefit: false, socialBenefitLabel: '' })
