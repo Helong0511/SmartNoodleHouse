@@ -569,22 +569,24 @@ class PaymentService:
         return money(net)
 
     @classmethod
-    async def paid_amount(cls, db: AsyncSession, order_id: int) -> Decimal:
-        """订单净已收金额（已入账支付 − 成功退款）。
-
-        不得只统计 status=PAID：部分退款后支付单变为 PARTIAL_REFUND，
-        若仍按 PAID 合计会导致 remaining 虚高、可重复收款。
-        """
-        return await cls.order_net_collected(db, order_id)
+    async def paid_amount(
+        cls, db: AsyncSession, order_id: int, *, current_read: bool = False
+    ) -> Decimal:
+        """订单净已收金额（已入账支付 − 成功退款）。资金决策路径可指定当前锁定读。"""
+        return await cls.order_net_collected(db, order_id, current_read=current_read)
 
     @classmethod
-    async def remaining_amount(cls, db: AsyncSession, order: Order) -> Decimal:
+    async def remaining_amount(
+        cls, db: AsyncSession, order: Order, *, current_read: bool = False
+    ) -> Decimal:
         # 全额退款终态：禁止再收
         if str(getattr(order, "payment_status", "") or "").upper() == "REFUNDED":
             return money(0)
         if str(getattr(order, "status", "") or "").upper() == "REFUNDED":
             return money(0)
-        rem = money(order.total_amount) - await cls.paid_amount(db, order.id)
+        rem = money(order.total_amount) - await cls.paid_amount(
+            db, order.id, current_read=current_read
+        )
         return rem if rem > 0 else money(0)
 
     @classmethod
@@ -694,9 +696,11 @@ class PaymentService:
         return out
 
     @classmethod
-    async def payment_progress(cls, db: AsyncSession, order: Order) -> dict:
-        paid = await cls.paid_amount(db, order.id)
-        remaining = await cls.remaining_amount(db, order)
+    async def payment_progress(
+        cls, db: AsyncSession, order: Order, *, current_read: bool = False
+    ) -> dict:
+        paid = await cls.paid_amount(db, order.id, current_read=current_read)
+        remaining = await cls.remaining_amount(db, order, current_read=current_read)
         method = (order.payment_method or "").strip() or await cls._resolve_payment_method(db, order.id)
         return {
             "order_id": order.id,
@@ -763,7 +767,7 @@ class PaymentService:
                 # 资金确认与财务分录必须同事务成功；任何环境都不允许静默确认。
                 raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
 
-        paid = await cls.paid_amount(db, order.id)
+        paid = await cls.paid_amount(db, order.id, current_read=True)
         remaining = money(order.total_amount) - paid
         method = await cls._resolve_payment_method(db, order.id)
 
@@ -834,7 +838,12 @@ class PaymentService:
         amount: Decimal | None = None,
     ) -> tuple[Payment, dict]:
         locked = (
-            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == order.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40402, "订单不存在")
@@ -849,7 +858,7 @@ class PaymentService:
         if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
             raise AppException(40012, f"当前订单状态不可支付: {order.status}")
 
-        remaining = await cls.remaining_amount(db, order)
+        remaining = await cls.remaining_amount(db, order, current_read=True)
         if remaining <= 0:
             raise AppException(40010, "订单已支付")
 
@@ -1019,7 +1028,7 @@ class PaymentService:
                 )
                 synced, sync_meta = payment, {"synced": False, "trade_state": "QUERY_FAILED"}
             if synced.status == "PAID":
-                progress = await cls.payment_progress(db, order)
+                progress = await cls.payment_progress(db, order, current_read=True)
                 return synced, {
                     "status": "PAID",
                     "already_paid": True,
@@ -1788,7 +1797,12 @@ class PaymentService:
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
         locked = (
-            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == order.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40402, "订单不存在")
@@ -1842,7 +1856,7 @@ class PaymentService:
                 status_code=409,
             )
 
-        remaining = await cls.remaining_amount(db, order)
+        remaining = await cls.remaining_amount(db, order, current_read=True)
         if remaining <= 0:
             raise AppException(40010, "订单已支付")
 
