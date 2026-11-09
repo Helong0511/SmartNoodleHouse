@@ -50,9 +50,11 @@ function isDevtools() {
 function miniEnvVersion() {
   try {
     const info = my.getAccountInfoSync && my.getAccountInfoSync()
-    return (info && info.miniProgram && info.miniProgram.envVersion) || ''
+    const version = String((info && info.miniProgram && info.miniProgram.envVersion) || '').toLowerCase()
+    // 只信任平台明确返回的 develop/trial；探测异常、空值或未知值均按正式版处理。
+    return ['develop', 'trial', 'release'].includes(version) ? version : 'release'
   } catch (e) {
-    return ''
+    return 'release'
   }
 }
 
@@ -85,17 +87,22 @@ function resolveDevApiBase() {
 
 function resolveApiBase() {
   const ver = miniEnvVersion()
-  if (ver === 'release' || (ver === 'trial' && TRIAL_USE_PROD_API)) {
-    // P0-4：正式版强制校验 HTTPS 且拒绝占位符
-    if (PROD_API_BASE.indexOf('your-domain.com') !== -1) {
-      throw new Error('PROD_API_BASE 仍为占位符，请在 env.js 替换为真实域名后再上传正式版')
-    }
-    if (!/^https:\/\//i.test(PROD_API_BASE)) {
-      throw new Error('PROD_API_BASE 必须为 HTTPS 地址')
-    }
-    return PROD_API_BASE
+  // 只有平台明确标记的开发版，或明确选择本地 API 的体验版，才允许使用 HTTP 开发地址。
+  if (ver === 'develop' || (ver === 'trial' && !TRIAL_USE_PROD_API)) {
+    return resolveDevApiBase()
   }
-  return resolveDevApiBase()
+  // App 模块初始化时也会调用此函数；不要在这里抛错导致正式版白屏。
+  // 首个真实 API 请求前由 assertApiBaseConfigured() 完成严格校验。
+  return PROD_API_BASE
+}
+
+function assertApiBaseConfigured(apiBase) {
+  const ver = miniEnvVersion()
+  if (ver === 'develop' || (ver === 'trial' && !TRIAL_USE_PROD_API)) return
+  const base = String(apiBase || PROD_API_BASE).trim()
+  if (!/^https:\/\//i.test(base) || /your-domain\.com/i.test(base)) {
+    throw new Error('正式版 API 地址未正确配置：请在 config/env.js 设置真实 HTTPS 域名并加入平台合法域名')
+  }
 }
 
 function getEnvDebugInfo() {
@@ -109,6 +116,7 @@ function getEnvDebugInfo() {
 
 module.exports = {
   resolveApiBase,
+  assertApiBaseConfigured,
   getEnvDebugInfo,
   isRelease,
   isDevelopOrTrial,
