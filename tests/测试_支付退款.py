@@ -172,6 +172,10 @@ async def test_finalize_refund_marks_partial():
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new_callable=AsyncMock,
     ), patch(
+        "app.services.payment_service.PaymentService._refund_rows_current",
+        new_callable=AsyncMock,
+        return_value=[row],
+    ), patch(
         "app.services.payment_service.PaymentService.order_net_collected",
         new_callable=AsyncMock,
         return_value=Decimal("60.00"),
@@ -246,6 +250,10 @@ async def test_finalize_refund_deducts_points_for_customer():
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new_callable=AsyncMock,
     ), patch(
+        "app.services.payment_service.PaymentService._refund_rows_current",
+        new_callable=AsyncMock,
+        return_value=[row],
+    ), patch(
         "app.services.payment_service.PaymentService.order_net_collected",
         new_callable=AsyncMock,
         return_value=Decimal("60.00"),
@@ -302,6 +310,10 @@ async def test_finalize_refund_queues_both_compensations_after_savepoint_failure
     ), patch(
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new_callable=AsyncMock,
+    ), patch(
+        "app.services.payment_service.PaymentService._refund_rows_current",
+        new_callable=AsyncMock,
+        return_value=[row],
     ), patch(
         "app.services.payment_service.PaymentService.order_net_collected",
         new_callable=AsyncMock, return_value=Decimal("60.00"),
@@ -363,6 +375,10 @@ async def test_full_refund_always_enqueues_milestone_reclaim_after_commit():
     ), patch(
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new_callable=AsyncMock,
+    ), patch(
+        "app.services.payment_service.PaymentService._refund_rows_current",
+        new_callable=AsyncMock,
+        return_value=[row],
     ), patch(
         "app.services.payment_service.PaymentService.order_net_collected",
         new_callable=AsyncMock, return_value=Decimal("0.00"),
@@ -748,3 +764,56 @@ async def test_scheduled_refund_poll_skips_when_another_worker_claimed(monkeypat
     claim_stmt = second_db.execute.call_args.args[0]
     assert claim_stmt.is_update
 
+
+
+@pytest.mark.asyncio
+async def test_refund_current_rows_use_for_update_and_refresh_identity_map():
+    from app.services.payment_service import PaymentService
+
+    refund = MagicMock()
+    refund.id = 10
+    refund.payment_id = 7
+    refund.amount = Decimal("3.00")
+    refund.status = "SUCCESS"
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [refund]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+
+    rows = await PaymentService._refund_rows_current(db, 7)
+
+    assert rows == [refund]
+    stmt = db.execute.await_args.args[0]
+    assert stmt._for_update_arg is not None
+    assert stmt.get_execution_options().get("populate_existing") is True
+
+
+@pytest.mark.asyncio
+async def test_order_net_collected_current_read_locks_payment_and_refund_rows():
+    from app.services.payment_service import PaymentService
+
+    payment = MagicMock()
+    payment.id = 7
+    payment.amount = Decimal("10.00")
+    payment.status = "PARTIAL_REFUND"
+    refund = MagicMock()
+    refund.id = 11
+    refund.payment_id = 7
+    refund.amount = Decimal("4.00")
+    refund.status = "SUCCESS"
+
+    payments_result = MagicMock()
+    payments_result.scalars.return_value.all.return_value = [payment]
+    refunds_result = MagicMock()
+    refunds_result.scalars.return_value.all.return_value = [refund]
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[payments_result, refunds_result])
+
+    net = await PaymentService.order_net_collected(db, 9, current_read=True)
+
+    assert net == Decimal("6.00")
+    assert db.execute.await_count == 2
+    for call in db.execute.await_args_list:
+        stmt = call.args[0]
+        assert stmt._for_update_arg is not None
+        assert stmt.get_execution_options().get("populate_existing") is True
