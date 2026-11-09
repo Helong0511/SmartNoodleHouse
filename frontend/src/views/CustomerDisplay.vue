@@ -23,7 +23,7 @@
       <h2>请配置门店</h2>
       <p>在浏览器地址栏追加参数，例如：</p>
       <code>/display?store_id=1</code>
-      <p v-if="needToken" class="hint">生产环境还需 <code>&amp;token=您的叫号屏令牌</code></p>
+      <p v-if="needToken" class="hint">生产环境请使用后台生成的本门店专属叫号屏链接。</p>
     </div>
 
     <div v-else-if="featureDisabled" class="setup">
@@ -158,10 +158,23 @@ const storeId = computed(() => {
   const n = Number(Array.isArray(raw) ? raw[0] : raw)
   return Number.isFinite(n) && n > 0 ? n : 0
 })
-const displayToken = computed(() => {
-  const raw = route.query.token
-  return String(Array.isArray(raw) ? raw[0] : raw || '').trim()
-})
+const displayToken = ref('')
+
+function initializeDisplayToken() {
+  const fragment = String(window.location.hash || '').replace(/^#/, '')
+  const fragmentToken = new URLSearchParams(fragment).get('token') || ''
+  const rawQueryToken = route.query.token
+  const queryToken = String(Array.isArray(rawQueryToken) ? rawQueryToken[0] : rawQueryToken || '').trim()
+  displayToken.value = String(fragmentToken || queryToken).trim()
+
+  if (fragmentToken || queryToken) {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('token')
+    url.hash = ''
+    // 清除地址栏与当前历史项中的 bearer token；新链接使用 fragment，HTTP 请求不会携带它。
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`)
+  }
+}
 
 const storeName = ref('')
 const preparing = ref<DisplayItem[]>([])
@@ -495,8 +508,7 @@ function connectWs() {
   }
   connStatus.value = 'connecting'
   const params: Record<string, string | number> = { store_id: storeId.value }
-  if (displayToken.value) params.token = displayToken.value
-  ws = openPublicWebSocket('display', params)
+  ws = openPublicWebSocket('display', params, displayToken.value)
 
   ws.onopen = () => {
     reconnectAttempt = 0
@@ -553,6 +565,7 @@ function tickClock() {
 let unbindVoice: (() => void) | null = null
 
 onMounted(async () => {
+  initializeDisplayToken()
   disposed = false
   unbindVoice = bindAutoVoiceUnlock((ok) => {
     if (ok) voiceUnlocked.value = true
