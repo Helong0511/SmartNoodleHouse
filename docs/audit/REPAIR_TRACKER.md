@@ -194,6 +194,7 @@
 | T-613 | 支付主动查单 Redis 冷却异常 | P2 | Redis 瞬时断连时明确返回 503，保留 fail-closed 限流策略 | api/payments.py、测试_支付同步.py | 已修复+CI通过 |
 | T-614 | 普通请求体缺少全局 ASGI 上限 | P1 | 注册 7MiB 全局 RequestBodyLimitMiddleware；webhook 保留更严格 512KiB | main.py、request_body_limit.py、test_request_body_limit.py | 已修复+CI通过 |
 | T-615 | 审查报告状态过时 | P2 | 重新读取当前代码，标记已修复项、外部阻塞项和人脸基础挑战边界 | 代码审查报告_2026-11-08.md、小程序专项审查报告_2026-11-08.md | 已更新 |
+| T-617 | 即时收款回调与金额异常竞态 | P1 | 渠道即时响应返回后重新 Order→Payment 当前读，回调已成功则不重复结算；金额不匹配仅在未成功时持久化 UNKNOWN，充值路径按 RechargeOrder→Payment 锁序 | payment_service.py、测试_支付同步.py | 已修复，等待最新 CI |
 | T-616 | 退款聚合旧快照 | P1 | MySQL RR 下锁等待前建立的普通读快照可能漏掉并发退款；改为父行锁后 FOR UPDATE 当前读、刷新 ORM 状态，并覆盖退款创建/成功收敛/订单净额及收款余额决策 | payment_service.py、测试_支付退款.py、测试_支付同步.py | 已修复，等待最新 CI |
 
 ### 本轮 CI 证据
