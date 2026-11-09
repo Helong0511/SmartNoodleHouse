@@ -335,6 +335,6 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 
 - 发现退款入口的锁序定位查询会先执行普通 SELECT；在 MySQL `REPEATABLE READ` 下，这可能提前建立事务快照。若随后等待 Order/Payment 行锁，普通 `SUM/COUNT` 仍可能读取锁等待前的旧快照，漏掉刚刚提交的退款状态。
 - 修复：`_lock_order_then_payment` 与退款父行锁查询增加 `populate_existing=True`，确保锁定读刷新当前 Session 中的 ORM 对象；退款创建的在途/已成功金额改为 Order→Payment 锁之后对 `PaymentRefund` 执行 `FOR UPDATE` 当前读并在 Python 汇总。
-- 退款成功收敛同样以当前锁定读汇总同一支付单退款事实；订单净已收在资金状态收敛路径使用 Payment 与 PaymentRefund 当前锁定读，避免旧快照误判部分/全额退款。
+- 退款成功收敛同样以当前锁定读汇总同一支付单退款事实；订单净已收在资金状态收敛路径使用 Payment 与 PaymentRefund 当前锁定读，避免旧快照误判部分/全额退款。进一步复核发现收款创建、现金收款和支付成功后的订单结清判断也依赖净已收金额，现一并在持有 Order 锁后启用当前读，并刷新锁定的 Order ORM 对象。
 - 新增回归测试验证退款行查询、订单净已收聚合均使用 `FOR UPDATE + populate_existing`，并验证父行锁后刷新 Payment。
 - 锁序保持 Order→Payment→PaymentRefund；不在持有退款行锁后再等待父行锁。普通展示用的 `refundable_amount` 仍是只读估算，最终退款金额由持锁的退款执行路径再次校验。
