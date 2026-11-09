@@ -1292,17 +1292,21 @@ async function loadStores() {
   }
 }
 
-async function loadTables() {
-  const sid = effectiveStoreId()
+async function loadTables(expectedStoreId?: number) {
+  const sid = expectedStoreId ?? effectiveStoreId()
   const params = sid ? { store_id: sid } : {}
   const res = await api.get('/tables/pos', { params })
+  if (sid !== effectiveStoreId()) return
   tables.value = res.data?.items || []
   if (selectedTableId.value && !tables.value.some((t) => t.id === selectedTableId.value)) {
     selectedTableId.value = null
   }
 }
 
+let menuLoadSequence = 0
+
 async function loadMenu() {
+  const sequence = ++menuLoadSequence
   const sid = effectiveStoreId()
   if (!sid) {
     categories.value = []
@@ -1330,14 +1334,18 @@ async function loadMenu() {
         return all
       })(),
     ])
+    // 门店切换期间旧请求可能后返回；仅允许当前门店、最新序号写入状态。
+    if (sequence !== menuLoadSequence || sid !== effectiveStoreId()) return
     categories.value = cats.data || []
     products.value = prodPages[0].map(decorate)
     activeCat.value = categories.value[0]?.id ?? null
-    await loadTables()
+    await loadTables(sid)
   } catch (e: any) {
-    ElMessage.error(e.message || '加载菜单失败')
+    if (sequence === menuLoadSequence && sid === effectiveStoreId()) {
+      ElMessage.error(e.message || '加载菜单失败')
+    }
   } finally {
-    loading.value = false
+    if (sequence === menuLoadSequence) loading.value = false
   }
 }
 
