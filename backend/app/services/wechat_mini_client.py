@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import dev_mode_allowed, get_settings
 from app.core.exceptions import AppException
 
 logger = logging.getLogger(__name__)
@@ -18,10 +18,8 @@ _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
 
 
 def _mock_allowed() -> bool:
-    s = get_settings()
-    if s.is_production:
-        return False
-    return s.is_development or s.allow_auth_mock
+    """微信手机号/access_token 的 Mock 统一受三重门控保护。"""
+    return dev_mode_allowed("allow_auth_mock")
 
 
 _PHONE_CODE_TTL = 600
