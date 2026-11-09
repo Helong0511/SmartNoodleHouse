@@ -17,6 +17,11 @@ from app.services.order_service import OrderPriceCalculator
 
 class OrderCreateService:
     @staticmethod
+    def _should_apply_social_benefit(customer_id: int | None, use_social_benefit: bool) -> bool:
+        """公益折扣必须由顾客显式勾选；旧版 social_rule_id 仅兼容接收，不参与资格判断。"""
+        return customer_id is not None and bool(use_social_benefit)
+
+    @staticmethod
     def _is_reusable_idempotent_order(order: Order) -> bool:
         """仅待支付未结清订单可被幂等键复用。"""
         return (order.status or "") == "PENDING_PAYMENT" and (order.payment_status or "") in (
@@ -52,8 +57,9 @@ class OrderCreateService:
         if len(combined) <= 64:
             return combined
         # 不可直接截断：相同长前缀会碰撞并错误复用他人/另一购物车的订单。
-        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        return f"{scope}sha256:{digest}"[:64]
+        digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+        # 超长键直接返回完整 256-bit 摘要；scope 已参与哈希，不再截断摘要位数。
+        return digest
 
     @staticmethod
     def _assert_idempotent_order_match(
@@ -271,7 +277,7 @@ class OrderCreateService:
 
             # 公益与券互斥；与会员折比补贴，取更优（折扣更低者）
             social_hit = None
-            if customer_id and (use_social_benefit or social_rule_id):
+            if OrderCreateService._should_apply_social_benefit(customer_id, use_social_benefit):
                 if customer_coupon_id or customer_voucher_id:
                     raise AppException(40008, "公益折扣不可与优惠券同享，请取消券后重试")
                 pids = [int(i["product_id"]) for i in items]
