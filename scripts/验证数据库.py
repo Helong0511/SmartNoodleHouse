@@ -288,6 +288,13 @@ async def _index_exists(db, table: str, index: str) -> bool:
     ).scalar()
     return int(n or 0) > 0
 
+async def _any_index_exists(db, table: str, indexes: tuple[str, ...]) -> bool:
+    """允许历史等价索引名，避免把迁移已识别的兼容索引误报为缺失。"""
+    for index in indexes:
+        if await _index_exists(db, table, index):
+            return True
+    return False
+
 
 async def _unique_or_column_unique(db, table: str, name: str) -> bool:
     """索引名匹配，或单列 UNIQUE（MySQL 常把 UNIQUE(col) 的索引名设为列名）。"""
@@ -389,22 +396,24 @@ async def main() -> int:
                     f"repository={sorted(expected_heads)}"
                 )
 
+        # 第二项为等价历史索引名；与迁移 0007_prod_indexes.py 的兼容策略保持一致。
         RECOMMENDED_INDEXES = [
-            ("orders", "idx_orders_store_pay_paid"),
-            ("payments", "idx_payments_status_paid"),
-            ("payment_refunds", "idx_refunds_status_succ"),
-            ("financial_ledger", "idx_fl_store_ch_type_created"),
-            ("customer_coupons", "idx_cc_customer_status_exp"),
-            ("payment_reconcile_batches", "ix_payment_reconcile_batches_scope_store_id"),
-            ("outbox_events", "idx_oe_status_retry"),
+            ("orders", ("idx_orders_store_pay_paid",)),
+            ("payments", ("idx_payments_status_paid",)),
+            ("payment_refunds", ("idx_refunds_status_succ", "idx_refunds_succeeded")),
+            ("financial_ledger", ("idx_fl_store_ch_type_created",)),
+            ("customer_coupons", ("idx_cc_customer_status_exp", "idx_cc_customer_status")),
+            ("payment_reconcile_batches", ("ix_payment_reconcile_batches_scope_store_id",)),
+            ("outbox_events", ("idx_oe_status_retry",)),
         ]
-        for table, index in RECOMMENDED_INDEXES:
+        for table, index_names in RECOMMENDED_INDEXES:
             if not await _table_exists(db, table):
                 continue
-            ok = await _index_exists(db, table, index)
-            print(f"[{'OK' if ok else 'WARN'}] index {table}.{index}")
+            ok = await _any_index_exists(db, table, index_names)
+            display_index = index_names[0]
+            print(f"[{'OK' if ok else 'WARN'}] index {table}.{display_index}")
             if not ok:
-                print("  hint: alembic upgrade head 或 sql/007_prod_indexes.sql")
+                print("  hint: 请执行 alembic upgrade head，并确认对应迁移已成功")
         if not await _table_exists(db, "alembic_version"):
             failures.append("missing alembic_version")
 
