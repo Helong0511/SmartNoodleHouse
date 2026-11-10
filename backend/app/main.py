@@ -86,10 +86,9 @@ async def _warmup_recognition_and_tts() -> None:
         from app.services.system_settings_service import SystemSettingsService
 
         settings = get_settings()
-        face_approved = not settings.is_production or (
-            settings.face_recognition_legal_reviewed
-            and settings.face_model_commercial_license_confirmed
-        )
+        from app.services.face_feature_gate import is_face_recognition_allowed
+
+        face_approved = is_face_recognition_allowed(settings)
         face_enabled = False
         if face_approved:
             async with AsyncSessionLocal() as db:
@@ -608,10 +607,9 @@ async def lifespan(app: FastAPI):
 
             async with AsyncSessionLocal() as db:
                 settings = get_settings()
-                face_approved = not settings.is_production or (
-                    settings.face_recognition_legal_reviewed
-                    and settings.face_model_commercial_license_confirmed
-                )
+                from app.services.face_feature_gate import is_face_recognition_allowed
+
+                face_approved = is_face_recognition_allowed(settings)
                 face_enabled = False
                 if face_approved:
                     try:
