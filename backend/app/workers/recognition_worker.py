@@ -86,7 +86,12 @@ class RecognitionWorker:
                         legal_reviewed = bool(
                             getattr(settings, "face_recognition_legal_reviewed", False)
                         )
-                        if bool(getattr(settings, "is_production", False)) and not legal_reviewed:
+                        model_license_confirmed = bool(
+                            getattr(settings, "face_model_commercial_license_confirmed", False)
+                        )
+                        if bool(getattr(settings, "is_production", False)) and (
+                            not legal_reviewed or not model_license_confirmed
+                        ):
                             face_enabled = False
                         else:
                             async with AsyncSessionLocal() as gate_db:
