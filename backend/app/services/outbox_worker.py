@@ -143,12 +143,11 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
         and_(
             OutboxEvent.aggregate_type == "webhook_task",
             or_(
-                OutboxEvent.payload.like('%"action": "confirm_order"%'),
-                OutboxEvent.payload.like('%"action":"confirm_order"%'),
-                OutboxEvent.payload.like('%"action": "cancel_order"%'),
-                OutboxEvent.payload.like('%"action":"cancel_order"%'),
-                OutboxEvent.payload.like('%"action": "reply_urge"%'),
-                OutboxEvent.payload.like('%"action":"reply_urge"%'),
+                # 匹配动作值而非 JSON 固定空格排版；合法 JSON 可任意缩进/空白。
+                # 保守地把含外部副作用动作标识的任务标记为 UNCERTAIN，避免崩溃后重复调用平台。
+                OutboxEvent.payload.like('%confirm_order%'),
+                OutboxEvent.payload.like('%cancel_order%'),
+                OutboxEvent.payload.like('%reply_urge%'),
             ),
         ),
     )
