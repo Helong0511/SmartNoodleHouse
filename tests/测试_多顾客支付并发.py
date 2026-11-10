@@ -472,7 +472,7 @@ async def test_close_channel_payments_by_id_http_outside_order_lock():
         return _CM(db)
 
     close_http = AsyncMock()
-    sync_mock = AsyncMock(return_value=(pay, {"synced": False}))
+    sync_mock = AsyncMock(return_value=(pay, {"synced": False, "trade_state": "CLOSED"}))
     lock_mock = AsyncMock(return_value=pay)
     close_local = AsyncMock()
 
