@@ -99,15 +99,8 @@ async function enrollFaceWelcome() {
     if (!ok) throw new Error('已取消人脸授权')
     actionCompleted = ok
   } else {
-    const ok = await new Promise((resolve) => {
-      my.confirm({
-        title: '开启人脸迎宾',
-        content: '将使用前置摄像头采集人脸，仅用于到店迎宾，可随时关闭。',
-        confirmButtonText: '去拍照',
-        cancelButtonText: '取消',
-        success: (r) => resolve(!!r.confirm),
-      })
-    })
+    // Development-only no-challenge mode still requires the same separate face-data consent.
+    const ok = await confirmAction('无需动作挑战，请确认后继续')
     if (!ok) throw new Error('已取消人脸授权')
     actionCompleted = ok
   }
