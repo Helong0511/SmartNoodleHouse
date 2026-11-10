@@ -138,7 +138,12 @@ async def test_resolve_uncertain_print_job_confirms_not_printed_and_queues_retry
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
                     res = await client.post(
                         "/api/print-jobs/7/resolve-uncertain",
-                        json={"outcome": "NOT_PRINTED", "reason": "已检查出纸口和打印队列，确认未出纸"},
+                        json={
+                            "outcome": "NOT_PRINTED",
+                            "reason": "已检查出纸口和打印队列，确认未出纸",
+                            "worker_stopped": True,
+                            "printer_queue_checked": True,
+                        },
                     )
         assert res.status_code == 200
         data = res.json()["data"]
@@ -186,5 +191,41 @@ async def test_resolve_uncertain_print_job_confirms_printed_without_retry():
         assert data["retry_queued"] is False
         assert data["outcome"] == "PRINTED"
         audit.assert_awaited_once()
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_resolve_uncertain_not_printed_requires_worker_stop_and_queue_check():
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    user = _staff_user()
+    job = SimpleNamespace(id=9, store_id=1, status="UNCERTAIN")
+    fake_db = MagicMock()
+    fake_db.get = AsyncMock(return_value=job)
+    fake_db.execute = AsyncMock()
+    fake_db.commit = AsyncMock()
+
+    async def override_db():
+        yield fake_db
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=set())):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                res = await client.post(
+                    "/api/print-jobs/9/resolve-uncertain",
+                    json={"outcome": "NOT_PRINTED", "reason": "还没有核对完整打印机队列"},
+                )
+        assert res.status_code == 400
+        assert "Worker 已停止" in res.json()["message"]
+        fake_db.execute.assert_not_awaited()
     finally:
         app.dependency_overrides.clear()
