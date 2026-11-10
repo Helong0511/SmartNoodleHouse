@@ -78,6 +78,9 @@ async def _warmup_recognition_and_tts() -> None:
 
     旧顺序「先 TTS 再人脸」会让 RecognitionWorker 空跑 40s+ 漏检，体感像「认出访客要等十几秒」。
     """
+    # Fail closed even if settings lookup or database access fails.
+    face_enabled = False
+
     # 1) 仅在功能已开启且生产合规/模型商业授权均确认后预热人脸模型。
     # 不能因为启动预热绕过正式请求路径的授权门禁。
     try:
@@ -256,18 +259,22 @@ async def _warmup_recognition_and_tts() -> None:
     except Exception:
         logger.exception("TTS 预热失败")
 
-    # 2) 入库用大图模型可后加载（不挡门口 live 识别）
-    try:
+    # 2) 入库用大图模型仅在同一硬门禁和系统开关均允许时预热。
+    # 人脸识别暂停期间完全跳过调用，避免无意义的硬门禁异常日志。
+    if face_enabled:
+        try:
 
-        def _load_enroll() -> None:
-            from app.services.face_extractor import _face_app
+            def _load_enroll() -> None:
+                from app.services.face_extractor import _face_app
 
-            _face_app()
+                _face_app()
 
-        await asyncio.to_thread(_load_enroll)
-        logger.info("InsightFace 入库模型预热完成")
-    except Exception:
-        logger.exception("InsightFace 入库模型预热失败")
+            await asyncio.to_thread(_load_enroll)
+            logger.info("InsightFace 入库模型预热完成")
+        except Exception:
+            logger.exception("InsightFace 入库模型预热失败")
+    else:
+        logger.info("跳过 InsightFace 入库模型预热：功能未开启或授权/合规门禁未通过")
 
 
 @asynccontextmanager
