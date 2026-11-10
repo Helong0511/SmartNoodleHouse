@@ -41,6 +41,21 @@ from app.tasks.scheduler import register_tasks
 from app.workers.tts_worker import TTSWorker
 
 logger = logging.getLogger(__name__)
+
+
+def _initialize_object_storage(settings) -> None:
+    """启动时校验对象存储适配器，避免首次上传请求才暴露配置/依赖错误。"""
+    try:
+        from app.services.object_storage import get_storage
+
+        get_storage()
+    except Exception as exc:
+        logger.exception(
+            "对象存储初始化失败，拒绝启动（STORAGE_BACKEND=%s）",
+            getattr(settings, "storage_backend", "local"),
+        )
+        raise SystemExit(1) from exc
+
 scheduler = AsyncIOScheduler(
     timezone=ZoneInfo("Asia/Shanghai"),
     job_defaults={
@@ -243,15 +258,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     validate_settings(settings)
 
-    # 对象存储在启动阶段初始化：S3 SDK 缺失、配置错误或 backend 拼写错误
-    # 必须在进程接流量前暴露，不能等到顾客上传头像/图片时才失败。
-    try:
-        from app.services.object_storage import get_storage
-
-        get_storage()
-    except Exception as exc:
-        logger.exception("对象存储初始化失败，拒绝启动（STORAGE_BACKEND=%s）", settings.storage_backend)
-        raise SystemExit(1) from exc
+    _initialize_object_storage(settings)
 
     try:
         from sqlalchemy import text
