@@ -93,11 +93,13 @@ jobs:
           grep -F 'REPLACE_DEPLOY_ROOT/backend/.venv/bin/uvicorn app.main:app' systemd/smart-noodle.service
           grep -F -- '--workers 2' systemd/smart-noodle.service
           grep -F -- '--timeout-graceful-shutdown 30' systemd/smart-noodle.service
+          grep -F -- '--no-access-log' systemd/smart-noodle.service
           if grep -Eq 'gunicorn|uvicorn[.]workers[.]UvicornWorker' systemd/smart-noodle.service; then
             echo "Deprecated or removed ASGI worker launch path found" >&2
             exit 1
           fi
           python -m uvicorn --help | grep -F -- '--workers'
+          python -m uvicorn --help | grep -F -- '--no-access-log'
           python - <<'PY'
           import os
           import socket

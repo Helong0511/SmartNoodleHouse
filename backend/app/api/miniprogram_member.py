@@ -21,6 +21,7 @@ from app.models import Customer
 from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
+from app.services.private_media import sign_private_avatar_url
 from app.utils.upload import fetch_and_save_remote_image, read_upload_limited, save_upload
 
 logger = logging.getLogger(__name__)
@@ -143,7 +144,7 @@ async def _member_activation_response(
         "customer_id": customer.id,
         "customer_no": customer.customer_no,
         "nickname": disp["nickname"] or nickname,
-        "avatar_url": disp["avatar_url"] or avatar,
+        "avatar_url": sign_private_avatar_url(disp["avatar_url"] or avatar, customer.id),
         "phone": customer.phone,
         "face_status": await _face_status(db, customer.id),
         "member_registered": CustomerService.is_member(customer),
@@ -342,7 +343,7 @@ async def patch_member_profile(
         {
             "customer_id": customer.id,
             "nickname": disp["nickname"],
-            "avatar_url": disp["avatar_url"],
+            "avatar_url": sign_private_avatar_url(disp["avatar_url"], customer.id),
             "phone": customer.phone,
             "birthday": serialize_dt(customer.birthday),
             "birthday_picker": birthday_for_picker(customer.birthday, cal),
@@ -399,7 +400,7 @@ async def upload_member_avatar(
     )
     return success(
         {
-            "avatar_url": url,
+            "avatar_url": sign_private_avatar_url(url, customer.id),
             "customer_id": customer.id,
         },
         request=request,
@@ -437,7 +438,7 @@ async def import_member_avatar_from_url(
     )
     return success(
         {
-            "avatar_url": url,
+            "avatar_url": sign_private_avatar_url(url, customer.id),
             "customer_id": customer.id,
         },
         request=request,

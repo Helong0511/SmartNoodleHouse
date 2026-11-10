@@ -48,6 +48,10 @@ class LocalObjectStorage(ObjectStorage):
         path = self._safe_resolve(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(path.write_bytes, data)
+        if key.startswith("avatars/"):
+            from app.services.private_media import private_avatar_path
+
+            return private_avatar_path(key)
         return f"/uploads/{key.replace(chr(92), '/')}"
 
     async def get_bytes(self, key: str) -> bytes:
@@ -160,7 +164,11 @@ class S3ObjectStorage(ObjectStorage):
             if self.public_base:
                 return f"{self.public_base}/{key}"
             return f"/api/media/public/{key}"
-        # 私有对象只保存不透明的内部标识，不把 S3/MinIO 管理端点暴露给客户端。
+        # 私有头像只返回应用内引用；读取必须经短时签名路由，不暴露 S3/MinIO 端点。
+        if key.startswith("avatars/"):
+            from app.services.private_media import private_avatar_path
+
+            return private_avatar_path(key)
         return f"s3://{self.bucket}/{key}"
 
     async def get_bytes(self, key: str) -> bytes:
