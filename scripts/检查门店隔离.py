@@ -56,6 +56,10 @@ EXEMPT: dict[str, str] = {
     "orders_common.py": "订单路由共享辅助，无独立 HTTP 入口",
     "products_common.py": "菜品路由共享辅助，无独立 HTTP 入口",
     "customers_common.py": "顾客路由共享辅助，无独立 HTTP 入口",
+    "media.py": (
+        "匿名公开媒体路由：仅允许 products/stores UUID key，且必须被产品主图、"
+        "产品图片或门店 Logo 精确引用；不读取顾客/人脸/头像等私有对象"
+    ),
 }
 
 
