@@ -92,12 +92,18 @@ def test_alipay_refund_status_is_fail_closed():
     assert _resolve_alipay_refund_status({}) == "PROCESSING"
 
 
-def test_refund_poll_backoff_grows_and_caps():
+def test_refund_poll_backoff_is_provider_specific_and_caps():
     from app.services.payment_service import _refund_poll_backoff_seconds
 
-    assert [_refund_poll_backoff_seconds(n) for n in (1, 2, 3, 4, 5, 100)] == [
-        300, 600, 1200, 1800, 1800, 1800
-    ]
+    assert [
+        _refund_poll_backoff_seconds(n, provider="WECHAT")
+        for n in (1, 2, 3, 4, 5, 6, 7, 8, 100)
+    ] == [60, 60, 60, 60, 300, 600, 1200, 1800, 1800]
+    # No authoritative Alipay cadence was established; retain the existing policy.
+    assert [
+        _refund_poll_backoff_seconds(n, provider="ALIPAY")
+        for n in (1, 2, 3, 4, 5, 100)
+    ] == [300, 600, 1200, 1800, 1800, 1800]
 
 
 @pytest.mark.asyncio
