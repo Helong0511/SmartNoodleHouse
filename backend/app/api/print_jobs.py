@@ -133,7 +133,6 @@ async def resolve_uncertain_print_job(
     if not changed.rowcount:
         await db.rollback()
         raise AppException(40912, "打印任务状态已变化，请刷新后重新核验", status_code=409)
-    await db.commit()
     await AuditService.log_staff(
         db,
         user=user,
