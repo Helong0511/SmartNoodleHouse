@@ -9,6 +9,16 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+def _require_face_recognition_enabled() -> None:
+    """Central hard stop: no direct extractor/model-loading caller may bypass the pause."""
+    from app.services.face_feature_gate import FACE_RECOGNITION_TEMPORARILY_DISABLED
+
+    if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+        raise RuntimeError("人脸识别功能临时关闭：模型商业授权尚未完成核验")
+
+
+
 # 生产统一 512 维 ArcFace embedding；OpenCV 兜底仅开发且显式允许
 EMBEDDING_DIM = 512
 # onnxruntime / InsightFace 非完全线程安全；识别 to_thread 与预热并发时需串行
@@ -51,6 +61,7 @@ def _assert_face_model_commercial_license() -> None:
 @lru_cache(maxsize=1)
 def _face_app():
     """授权入库用：较高检测分辨率，偏准。"""
+    _require_face_recognition_enabled()
     _assert_face_model_commercial_license()
     from insightface.app import FaceAnalysis
 
@@ -62,6 +73,7 @@ def _face_app():
 @lru_cache(maxsize=1)
 def _face_app_live():
     """到店实时识别：偏召回（门口远景/侧脸/弱光）。"""
+    _require_face_recognition_enabled()
     _assert_face_model_commercial_license()
     from insightface.app import FaceAnalysis
 
@@ -73,6 +85,7 @@ def _face_app_live():
 
 def ensure_live_face_app() -> None:
     """阻塞加载 live 模型（供启动预热 / RecognitionWorker 就绪门闩）。"""
+    _require_face_recognition_enabled()
     _face_app_live()
 
 
@@ -162,6 +175,7 @@ def extract_face_embedding_bgr(
     live=True：到店实时路径——用较小 det_size，多人时取最大脸（门口常有陪同）。
     live=False：授权入库——要求画面仅一人，检测更严。
     """
+    _require_face_recognition_enabled()
     _assert_face_model_commercial_license()
     if _insightface_available():
         try:
@@ -230,6 +244,7 @@ def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
     light=True：窗口收集期用更小缩放、跳过 CLAHE 二次检测，降 CPU；
     定稿匹配前应对 best_frame 再跑 light=False 完整提特征。
     """
+    _require_face_recognition_enabled()
     _assert_face_model_commercial_license()
     from app.services.face_best_frame import LiveFaceHit
 
