@@ -93,8 +93,13 @@ def test_alipay_refund_status_is_fail_closed():
 
 
 def test_refund_poll_backoff_is_provider_specific_and_caps():
-    from app.services.payment_service import _refund_poll_backoff_seconds
+    from app.services.payment_service import (
+        _initial_refund_poll_delay_seconds,
+        _refund_poll_backoff_seconds,
+    )
 
+    assert _initial_refund_poll_delay_seconds(provider="WECHAT") == 60
+    assert _initial_refund_poll_delay_seconds(provider="ALIPAY") == 300
     assert [
         _refund_poll_backoff_seconds(n, provider="WECHAT")
         for n in (1, 2, 3, 4, 5, 6, 7, 8, 100)
