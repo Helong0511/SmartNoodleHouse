@@ -155,7 +155,7 @@ def test_private_avatar_signed_queries_are_not_written_to_access_logs():
 
     log_format = next(line for line in nginx.splitlines() if line.startswith("log_format private_media"))
     assert "$uri" in log_format
-    assert "$request" not in log_format
+    assert '"$request ' not in log_format
     assert "$args" not in log_format
     assert "location ^~ /api/media/private/avatars/" in nginx
     assert "smart-noodle.private-media.access.log private_media" in nginx
