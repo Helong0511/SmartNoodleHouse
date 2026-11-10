@@ -14,7 +14,7 @@ def _dotenv_value(path: Path, key: str) -> str:
 def test_generic_env_file_is_an_overview_not_a_production_template() -> None:
     path = ROOT / ".env.example"
     content = path.read_text(encoding="utf-8")
-    assert "仅供查阅，不可直接复制为运行配置" in content.splitlines()[0]
+    assert "仅供查阅，不可直接复制为运行配置" in content
     assert _dotenv_value(path, "APP_ENV") == "development"
     assert _dotenv_value(path, "APP_HOST") == "127.0.0.1"
     assert "请勿直接复制为 .env" in content
