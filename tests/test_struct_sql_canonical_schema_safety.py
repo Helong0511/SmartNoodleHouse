@@ -15,7 +15,7 @@ def test_canonical_schema_contains_no_destructive_statements():
     schema = raw[start + len(start_marker):end]
     # Join the complete SQL body before splitting: CREATE TABLE statements
     # span many lines, so per-line splitting mistakes column definitions for SQL.
-    body = "\\n".join(
+    body = "\n".join(
         line for line in schema.splitlines() if not line.strip().startswith("--")
     )
     statements = [part.strip() for part in body.split(";") if part.strip()]
