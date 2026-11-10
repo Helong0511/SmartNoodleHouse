@@ -157,8 +157,8 @@
 ### 2026-11-10 增量复核：渠道关单终态确认
 
 - 复核 PaymentService.close_channel_payments() 与 close_channel_payments_by_id() 时发现：锁外关单路径在渠道关单失败、查单返回 UNKNOWN 或查单异常后，仍可能继续把本地 PENDING 支付单改为 CLOSED。该状态无法证明渠道侧未扣款，可能造成已付款订单被本地误关。
-- 已新增 _channel_trade_is_terminal_unpaid()：仅微信 CLOSED/REVOKED/PAYERROR 与支付宝 TRADE_CLOSED 可作为未支付终态；NOTPAY/USERPAYING/WAIT_BUYER_PAY/UNKNOWN/NOT_CONFIGURED 等非终态或未知状态一律保留 PENDING，等待后续查单补偿。
+- 已新增 _channel_trade_is_terminal_unpaid()：微信仅 CLOSED/REVOKED/PAYERROR 可作为未支付终态；支付宝必须同时满足 trade_status=TRADE_CLOSED 且撤销响应 action=close。支付宝 action=refund 代表渠道已触发退款，不能当作未支付关单；action 缺失也保留 PENDING。NOTPAY/USERPAYING/WAIT_BUYER_PAY/UNKNOWN/NOT_CONFIGURED 等状态同样保留 PENDING。
 - 两条关单路径均已增加终态门禁；锁外路径在关单失败或查单异常时不再继续本地 CLOSED。
 - 回归测试新增覆盖渠道关单超时 + UNKNOWN、关单超时 + 查单异常、处理中状态，以及渠道明确 CLOSED 后仍可安全完成本地关单。
-- 官方状态依据：微信支付交易状态枚举明确区分 CLOSED、REVOKED、PAYERROR 与 NOTPAY、USERPAYING；支付宝区分 TRADE_CLOSED 与 WAIT_BUYER_PAY。见微信支付查询订单文档及支付宝交易状态说明。
-- 关联代码提交：226ef93ef407b15bbd391c302042cf4844e07355；测试提交：5c4303a16fc6a3517ecaf2b5aa26288e0893161f、545c129d03b1ed78769682d74dae5fdacfe99dbd。最终 HEAD 的 CI 仍待执行完成，未提前标记测试通过。
+- 官方状态依据：微信支付交易状态枚举明确区分 CLOSED、REVOKED、PAYERROR 与 NOTPAY、USERPAYING；支付宝 TRADE_CLOSED 可能表示未付款关闭，也可能表示付款后全额退款，撤销接口 action=close 表示无退款关闭、action=refund 表示已触发退款。见微信支付查询订单文档及支付宝 alipay.trade.cancel / 交易状态说明。
+- 关联代码提交：226ef93ef407b15bbd391c302042cf4844e07355、9cdf9a29bf175f1769bf6d16d4dc592446ee0553；测试提交：5c4303a16fc6a3517ecaf2b5aa26288e0893161f、545c129d03b1ed78769682d74dae5fdacfe99dbd、f00135be0213bd408a67e66237fe728b07b69368。最终 HEAD 的 CI 仍待执行完成，未提前标记测试通过。
