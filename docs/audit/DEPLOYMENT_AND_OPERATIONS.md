@@ -233,6 +233,7 @@
 - 依赖：当前 `boto3` 同时列在 `backend/requirements.txt` 与完整生产锁文件中，因此默认运行时安装也会安装 boto3；不要将其描述为可选依赖。若未来拆分 S3 extra，必须同步更新锁文件生成、Ubuntu 部署安装命令和 CI。
 - 私有媒体：顾客头像不能使用公开 CDN/匿名媒体路由；短时 URL 不得写入数据库，持久化稳定对象路径，响应时再签发。访客抓拍/人脸图像仍默认禁止公开访问。
 - 集成测试：CI 启动临时 MinIO 并运行 `tests/test_s3_object_storage_minio.py`；本地可先启动 MinIO，再设置 `S3_TEST_ENDPOINT`、`S3_TEST_ACCESS_KEY`、`S3_TEST_SECRET_KEY` 并执行 `PYTHONPATH=backend python -m pytest -q tests/test_s3_object_storage_minio.py`。
+  - CI 镜像固定为 `dappros/minio:RELEASE.2025-09-07T16-13-09Z`（上游 MinIO 社区发行版的重新发布副本），仅用于一次性集成测试；生产环境应使用经组织审核、固定 digest 并纳入镜像供应链管理的 S3 服务镜像，不直接复用该 CI 镜像。
 - 图片：门店 Logo 上传转 WebP、拒绝外链/ GIF/过小（测试_门店Logo.py）；餐品图 URL 白名单。
 - 人脸：仅摄像头实拍，base64 大小+像素双限，decompression bomb 防护。
 
