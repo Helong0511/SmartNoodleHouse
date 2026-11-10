@@ -139,3 +139,11 @@ def test_mysql_restore_command_forces_utf8mb4_client_charset():
         "operator",
         "smart_noodle_house",
     ]
+
+
+
+def test_nginx_denies_direct_customer_avatar_static_access():
+    config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
+    assert "location ^~ /uploads/avatars/ {" in config
+    assert "location ^~ /uploads/visitors/ {" in config
+    assert config.index("location ^~ /uploads/avatars/ {") < config.index("location /uploads/ {")

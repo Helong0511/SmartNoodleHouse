@@ -923,6 +923,12 @@ def create_app() -> FastAPI:
 
     mimetypes.add_type("image/webp", ".webp")
 
+    # 头像属于顾客个人资料；旧版本地 /uploads/avatars URL 也必须经过短时签名媒体路由。
+    # 显式路由放在 /uploads StaticFiles mount 之前，避免开发环境绕过签名保护。
+    @app.get("/uploads/avatars/{key:path}", include_in_schema=False)
+    async def _deny_public_customer_avatar(key: str):
+        raise AppException(40425, "顾客头像不允许通过公开静态路径访问", status_code=404)
+
     # 开发环境静态挂载也必须拦截访客人脸抓拍，不能因绕过 Nginx 而公开。
     @app.get("/uploads/visitors/{key:path}", include_in_schema=False)
     async def _deny_public_visitor_snapshot(key: str):

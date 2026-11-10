@@ -36,6 +36,11 @@ from app.core.security import create_customer_token, decode_customer_token
 from app.models import Customer, CustomerAlipayAccount, CustomerWechatAccount
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
+from app.services.private_media import (
+    avatar_object_key,
+    private_avatar_path,
+    sign_private_avatar_url,
+)
 from app.services.dining_session_service import DiningSessionService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
 
@@ -89,7 +94,7 @@ async def _channel_login_payload(
         "customer_no": customer.customer_no,
         "customer_token": _issue_customer_token(customer, channel),
         "nickname": disp["nickname"],
-        "avatar_url": disp["avatar_url"],
+        "avatar_url": sign_private_avatar_url(disp["avatar_url"], customer.id),
         "phone": customer.phone,
         "is_new": not bool(getattr(customer, "first_seen_store_id", None)),
         "is_guest": not is_member,
@@ -177,6 +182,10 @@ def _persistable_avatar_url(url: str | None) -> str | None:
         return None
     if u.startswith("/uploads/"):
         return u.split("?", 1)[0]
+    private_path = u.split("?", 1)[0]
+    key = avatar_object_key(private_path)
+    if key:
+        return private_avatar_path(key)
     marker = "/uploads/"
     if marker in u and (u.startswith("http://") or u.startswith("https://")):
         return u[u.find(marker) :].split("?", 1)[0]

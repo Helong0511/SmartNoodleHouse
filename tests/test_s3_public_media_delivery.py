@@ -60,7 +60,7 @@ async def test_s3_storage_returns_frontend_renderable_url_without_public_cdn():
         b"private",
         "image/webp",
     )
-    assert private_url == "s3://private-bucket/avatars/abcdef0123456789abcdef0123456789.webp"
+    assert private_url == "/api/media/private/avatars/abcdef0123456789abcdef0123456789.webp"
 
     storage.public_base = "https://cdn.example.test/assets"
     cdn_url = await storage.put_bytes(key, b"image", "image/webp")

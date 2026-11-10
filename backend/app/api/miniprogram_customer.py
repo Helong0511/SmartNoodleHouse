@@ -13,6 +13,7 @@ from app.core.response import serialize_dt, success
 from app.models import CouponTemplate, CustomerPreference
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService, PreferenceService
+from app.services.private_media import sign_private_avatar_url
 from app.services.scope_override import merge_store_over_hq
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
@@ -66,7 +67,7 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
             "customer_no": customer.customer_no,
             "display_name": customer.display_name,
             "nickname": disp["nickname"],
-            "avatar_url": disp["avatar_url"],
+            "avatar_url": sign_private_avatar_url(disp["avatar_url"], customer.id),
             "phone": customer.phone,
             "birthday": serialize_dt(customer.birthday),
             "birthday_picker": birthday_for_picker(customer.birthday, cal),

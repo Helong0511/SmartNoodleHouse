@@ -25,6 +25,7 @@ from app.models import (
 from app.services.audit_service import AuditService
 from app.services.customer_merge_service import CustomerMergeService
 from app.services.customer_service import CustomerService, PreferenceService
+from app.services.private_media import sign_private_avatar_url
 
 router = APIRouter(prefix="/customers", tags=["顾客"])
 
@@ -335,7 +336,7 @@ async def list_customers(
             "id": c.id,
             "customer_no": c.customer_no,
             **CustomerService.identity_name_payload(c),
-            "avatar_url": _avatar_for(c),
+            "avatar_url": sign_private_avatar_url(_avatar_for(c), c.id),
             "phone": c.phone,
             "status": c.status,
             "channels": [
@@ -489,7 +490,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             **CustomerService.identity_name_payload(customer),
             "phone": customer.phone,
             "status": customer.status,
-            "avatar_url": avatar,
+            "avatar_url": sign_private_avatar_url(avatar, customer.id),
             "has_face": face.scalar_one_or_none() is not None,
             "order_count": int(order_count),
             "last_order_at": serialize_dt(customer.last_order_at),
@@ -501,7 +502,9 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
                     "openid": w.openid,
                     "unionid": w.unionid,
                     "nickname": getattr(w, "nickname", None),
-                    "avatar_url": getattr(w, "avatar_url", None),
+                    "avatar_url": sign_private_avatar_url(
+                        getattr(w, "avatar_url", None), customer.id
+                    ),
                     "profile_completed": int(getattr(w, "profile_completed", 0) or 0),
                     "is_mock": str(w.openid).startswith("wx_dev_"),
                 }
@@ -511,7 +514,9 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
                 {
                     "alipay_user_id": a.alipay_user_id,
                     "nickname": getattr(a, "nickname", None),
-                    "avatar_url": getattr(a, "avatar_url", None),
+                    "avatar_url": sign_private_avatar_url(
+                        getattr(a, "avatar_url", None), customer.id
+                    ),
                     "profile_completed": int(getattr(a, "profile_completed", 0) or 0),
                     "is_mock": str(a.alipay_user_id).startswith("ali_dev_"),
                 }
