@@ -162,6 +162,16 @@ def validate_settings(settings: Settings) -> None:
     if not isinstance(webhook_limit, int) or not 1024 <= webhook_limit <= 10 * 1024 * 1024:
         errors.append("WEBHOOK_MAX_BODY_BYTES 必须在 1024 至 10485760 字节之间")
     is_prod = bool(getattr(settings, "is_production", False))
+    if is_prod and getattr(settings, "enable_face_welcome", False):
+        if not getattr(settings, "face_recognition_legal_reviewed", False):
+            errors.append(
+                "生产环境启用人脸识别前必须完成 FACE_RECOGNITION_LEGAL_REVIEWED 法律/隐私审核"
+            )
+        if not getattr(settings, "face_model_commercial_license_confirmed", False):
+            errors.append(
+                "生产环境启用人脸识别前必须取得模型商业授权并设置 "
+                "FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=true"
+            )
     face_liveness_mode = str(
         getattr(settings, "face_liveness_mode", "challenge") or "challenge"
     ).strip().lower()

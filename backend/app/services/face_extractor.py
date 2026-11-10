@@ -30,9 +30,28 @@ def _onnx_providers() -> list[str]:
         return ["CPUExecutionProvider"]
 
 
+def _assert_face_model_commercial_license() -> None:
+    """生产加载 InsightFace 预训练模型前必须确认商业授权；代码 MIT 不代表模型可商用。"""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    if settings.is_production and not getattr(
+        settings, "face_recognition_legal_reviewed", False
+    ):
+        raise RuntimeError("生产环境禁止在完成 FACE_RECOGNITION_LEGAL_REVIEWED 审核前运行人脸模型")
+    if settings.is_production and not getattr(
+        settings, "face_model_commercial_license_confirmed", False
+    ):
+        raise RuntimeError(
+            "生产环境禁止加载未确认商业授权的 InsightFace 预训练模型；"
+            "取得模型商业授权并设置 FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=true 后再启用"
+        )
+
+
 @lru_cache(maxsize=1)
 def _face_app():
     """授权入库用：较高检测分辨率，偏准。"""
+    _assert_face_model_commercial_license()
     from insightface.app import FaceAnalysis
 
     app = FaceAnalysis(name="buffalo_l", providers=_onnx_providers())
@@ -43,6 +62,7 @@ def _face_app():
 @lru_cache(maxsize=1)
 def _face_app_live():
     """到店实时识别：偏召回（门口远景/侧脸/弱光）。"""
+    _assert_face_model_commercial_license()
     from insightface.app import FaceAnalysis
 
     app = FaceAnalysis(name="buffalo_l", providers=_onnx_providers())
@@ -142,6 +162,7 @@ def extract_face_embedding_bgr(
     live=True：到店实时路径——用较小 det_size，多人时取最大脸（门口常有陪同）。
     live=False：授权入库——要求画面仅一人，检测更严。
     """
+    _assert_face_model_commercial_license()
     if _insightface_available():
         try:
             return _extract_insightface_bgr(img, live=live)
@@ -209,6 +230,7 @@ def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
     light=True：窗口收集期用更小缩放、跳过 CLAHE 二次检测，降 CPU；
     定稿匹配前应对 best_frame 再跑 light=False 完整提特征。
     """
+    _assert_face_model_commercial_license()
     from app.services.face_best_frame import LiveFaceHit
 
     src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0

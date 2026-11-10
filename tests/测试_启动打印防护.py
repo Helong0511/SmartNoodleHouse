@@ -88,6 +88,28 @@ def test_prod_rejects_rate_limit_disabled():
         validate_settings(_base_prod(enable_rate_limit=False))
 
 
+def test_prod_rejects_face_welcome_without_legal_review():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_face_welcome=True,
+                face_recognition_legal_reviewed=False,
+                face_model_commercial_license_confirmed=True,
+            )
+        )
+
+
+def test_prod_rejects_face_welcome_without_model_commercial_license():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_face_welcome=True,
+                face_recognition_legal_reviewed=True,
+                face_model_commercial_license_confirmed=False,
+            )
+        )
+
+
 def test_prod_rejects_opencv_face_fallback():
     with pytest.raises(SystemExit):
         validate_settings(_base_prod(allow_opencv_face_fallback=True))

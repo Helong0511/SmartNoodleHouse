@@ -6,8 +6,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+@pytest.mark.parametrize(
+    ("legal_reviewed", "license_confirmed"),
+    [(False, True), (True, False)],
+)
 @pytest.mark.asyncio
-async def test_disabled_face_welcome_stops_worker_before_model_or_camera_processing(monkeypatch):
+async def test_unapproved_face_welcome_stops_worker_before_model_or_camera_processing(
+    monkeypatch, legal_reviewed, license_confirmed
+):
     """The global face feature flag must gate all biometric frame processing."""
     from app.core import config as config_module
     from app.core import database as database_module
@@ -26,9 +32,10 @@ async def test_disabled_face_welcome_stops_worker_before_model_or_camera_process
     settings = SimpleNamespace(
         enable_face_welcome=True,
         is_production=True,
-        face_recognition_legal_reviewed=False,
-        # Even if the admin toggle and legacy capture switch are true, the
-        # production legal-review gate must prevent biometric processing.
+        face_recognition_legal_reviewed=legal_reviewed,
+        face_model_commercial_license_confirmed=license_confirmed,
+        # Even if the admin toggle and legacy capture switch are true, either
+        # missing production approval must prevent biometric processing.
         unknown_visitor_capture_enabled=True,
     )
     monkeypatch.setattr(database_module, "AsyncSessionLocal", FakeSession)
@@ -83,21 +90,29 @@ def test_unknown_visitor_face_processing_defaults_are_off():
 
     assert Settings.model_fields["enable_face_welcome"].default is False
     assert Settings.model_fields["face_recognition_legal_reviewed"].default is False
+    assert Settings.model_fields["face_model_commercial_license_confirmed"].default is False
     assert Settings.model_fields["unknown_visitor_capture_enabled"].default is False
     assert Settings.model_fields["unknown_visitor_welcome_enabled"].default is False
     assert BUSINESS_SETTING_META["unknown_visitor_capture_enabled"]["default"] is False
     assert BUSINESS_SETTING_META["unknown_visitor_welcome_enabled"]["default"] is False
 
 
+@pytest.mark.parametrize(
+    ("legal_reviewed", "license_confirmed"),
+    [(False, True), (True, False)],
+)
 @pytest.mark.asyncio
-async def test_production_face_enrollment_api_requires_legal_review(monkeypatch):
+async def test_production_face_enrollment_api_requires_legal_and_model_approval(
+    monkeypatch, legal_reviewed, license_confirmed
+):
     from app.api import miniprogram_face
     from app.core.exceptions import AppException
     from app.services.system_settings_service import SystemSettingsService
 
     settings = SimpleNamespace(
         is_production=True,
-        face_recognition_legal_reviewed=False,
+        face_recognition_legal_reviewed=legal_reviewed,
+        face_model_commercial_license_confirmed=license_confirmed,
         enable_face_welcome=True,
     )
     monkeypatch.setattr(miniprogram_face, "get_settings", lambda: settings)
