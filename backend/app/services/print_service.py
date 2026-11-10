@@ -74,7 +74,7 @@ TICKET_CANCEL = "CANCEL"  # 作废/取消（票头加【作废】）
 MAX_PRINT_ATTEMPTS = 8
 PRINT_BACKOFF_BASE_SEC = 2
 PRINT_BACKOFF_CAP_SEC = 3600
-# PRINTING 超时回收：locked_at 早于 now - STALE_PRINTING_SEC 视为崩溃残留，复位 RETRYING
+# PRINTING 超时回收：物理打印结果无法可靠判定，必须进入 UNCERTAIN 等待人工核验
 STALE_PRINTING_SEC = 300
 # TEXT 可截断上限（留余量）
 PRINT_CONTENT_MAX_LEN = 60000
@@ -977,11 +977,10 @@ class PrintService:
 
     @classmethod
     async def reclaim_stale_printing(cls, db: AsyncSession, *, stale_after: int = STALE_PRINTING_SEC) -> int:
-        """回收崩溃残留的 PRINTING 任务：locked_at < now - stale_after → 复位 RETRYING。
+        """将结果未知的崩溃残留任务隔离为 UNCERTAIN，禁止自动重打。
 
-        复位时不清零 attempt_count（避免无限重试），仅释放锁。
-        注意：必须回到 RETRYING（而非 PENDING）——process_pending_print_jobs
-        只认领 RETRYING/FAILED，回到 PENDING 会导致任务永久卡住。
+        打印机可能已接收任务但应用未能持久化 SUCCESS；TCP/云打印均不保证
+        exactly-once。只有操作员核对纸面输出并显式处置后，任务才能关闭或重试。
         """
         cutoff = now_local() - timedelta(seconds=stale_after)
         stmt = (
@@ -991,10 +990,11 @@ class PrintService:
                 or_(PrintJob.locked_at.is_(None), PrintJob.locked_at < cutoff),
             )
             .values(
-                status="RETRYING",
+                status="UNCERTAIN",
+                last_error="PRINT_RESULT_UNKNOWN: printer may already have accepted the ticket; operator verification required",
                 locked_at=None,
                 locked_by=None,
-                next_retry_at=now_local(),
+                next_retry_at=None,
             )
         )
         result = await db.execute(stmt)
@@ -1002,8 +1002,7 @@ class PrintService:
         count = int(result.rowcount or 0)
         if count:
             logger.critical(
-                "PRINT RESULT UNCERTAIN: reclaimed %s stale PRINTING jobs; printer may already have accepted the ticket. "
-                "Automatic retry can create duplicate kitchen tickets. Inspect printer/output before manual intervention.",
+                "PRINT RESULT UNCERTAIN: quarantined %s stale PRINTING jobs as UNCERTAIN; automatic retry is disabled until an operator verifies printer output.",
                 count,
             )
         return count
