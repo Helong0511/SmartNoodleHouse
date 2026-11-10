@@ -56,6 +56,7 @@ def _face_app():
 @lru_cache(maxsize=1)
 def _face_app_live():
     """到店实时识别：偏召回（门口远景/侧脸/弱光）。"""
+    _assert_face_model_commercial_license()
     from insightface.app import FaceAnalysis
 
     app = FaceAnalysis(name="buffalo_l", providers=_onnx_providers())
