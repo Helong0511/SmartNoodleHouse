@@ -830,22 +830,28 @@ async def test_recharge_settlement_never_downgrades_refunded_payment():
 
 
 @pytest.mark.parametrize(
-    ("provider", "trade_state", "expected"),
+    ("provider", "trade_state", "cancel_action", "expected"),
     [
-        ("WECHAT", "CLOSED", True),
-        ("WECHAT", "REVOKED", True),
-        ("WECHAT", "PAYERROR", True),
-        ("WECHAT", "NOTPAY", False),
-        ("WECHAT", "USERPAYING", False),
-        ("WECHAT", "UNKNOWN", False),
-        ("ALIPAY", "TRADE_CLOSED", True),
-        ("ALIPAY", "WAIT_BUYER_PAY", False),
-        ("ALIPAY", "TRADE_SUCCESS", False),
-        ("OTHER", "CLOSED", False),
+        ("WECHAT", "CLOSED", None, True),
+        ("WECHAT", "REVOKED", None, True),
+        ("WECHAT", "PAYERROR", None, True),
+        ("WECHAT", "NOTPAY", None, False),
+        ("WECHAT", "USERPAYING", None, False),
+        ("WECHAT", "UNKNOWN", None, False),
+        ("ALIPAY", "TRADE_CLOSED", "close", True),
+        ("ALIPAY", "TRADE_CLOSED", "refund", False),
+        ("ALIPAY", "TRADE_CLOSED", None, False),
+        ("ALIPAY", "WAIT_BUYER_PAY", "close", False),
+        ("ALIPAY", "TRADE_SUCCESS", "close", False),
+        ("OTHER", "CLOSED", None, False),
     ],
 )
-def test_channel_trade_must_be_explicit_terminal_unpaid(provider, trade_state, expected):
-    assert PaymentService._channel_trade_is_terminal_unpaid(provider, trade_state) is expected
+def test_channel_trade_must_be_explicit_terminal_unpaid(
+    provider, trade_state, cancel_action, expected
+):
+    assert PaymentService._channel_trade_is_terminal_unpaid(
+        provider, trade_state, cancel_action=cancel_action
+    ) is expected
 
 
 class _PaymentCloseSessionContext:
@@ -1008,3 +1014,42 @@ async def test_close_channel_payments_by_id_closes_only_after_terminal_unpaid_co
     close_local.assert_awaited_once_with(
         db, payment, reason="超时关单同步撤销渠道交易"
     )
+
+
+@pytest.mark.asyncio
+async def test_close_channel_payments_by_id_does_not_treat_alipay_auto_refund_as_unpaid():
+    """支付宝撤销 action=refund 表示已触发退款，TRADE_CLOSED 不可当作未付款关单。"""
+    order = SimpleNamespace(id=741, order_no="O741", payment_status="UNPAID")
+    payment = SimpleNamespace(
+        id=742, payment_no="PAY742", provider="ALIPAY",
+        channel="ALIPAY_MINIPROGRAM", status="PENDING",
+    )
+    rows = MagicMock()
+    rows.scalars.return_value = [payment]
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[order, payment])
+    db.execute = AsyncMock(return_value=rows)
+    db.commit = AsyncMock()
+
+    with patch(
+        "app.services.payment_service.AsyncSessionLocal",
+        side_effect=lambda: _PaymentCloseSessionContext(db),
+    ), patch(
+        "app.services.payment_service._alipay_pay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service.alipay_client.trade_cancel",
+        new_callable=AsyncMock, return_value={"action": "refund"},
+    ), patch.object(
+        PaymentService, "sync_payment_status", new_callable=AsyncMock,
+        return_value=(payment, {"trade_state": "TRADE_CLOSED"}),
+    ), patch.object(
+        PaymentService, "_lock_order_then_payment", new_callable=AsyncMock,
+    ) as lock_payment, patch.object(
+        PaymentService, "_close_pending_payment", new_callable=AsyncMock,
+    ) as close_local:
+        late_paid = await PaymentService.close_channel_payments_by_id(order.id)
+
+    assert late_paid is False
+    lock_payment.assert_not_awaited()
+    close_local.assert_not_awaited()
+    assert payment.status == "PENDING"
