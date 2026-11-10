@@ -30,7 +30,6 @@ def _onnx_providers() -> list[str]:
         return ["CPUExecutionProvider"]
 
 
-@lru_cache(maxsize=1)
 def _assert_face_model_commercial_license() -> None:
     """生产加载 InsightFace 预训练模型前必须确认商业授权；代码 MIT 不代表模型可商用。"""
     from app.core.config import get_settings
@@ -43,6 +42,7 @@ def _assert_face_model_commercial_license() -> None:
         )
 
 
+@lru_cache(maxsize=1)
 def _face_app():
     """授权入库用：较高检测分辨率，偏准。"""
     _assert_face_model_commercial_license()
@@ -149,6 +149,7 @@ def extract_face_embedding_bgr(
     *,
     live: bool = False,
 ) -> list[float]:
+    _assert_face_model_commercial_license()
     """
     从摄像头 BGR 帧直接提特征（内存，不打开图片文件）。
     SCRFD 检测 + ArcFace 512D；InsightFace 不可用时生产 fail-closed。
@@ -218,6 +219,7 @@ def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float]
 
 
 def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
+    _assert_face_model_commercial_license()
     """到店实时：返回 embedding + 脸框占比/清晰度/置信度，供短时窗口择优。
 
     light=True：窗口收集期用更小缩放、跳过 CLAHE 二次检测，降 CPU；
