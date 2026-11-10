@@ -13,11 +13,12 @@ def test_canonical_schema_contains_no_destructive_statements():
     assert start >= 0 and end > start, "canonical schema markers must exist"
 
     schema = raw[start + len(start_marker):end]
-    statements = []
-    for line in schema.splitlines():
-        if line.strip().startswith("--"):
-            continue
-        statements.extend(part.strip() for part in line.split(";") if part.strip())
+    # Join the complete SQL body before splitting: CREATE TABLE statements
+    # span many lines, so per-line splitting mistakes column definitions for SQL.
+    body = "\\n".join(
+        line for line in schema.splitlines() if not line.strip().startswith("--")
+    )
+    statements = [part.strip() for part in body.split(";") if part.strip()]
 
     destructive = [
         statement for statement in statements
