@@ -1,6 +1,6 @@
 """为已部署数据库补齐退款幂等键字段及唯一约束。
 
-Revision ID: 0047_payment_refund_idempotency_key
+Revision ID: 0047_payment_refund_idem
 Revises: 0046_outbox_stock_sync_version
 
 基线迁移会读取当前 sql/struct.sql。已经执行过旧版基线的数据库不会自动获得后来
