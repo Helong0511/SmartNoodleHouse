@@ -165,7 +165,7 @@ def _assert_safe_product_image_url(url: str | None) -> str | None:
         parsed = urlparse(s)
         base = urlparse(public_base)
         if (
-            parsed.scheme in ("http", "https")
+            parsed.scheme == "https"
             and parsed.scheme == base.scheme
             and parsed.netloc.lower() == base.netloc.lower()
             and not parsed.username
