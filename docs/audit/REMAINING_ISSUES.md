@@ -153,3 +153,12 @@
 - 发现 MySQL `REPEATABLE READ` 下，普通定位查询可能提前建立快照；等待 Order/Payment 锁后再用普通聚合统计退款，会漏掉等待期间刚提交的退款。
 - 已将关键退款判断改为 Order→Payment→PaymentRefund 锁序下的 `FOR UPDATE` 当前读，并刷新 ORM identity map；增加单测覆盖退款当前读、订单净额当前读、锁定 Payment 刷新及在途退款拒绝重复提交。
 - 最新代码 SHA `4a98702eff3205c7685ba0c412ff1def5179efd3` 的 CI 尚在排队/等待，不能沿用旧 SHA 的 CI 结果。
+
+### 2026-11-10 增量复核：渠道关单终态确认
+
+- 复核 PaymentService.close_channel_payments() 与 close_channel_payments_by_id() 时发现：锁外关单路径在渠道关单失败、查单返回 UNKNOWN 或查单异常后，仍可能继续把本地 PENDING 支付单改为 CLOSED。该状态无法证明渠道侧未扣款，可能造成已付款订单被本地误关。
+- 已新增 _channel_trade_is_terminal_unpaid()：仅微信 CLOSED/REVOKED/PAYERROR 与支付宝 TRADE_CLOSED 可作为未支付终态；NOTPAY/USERPAYING/WAIT_BUYER_PAY/UNKNOWN/NOT_CONFIGURED 等非终态或未知状态一律保留 PENDING，等待后续查单补偿。
+- 两条关单路径均已增加终态门禁；锁外路径在关单失败或查单异常时不再继续本地 CLOSED。
+- 回归测试新增覆盖渠道关单超时 + UNKNOWN、关单超时 + 查单异常、处理中状态，以及渠道明确 CLOSED 后仍可安全完成本地关单。
+- 官方状态依据：微信支付交易状态枚举明确区分 CLOSED、REVOKED、PAYERROR 与 NOTPAY、USERPAYING；支付宝区分 TRADE_CLOSED 与 WAIT_BUYER_PAY。见微信支付查询订单文档及支付宝交易状态说明。
+- 关联代码提交：226ef93ef407b15bbd391c302042cf4844e07355；测试提交：5c4303a16fc6a3517ecaf2b5aa26288e0893161f、545c129d03b1ed78769682d74dae5fdacfe99dbd。最终 HEAD 的 CI 仍待执行完成，未提前标记测试通过。
