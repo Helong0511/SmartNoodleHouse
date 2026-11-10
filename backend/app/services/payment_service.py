@@ -481,13 +481,28 @@ def _resolve_alipay_refund_status(parsed: dict) -> str:
     return "PROCESSING"
 
 
-_REFUND_POLL_BACKOFF_SECONDS = (300, 600, 1200, 1800)
+_WECHAT_REFUND_POLL_BACKOFF_SECONDS = (60, 60, 60, 60, 300, 600, 1200, 1800)
+_DEFAULT_REFUND_POLL_BACKOFF_SECONDS = (300, 600, 1200, 1800)
 
 
-def _refund_poll_backoff_seconds(retry_count: int) -> int:
-    """微信退款仍处理中时按 5/10/20/30 分钟衰减查单，避免频率限制和任务饥饿。"""
+def _initial_refund_poll_delay_seconds(*, provider: str | None = None) -> int:
+    """退款申请仍未终结时的首次主动查单延迟。"""
+    return _refund_poll_backoff_seconds(0, provider=provider)
+
+
+def _refund_poll_backoff_seconds(retry_count: int, *, provider: str | None = None) -> int:
+    """按渠道安排未决退款查单；微信前 5 分钟每分钟一次，之后逐步衰减。
+
+    支付宝暂保留原 5/10/20/30 分钟策略，避免把微信官方建议无依据地套用到其他渠道。
+    retry_count 在查单 claim 时递增，因此第 1～4 次查单后间隔 1 分钟，第 5 次后间隔 5 分钟。
+    """
     attempt = max(1, int(retry_count or 0))
-    return _REFUND_POLL_BACKOFF_SECONDS[min(attempt - 1, len(_REFUND_POLL_BACKOFF_SECONDS) - 1)]
+    schedule = (
+        _WECHAT_REFUND_POLL_BACKOFF_SECONDS
+        if str(provider or "").strip().upper() == "WECHAT"
+        else _DEFAULT_REFUND_POLL_BACKOFF_SECONDS
+    )
+    return schedule[min(attempt - 1, len(schedule) - 1)]
 
 
 class PaymentService:
@@ -3143,6 +3158,14 @@ class PaymentService:
         else:
             # 受理成功，等待回调/定时查询——不得当作已退款
             row.status = "PROCESSING"
+            # The scheduler runs every minute; set an explicit provider-specific due time
+            # rather than leaving NULL (which would make the first query run immediately).
+            from datetime import timedelta
+            from app.core.response import naive_local_now
+
+            row.next_retry_at = naive_local_now() + timedelta(
+                seconds=_initial_refund_poll_delay_seconds(provider=current_payment.provider)
+            )
             await db.flush()
 
         return row
@@ -3767,6 +3790,7 @@ class PaymentService:
         reason: str,
         delay_seconds: int | None = None,
         claim_version: int | None = None,
+        provider: str | None = None,
     ) -> None:
         """记录一次未决查单并设置下次执行时间；只锁退款行，不等待支付/订单行。"""
         from datetime import timedelta
@@ -3799,7 +3823,7 @@ class PaymentService:
             delay = (
                 int(delay_seconds)
                 if delay_seconds is not None
-                else _refund_poll_backoff_seconds(row.retry_count)
+                else _refund_poll_backoff_seconds(row.retry_count, provider=provider)
             )
             row.next_retry_at = now + timedelta(seconds=max(30, delay))
             row.last_error = str(reason or "退款结果仍未确认")[:500]
@@ -3840,6 +3864,7 @@ class PaymentService:
         done = 0
         for rid in ids:
             claim_version: int | None = None
+            payment_snapshot = None
             try:
                 # 原子领取：把到期时间推进到短租约，并递增 retry_count 作为 fencing
                 # version。多个 Worker 即使同时读到同一 ID，也只有一个 UPDATE 能成功。
@@ -3914,6 +3939,7 @@ class PaymentService:
                         int(rid),
                         reason=f"渠道退款查询异常: {type(e).__name__}: {e}",
                         claim_version=claim_version,
+                        provider=payment_snapshot.provider,
                     )
                     continue
                 if result is None:
@@ -4014,7 +4040,9 @@ class PaymentService:
                     )
                     if row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
                         row.next_retry_at = naive_local_now() + timedelta(
-                            seconds=_refund_poll_backoff_seconds(row.retry_count)
+                            seconds=_refund_poll_backoff_seconds(
+                                row.retry_count, provider=payment_snapshot.provider
+                            )
                         )
                         row.last_error = f"渠道退款状态仍未终结: {query_status}"[:500]
                     else:
@@ -4048,6 +4076,7 @@ class PaymentService:
                         int(rid),
                         reason=f"退款查单异常: {type(e).__name__}: {e}",
                         claim_version=claim_version,
+                        provider=payment_snapshot.provider if payment_snapshot else None,
                     )
                 except Exception:
                     logger.exception("记录退款查单退避失败 refund_id=%s", rid)
