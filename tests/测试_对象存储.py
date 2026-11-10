@@ -95,3 +95,29 @@ def test_s3_client_has_bounded_timeouts_and_retries(monkeypatch):
     assert config.max_pool_connections == 50
     assert config.tcp_keepalive is True
     assert config.retries == {"mode": "standard", "max_attempts": 3}
+
+
+def test_startup_storage_initialization_fails_closed(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import main as mainmod
+    from app.services import object_storage as osmod
+
+    def fail_storage():
+        raise RuntimeError("S3 SDK 缺失")
+
+    monkeypatch.setattr(osmod, "get_storage", fail_storage)
+    with pytest.raises(SystemExit) as exc:
+        mainmod._initialize_object_storage(SimpleNamespace(storage_backend="s3"))
+    assert exc.value.code == 1
+
+
+def test_startup_storage_initialization_accepts_configured_adapter(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import main as mainmod
+    from app.services import object_storage as osmod
+
+    expected = object()
+    monkeypatch.setattr(osmod, "get_storage", lambda: expected)
+    assert mainmod._initialize_object_storage(SimpleNamespace(storage_backend="local")) is None

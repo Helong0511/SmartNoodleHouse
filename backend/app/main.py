@@ -41,6 +41,21 @@ from app.tasks.scheduler import register_tasks
 from app.workers.tts_worker import TTSWorker
 
 logger = logging.getLogger(__name__)
+
+
+def _initialize_object_storage(settings) -> None:
+    """启动时校验对象存储适配器，避免首次上传请求才暴露配置/依赖错误。"""
+    try:
+        from app.services.object_storage import get_storage
+
+        get_storage()
+    except Exception as exc:
+        logger.exception(
+            "对象存储初始化失败，拒绝启动（STORAGE_BACKEND=%s）",
+            getattr(settings, "storage_backend", "local"),
+        )
+        raise SystemExit(1) from exc
+
 scheduler = AsyncIOScheduler(
     timezone=ZoneInfo("Asia/Shanghai"),
     job_defaults={
@@ -242,6 +257,8 @@ async def lifespan(app: FastAPI):
     global tts_task, recognition_task, _leader_stop, _leader_renew_task, _leader_worker_id
     settings = get_settings()
     validate_settings(settings)
+
+    _initialize_object_storage(settings)
 
     try:
         from sqlalchemy import text
