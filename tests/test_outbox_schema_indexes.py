@@ -31,7 +31,7 @@ def test_outbox_retry_index_matches_canonical_schema_and_verifier():
     assert _canonical_index_columns("idx_oe_status_retry") == indexes["idx_oe_status_retry"]
 
     verifier = (ROOT / "scripts" / "验证数据库.py").read_text(encoding="utf-8")
-    assert '("outbox_events", "idx_oe_status_retry")' in verifier
+    assert '("outbox_events", ("idx_oe_status_retry",))' in verifier
     assert "ix_oe_next_retry_at_status" not in verifier
 
 

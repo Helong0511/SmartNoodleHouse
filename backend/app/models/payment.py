@@ -117,6 +117,10 @@ class PosRefundRequest(Base, TimestampMixin):
     review_remark: Mapped[str | None] = mapped_column(String(500))
     refund_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("payment_refunds.id"))
     fail_reason: Mapped[str | None] = mapped_column(String(255))
+    # 审批执行权采用数据库 epoch + 随机 token 双重 fencing；Redis 不参与资金安全判定。
+    execution_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    execution_token: Mapped[str | None] = mapped_column(String(64), default=None)
+    execution_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class PaymentStatusHistory(Base):

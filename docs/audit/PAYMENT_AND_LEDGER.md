@@ -304,3 +304,55 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 推荐学习异常必须向 Outbox worker 传播，进入指数退避重试；达到最大尝试次数后进入失败/死信告警，不得仅记录日志后把事件标记为 DONE。
 - `tests/test_paid_side_effects_retry.py` 覆盖事件独立入队、偏好更新不再隐式触发推荐学习、推荐学习异常向 worker 传播。
 - 此项为代码级回归防护；仍需以最新提交对应的 CI 结果作为验收证据。
+
+
+### 2026-11-09 退款推荐学习独立重试边界复核
+
+- 发现退款后的推荐负向学习原先嵌在 `pref_recompute` handler 中，并捕获所有异常只记录日志；Outbox worker 会误将该事件标记 DONE，造成退款推荐画像漏更新。
+- 修复：退款成功事务同步写入独立 `taste_learning_refund` Outbox 事件；偏好重算与推荐学习分离。推荐学习 handler 不吞异常，由 Outbox 退避重试和死信机制负责恢复。
+- `record_full_refund_events` 内部仍以订单 `payment_status=REFUNDED` 为门槛，部分退款事件安全 no-op；其 `order_refund:{order_id}:{product_id}` 事件 ID 保证重试幂等。
+- 回归测试覆盖偏好 handler 不再隐式执行推荐学习，以及退款推荐学习异常必须传播。以该提交对应的 CI 为最终验收依据。
+
+
+### 2026-11-09 POS 退款审批重复请求窗口
+
+- 发现审批流程先提交 `PosRefundRequest=PROCESSING`，随后才创建渠道退款单并绑定 `refund_id`。在两步之间重复审批请求可能读到 `PROCESSING + refund_id=NULL`，旧逻辑会继续分配退款并可能重复调用渠道。
+- 修复：`PROCESSING` 且尚无 `refund_id` 时直接返回当前申请，不再开始第二次执行。渠道请求前，`PaymentService.refund` 会先在同一事务中持久化退款单并绑定申请，因此此保护覆盖了真正的外部副作用窗口。
+- 增加回归测试，确保该状态不触发退款分配或渠道调用。若进程在认领提交后、创建退款单前崩溃，申请会保持处理中并需后续运维恢复；此路径应由后续认领超时恢复任务处理，不能通过并发重试冒险重复退款。
+
+## POS 退款审批执行权 fencing（2026-11-09）
+
+- `pos_refund_requests.execution_epoch` 是数据库单调递增的执行代际；`execution_token` 是本次审批 worker 的随机 owner token；`execution_lease_until` 仅用于首笔 `PaymentRefund` 创建并绑定前的短租约。
+- 新审批或过期租约接管时，在 POS 申请行锁内递增 epoch、生成新 token 并持久化租约。旧 worker 恢复后必须在 `PaymentService.refund` 的同一数据库事务中重新锁定 POS 申请，并同时匹配 token、epoch、状态及未绑定时的租约有效期；不匹配则拒绝创建退款单。
+- 首笔退款单与 POS `refund_id` 在调用微信/支付宝之前同事务提交。绑定后租约清空，后续多支付方式分摊继续使用同一 token/epoch；若渠道状态仍为 PENDING/PROCESSING/UNKNOWN/ABNORMAL，不允许新 worker 再发起一笔。
+- 旧数据 `PROCESSING + refund_id=NULL + execution_epoch=0` 不具备可证明的租约所有权，继续 fail-closed，不自动接管。必须先人工查渠道退款单/流水，确认未发起退款后再执行受控恢复。
+- 如果进程在退款单绑定事务提交后、渠道请求发送前崩溃，数据库中的退款单仍是 PENDING；该状态不能证明请求未发送。必须通过渠道查单/对账恢复，不得仅凭超时重新创建退款单。
+- 异常收尾先 rollback 并重新读取持久化退款事实：已绑定且仍在途的退款保留 POS PROCESSING；只有未创建/绑定退款单或渠道明确终态失败时才可收敛为 FAILED。旧 epoch worker 不得覆盖新 owner 的状态。
+- 本机制的租约接管安全性依赖 MySQL 行锁与事务提交；Redis 锁仅用于缓存/worker 协调，不参与资金 fencing。
+
+
+## 2026-11-09 退款聚合的 MySQL RR 快照复核
+
+- 发现退款入口的锁序定位查询会先执行普通 SELECT；在 MySQL `REPEATABLE READ` 下，这可能提前建立事务快照。若随后等待 Order/Payment 行锁，普通 `SUM/COUNT` 仍可能读取锁等待前的旧快照，漏掉刚刚提交的退款状态。
+- 修复：`_lock_order_then_payment` 与退款父行锁查询增加 `populate_existing=True`，确保锁定读刷新当前 Session 中的 ORM 对象；退款创建的在途/已成功金额改为 Order→Payment 锁之后对 `PaymentRefund` 执行 `FOR UPDATE` 当前读并在 Python 汇总。
+- 退款成功收敛同样以当前锁定读汇总同一支付单退款事实；订单净已收在资金状态收敛路径使用 Payment 与 PaymentRefund 当前锁定读，避免旧快照误判部分/全额退款。进一步复核发现收款创建、现金收款和支付成功后的订单结清判断也依赖净已收金额，现一并在持有 Order 锁后启用当前读，并刷新锁定的 Order ORM 对象。
+- 新增回归测试验证退款行查询、订单净已收聚合均使用 `FOR UPDATE + populate_existing`，并验证父行锁后刷新 Payment。
+- 锁序保持 Order→Payment→PaymentRefund；不在持有退款行锁后再等待父行锁。普通展示用的 `refundable_amount` 仍是只读估算，最终退款金额由持锁的退款执行路径再次校验。
+
+## 2026-11-09 即时收款返回与异步回调竞态复核
+
+- 发现付款码即时收款在渠道 HTTP 返回后直接使用请求前 ORM 对象执行 `_settle_immediate_payment`；若异步 SUCCESS 回调先一步提交，旧对象仍可能是 PENDING，再次执行 SALE/订单收敛。
+- 修复：即时收款与开发 mock 结算在渠道响应后重新按 Order→Payment 当前读锁定，并用 `populate_existing=True` 刷新订单和支付对象；若回调已将支付单置 PAID/PARTIAL_REFUND/REFUNDED，则即时路径直接退出，不重复执行资金副作用，也不把退款终态降级回 PAID。
+- 即时渠道金额缺失/不匹配时，不再直接改写旧 ORM 对象。改为重新锁定并刷新当前支付单；仅在尚未 PAID/退款终态时转 UNKNOWN，写状态历史并先提交，再向调用方返回金额错误，避免请求异常回滚掉 UNKNOWN，也避免覆盖并发成功回调。
+- 充值即时金额不匹配路径按 RechargeOrder→Payment 当前读锁定；两者任一已 PAID 时不做降级，状态分叉则 fail-closed 报人工核对；未支付时持久化 UNKNOWN 和状态历史。充值最终入账本身也移除锁前状态短路，并在 RechargeOrder→Payment 锁后刷新 ORM，再判断双边 PAID/终态，避免旧对象触发重复充值或把退款终态覆盖成 PAID。即时渠道返回的 `provider_trade_no` 也延后到持锁后的充值结算函数中写入，避免外部请求返回期间迟到回调已更新字段、旧对象再覆盖。
+- 新增测试覆盖回调先成功时不降级、不重复记账，以及金额不匹配时 UNKNOWN 必须持久化。
+
+
+## 2026-11-10 支付宝同步网关响应验签
+
+- 支付宝 OpenAPI 的交易查询、撤销、退款等同步响应必须验证顶层 sign，不能仅依赖 HTTPS。
+- 客户端在读取业务 code、trade_status、action、fund_change 前，先用 ALIPAY_PUBLIC_KEY 按 RSA2/SHA-256 验证对应的 alipay_*_response JSON 节点。
+- 缺失签名、响应节点异常或签名不匹配均 fail-closed；不会继续使用未经验证的交易状态做支付入账、退款或关单决策。
+- 验签实现与回归测试：backend/app/utils/alipay_keys.py、backend/app/services/alipay_client.py、tests/测试_支付宝密钥.py。
+- 官方说明：https://developer.alibaba.com/docs/doc.htm?articleId=105975&docType=1&treeId=293；https://jaq-doc.alibaba.com/docs/doc.htm?articleId=104613&docType=1&treeId=140。
+- 最新 HEAD 的 CI 未完成前，不把该项登记为 CI 通过。

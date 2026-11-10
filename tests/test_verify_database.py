@@ -1,6 +1,7 @@
 """Regression tests for production database verification."""
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from pathlib import Path
 
@@ -87,3 +88,28 @@ def test_database_charset_verifier_reports_connection_schema_table_and_column_mi
     assert any("table orders collation" in issue for issue in issues)
     assert any("customers.nickname charset" in issue for issue in issues)
     assert any("customers.nickname collation" in issue for issue in issues)
+
+
+def test_database_index_verifier_accepts_equivalent_legacy_index_names(monkeypatch):
+    """历史索引名与规范列定义等价时，不应产生误报。"""
+    existing = {"payment_refunds": {"idx_refunds_succeeded"}}
+
+    async def fake_index_exists(db, table, index):
+        return index in existing.get(table, set())
+
+    monkeypatch.setattr(MODULE, "_index_exists", fake_index_exists)
+
+    assert asyncio.run(
+        MODULE._any_index_exists(
+            object(),
+            "payment_refunds",
+            ("idx_refunds_status_succ", "idx_refunds_succeeded"),
+        )
+    )
+    assert not asyncio.run(
+        MODULE._any_index_exists(
+            object(),
+            "customer_coupons",
+            ("idx_cc_customer_status_exp", "idx_cc_customer_status"),
+        )
+    )

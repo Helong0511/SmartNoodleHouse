@@ -324,3 +324,228 @@ async def test_processing_pos_request_with_inflight_refund_never_reissues_provid
     assert out.status == "PROCESSING"
     refund_call.assert_not_awaited()
     db.refresh.assert_awaited_once_with(request)
+
+
+@pytest.mark.asyncio
+async def test_processing_pos_request_without_refund_binding_never_starts_second_execution():
+    """认领事务已提交但首笔退款单尚未绑定时，重复审批必须 fail-closed。"""
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        id=121,
+        store_id=1,
+        order_id=91,
+        amount=money("20.00"),
+        executed_amount=money("0.00"),
+        reason="顾客退款",
+        status="PROCESSING",
+        reviewed_by=8,
+        reviewed_at=None,
+        review_remark=None,
+        payment_id=3,
+        refund_id=None,
+        fail_reason=None,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_lock_result(request))
+    db.refresh = AsyncMock()
+
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock,
+        return_value=True,
+    ), patch("app.services.pos_refund_service.assert_store_access"), patch.object(
+        PosRefundService, "_refundable_pairs", new_callable=AsyncMock
+    ) as allocate, patch(
+        "app.services.pos_refund_service.PaymentService.refund",
+        new_callable=AsyncMock,
+    ) as refund_call:
+        out = await PosRefundService.approve_and_execute(
+            db, user=_user("STORE_ADMIN"), request_id=121
+        )
+
+    assert out is request
+    assert out.status == "PROCESSING"
+    db.refresh.assert_awaited_once_with(request)
+    allocate.assert_not_awaited()
+    refund_call.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_recovery_preserves_processing_when_refund_row_is_already_persisted():
+    """异常发生在退款单提交之后时，POS 申请不能被错误标为 FAILED。"""
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        id=130,
+        status="PROCESSING",
+        refund_id=990,
+        execution_token="owner-current",
+        execution_epoch=7,
+        execution_lease_until=None,
+        executed_amount=money("0.00"),
+        amount=money("20.00"),
+        fail_reason=None,
+    )
+    refund = SimpleNamespace(status="PENDING")
+    db = AsyncMock()
+    db.rollback = AsyncMock()
+    db.get = AsyncMock(return_value=refund)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch.object(PosRefundService, "_lock_request", new_callable=AsyncMock, return_value=request):
+        out = await PosRefundService._recover_execution_error(
+            db,
+            request_id=130,
+            claim_token="owner-current",
+            claim_epoch=7,
+            amount_total=money("20.00"),
+            error=RuntimeError("local persistence interrupted after refund row commit"),
+        )
+
+    assert out is request
+    assert request.status == "PROCESSING"
+    assert "待确认" in request.fail_reason
+    db.rollback.assert_awaited_once()
+    db.get.assert_awaited_once()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stale_pos_refund_owner_cannot_overwrite_new_execution_state():
+    """租约接管后，旧 worker 的异常收尾不得覆盖新 epoch 的状态。"""
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        id=131,
+        status="PROCESSING",
+        refund_id=None,
+        execution_token="new-owner",
+        execution_epoch=9,
+        execution_lease_until=None,
+        executed_amount=money("0.00"),
+        amount=money("20.00"),
+        fail_reason=None,
+    )
+    db = AsyncMock()
+    db.rollback = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch.object(PosRefundService, "_lock_request", new_callable=AsyncMock, return_value=request):
+        out = await PosRefundService._recover_execution_error(
+            db,
+            request_id=131,
+            claim_token="old-owner",
+            claim_epoch=8,
+            amount_total=money("20.00"),
+            error=RuntimeError("stale worker resumed"),
+        )
+
+    assert out is request
+    assert request.status == "PROCESSING"
+    assert request.execution_token == "new-owner"
+    assert request.execution_epoch == 9
+    db.get.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_mixed_payment_refunds_reuse_one_fencing_claim_and_accumulate_once():
+    """组合支付分两笔渠道退款时，同一审批必须复用 owner epoch，金额只累计一次。"""
+    from types import SimpleNamespace
+
+    cash = SimpleNamespace(
+        id=301, provider="CASH", status="PAID", amount=money("4.00"), order_id=901,
+    )
+    wechat = SimpleNamespace(
+        id=302, provider="WECHAT", status="PAID", amount=money("6.00"), order_id=901,
+    )
+    request = SimpleNamespace(
+        id=303, store_id=1, order_id=901, amount=money("10.00"),
+        executed_amount=money("0.00"), reason="组合支付退款", status="PENDING",
+        reviewed_by=None, reviewed_at=None, review_remark=None,
+        payment_id=301, refund_id=None, fail_reason=None,
+        execution_epoch=4, execution_token=None, execution_lease_until=None,
+    )
+    refunds = [
+        SimpleNamespace(id=401, status="SUCCESS", fail_reason=None),
+        SimpleNamespace(id=402, status="SUCCESS", fail_reason=None),
+    ]
+    db = AsyncMock()
+    request_result = _lock_result(request)
+    refund_results = [_lock_result(refunds[0]), _lock_result(refunds[1])]
+    # 初次锁申请；每笔退款后分别锁退款事实和 POS 申请；最后重新锁申请收敛状态。
+    db.execute = AsyncMock(side_effect=[
+        request_result,
+        refund_results[0], request_result,
+        refund_results[1], request_result,
+        request_result,
+    ])
+    db.get = AsyncMock(side_effect=[cash, wechat])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    observed = []
+
+    async def refund_mock(
+        _db, payment, amount, reason, *, operator_id,
+        pos_refund_request_id, pos_refund_execution_token,
+        pos_refund_execution_epoch,
+    ):
+        observed.append((
+            payment.id, amount, pos_refund_request_id,
+            pos_refund_execution_token, pos_refund_execution_epoch,
+        ))
+        refund = refunds[len(observed) - 1]
+        # 模拟 PaymentService 在退款成功事务内绑定退款单并累计执行金额。
+        request.refund_id = refund.id
+        request.payment_id = payment.id
+        request.executed_amount = money(request.executed_amount + amount)
+        return refund
+
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock, return_value=True,
+    ), patch(
+        "app.services.pos_refund_service.assert_store_access"
+    ), patch.object(
+        PosRefundService, "_refundable_pairs",
+        new_callable=AsyncMock,
+        return_value=(money("10.00"), [
+            (wechat, money("6.00")), (cash, money("4.00")),
+        ]),
+    ), patch(
+        "app.services.pos_refund_service.PaymentService.refund",
+        side_effect=refund_mock,
+    ):
+        result = await PosRefundService.approve_and_execute(
+            db, user=_user("STORE_ADMIN"), request_id=303,
+        )
+
+    assert [item[0] for item in observed] == [301, 302]
+    assert [item[1] for item in observed] == [money("4.00"), money("6.00")]
+    assert all(item[2] == 303 for item in observed)
+    assert observed[0][3] and observed[0][3] == observed[1][3]
+    assert observed[0][4] == observed[1][4] == 5
+    assert request.executed_amount == money("10.00")
+    assert result.status == "SUCCESS"
+    assert db.commit.await_count >= 3
+
+
+def test_pos_refund_execution_claim_matches_current_owner_only():
+    """旧 worker 的迟到响应不能覆盖已接管的执行者关联。"""
+    from types import SimpleNamespace
+    from app.services.pos_refund_service import PosRefundService
+
+    current = SimpleNamespace(execution_token="new-owner", execution_epoch=12)
+    assert PosRefundService._execution_claim_matches(
+        current, claim_token="new-owner", claim_epoch=12
+    )
+    assert not PosRefundService._execution_claim_matches(
+        current, claim_token="old-owner", claim_epoch=11
+    )
+    assert not PosRefundService._execution_claim_matches(
+        current, claim_token="new-owner", claim_epoch=11
+    )

@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.biz_no import generate_no, payment_biz, refund_biz, resolve_table_parts
 from app.core.exceptions import AppException
-from app.core.response import money, now_local, serialize_dt
+from app.core.response import ensure_local_aware, money, now_local, serialize_dt
 from app.models import (
     Customer,
     DiningTable,
@@ -511,30 +511,56 @@ class PaymentService:
         return p()
 
     @classmethod
-    async def order_net_collected(cls, db: AsyncSession, order_id: int) -> Decimal:
-        """订单净已收：各支付单金额 − 成功退款（含 PAID/PARTIAL_REFUND/REFUNDED）。"""
-        payments = list(
-            (
-                await db.execute(
-                    select(Payment).where(
-                        Payment.order_id == int(order_id),
-                        Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
-                    )
-                )
-            ).scalars().all()
+    async def _refund_rows_current(cls, db: AsyncSession, payment_id: int) -> list[PaymentRefund]:
+        """在已持有父级 Order/Payment 锁后，以当前读锁定退款事实，避免 RR 快照漏读新提交。"""
+        result = await db.execute(
+            select(PaymentRefund)
+            .where(PaymentRefund.payment_id == int(payment_id))
+            .order_by(PaymentRefund.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        return list(result.scalars().all())
+
+    @classmethod
+    async def order_net_collected(
+        cls, db: AsyncSession, order_id: int, *, current_read: bool = False
+    ) -> Decimal:
+        """订单净已收：各支付单金额 − 成功退款；资金状态收敛时可强制使用当前读。"""
+        payment_stmt = select(Payment).where(
+            Payment.order_id == int(order_id),
+            Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
+        ).order_by(Payment.id.asc())
+        if current_read:
+            payment_stmt = payment_stmt.with_for_update().execution_options(populate_existing=True)
+        payments = list((await db.execute(payment_stmt)).scalars().all())
         if not payments:
             return money(0)
-        pids = [p.id for p in payments]
-        refund_rows = (
-            await db.execute(
-                select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                    PaymentRefund.payment_id.in_(pids),
-                    PaymentRefund.status == "SUCCESS",
-                ).group_by(PaymentRefund.payment_id)
+        pids = [int(p.id) for p in payments]
+        if current_read:
+            refund_stmt = (
+                select(PaymentRefund)
+                .where(PaymentRefund.payment_id.in_(pids))
+                .order_by(PaymentRefund.id.asc())
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-        ).all()
-        refund_map = {int(pid): money(amt or 0) for pid, amt in refund_rows}
+            current_refunds = (await db.execute(refund_stmt)).scalars().all()
+            refund_map: dict[int, Decimal] = {}
+            for refund_row in current_refunds:
+                if refund_row.status == "SUCCESS":
+                    pid = int(refund_row.payment_id)
+                    refund_map[pid] = money(refund_map.get(pid, money(0)) + money(refund_row.amount))
+        else:
+            refund_rows = (
+                await db.execute(
+                    select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                        PaymentRefund.payment_id.in_(pids),
+                        PaymentRefund.status == "SUCCESS",
+                    ).group_by(PaymentRefund.payment_id)
+                )
+            ).all()
+            refund_map = {int(pid): money(amt or 0) for pid, amt in refund_rows}
         net = money(0)
         for p in payments:
             left = money(p.amount) - refund_map.get(int(p.id), money(0))
@@ -543,22 +569,24 @@ class PaymentService:
         return money(net)
 
     @classmethod
-    async def paid_amount(cls, db: AsyncSession, order_id: int) -> Decimal:
-        """订单净已收金额（已入账支付 − 成功退款）。
-
-        不得只统计 status=PAID：部分退款后支付单变为 PARTIAL_REFUND，
-        若仍按 PAID 合计会导致 remaining 虚高、可重复收款。
-        """
-        return await cls.order_net_collected(db, order_id)
+    async def paid_amount(
+        cls, db: AsyncSession, order_id: int, *, current_read: bool = False
+    ) -> Decimal:
+        """订单净已收金额（已入账支付 − 成功退款）。资金决策路径可指定当前锁定读。"""
+        return await cls.order_net_collected(db, order_id, current_read=current_read)
 
     @classmethod
-    async def remaining_amount(cls, db: AsyncSession, order: Order) -> Decimal:
+    async def remaining_amount(
+        cls, db: AsyncSession, order: Order, *, current_read: bool = False
+    ) -> Decimal:
         # 全额退款终态：禁止再收
         if str(getattr(order, "payment_status", "") or "").upper() == "REFUNDED":
             return money(0)
         if str(getattr(order, "status", "") or "").upper() == "REFUNDED":
             return money(0)
-        rem = money(order.total_amount) - await cls.paid_amount(db, order.id)
+        rem = money(order.total_amount) - await cls.paid_amount(
+            db, order.id, current_read=current_read
+        )
         return rem if rem > 0 else money(0)
 
     @classmethod
@@ -668,9 +696,11 @@ class PaymentService:
         return out
 
     @classmethod
-    async def payment_progress(cls, db: AsyncSession, order: Order) -> dict:
-        paid = await cls.paid_amount(db, order.id)
-        remaining = await cls.remaining_amount(db, order)
+    async def payment_progress(
+        cls, db: AsyncSession, order: Order, *, current_read: bool = False
+    ) -> dict:
+        paid = await cls.paid_amount(db, order.id, current_read=current_read)
+        remaining = await cls.remaining_amount(db, order, current_read=current_read)
         method = (order.payment_method or "").strip() or await cls._resolve_payment_method(db, order.id)
         return {
             "order_id": order.id,
@@ -737,7 +767,7 @@ class PaymentService:
                 # 资金确认与财务分录必须同事务成功；任何环境都不允许静默确认。
                 raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
 
-        paid = await cls.paid_amount(db, order.id)
+        paid = await cls.paid_amount(db, order.id, current_read=True)
         remaining = money(order.total_amount) - paid
         method = await cls._resolve_payment_method(db, order.id)
 
@@ -808,7 +838,12 @@ class PaymentService:
         amount: Decimal | None = None,
     ) -> tuple[Payment, dict]:
         locked = (
-            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == order.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40402, "订单不存在")
@@ -823,7 +858,7 @@ class PaymentService:
         if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
             raise AppException(40012, f"当前订单状态不可支付: {order.status}")
 
-        remaining = await cls.remaining_amount(db, order)
+        remaining = await cls.remaining_amount(db, order, current_read=True)
         if remaining <= 0:
             raise AppException(40010, "订单已支付")
 
@@ -859,6 +894,8 @@ class PaymentService:
                     select(Payment)
                     .where(Payment.order_id == order.id, Payment.status == "PENDING")
                     .order_by(Payment.id.desc())
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalars().all()
         )
@@ -987,13 +1024,14 @@ class PaymentService:
         if reused:
             try:
                 synced, sync_meta = await cls.sync_payment_status(db, payment)
+                payment = synced
             except AppException as exc:
                 logger.warning(
                     "复用支付单查单失败 payment=%s: %s", payment.payment_no, exc.message
                 )
                 synced, sync_meta = payment, {"synced": False, "trade_state": "QUERY_FAILED"}
             if synced.status == "PAID":
-                progress = await cls.payment_progress(db, order)
+                progress = await cls.payment_progress(db, order, current_read=True)
                 return synced, {
                     "status": "PAID",
                     "already_paid": True,
@@ -1049,7 +1087,7 @@ class PaymentService:
         await db.flush()
         if pay_data.get("_mock"):
             await cls._settle_mock_payment(db, payment, order, provider_u)
-            pay_data["status"] = "PAID"
+            pay_data["status"] = payment.status
             pay_data["mock_settled"] = True
         elif pay_data.get("immediate_paid"):
             trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
@@ -1057,11 +1095,10 @@ class PaymentService:
             try:
                 _require_provider_amount(pay_data, payment.amount)
             except AppException:
-                payment.status = "UNKNOWN"
-                await db.flush()
+                await cls._mark_order_payment_unknown_after_amount_mismatch(db, int(payment.id))
                 raise
             await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
-            pay_data["status"] = "PAID"
+            pay_data["status"] = payment.status
         else:
             # 渠道已受理、待回调：保持 PENDING，等待回调/查单推进
             if payment.status not in ("PENDING", "REQUESTING"):
@@ -1093,7 +1130,19 @@ class PaymentService:
         recharge = locked
         if recharge.status == "PAID":
             raise AppException(40010, "充值单已支付")
-        if recharge.status not in ("PENDING",):
+        # 多端/重试可能同时为同一充值单创建支付：先锁充值单并刷新当前状态，
+        # 再锁定读取现有支付单，避免两个请求都看见“无 PENDING”后各建一笔。
+        recharge = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if recharge is None:
+            raise AppException(40491, "充值单不存在")
+        if recharge.status != "PENDING":
             raise AppException(40012, f"当前充值单状态不可支付: {recharge.status}")
 
         provider_u = provider.upper()
@@ -1152,8 +1201,8 @@ class PaymentService:
         payment_id = payment.id
         recharge_id = recharge.id
         await db.commit()
-        payment = await db.get(Payment, payment_id)
-        recharge = await db.get(RechargeOrder, recharge_id)
+        payment = await db.get(Payment, payment_id, populate_existing=True)
+        recharge = await db.get(RechargeOrder, recharge_id, populate_existing=True)
         if not payment or not recharge:
             raise AppException(40491, "充值/支付单不存在")
 
@@ -1201,12 +1250,17 @@ class PaymentService:
             try:
                 _require_provider_amount(pay_data, payment.amount)
             except AppException:
-                payment.status = "UNKNOWN"
-                await db.flush()
+                await cls._mark_recharge_payment_unknown_after_amount_mismatch(
+                    db, int(recharge.id), int(payment.id)
+                )
                 raise
-            payment.provider_trade_no = str(trade_no or "")
             await cls._settle_recharge_payment(
-                db, payment=payment, recharge=recharge, provider=provider_u, source="RECHARGE_IMMEDIATE"
+                db,
+                payment=payment,
+                recharge=recharge,
+                provider=provider_u,
+                source="RECHARGE_IMMEDIATE",
+                provider_trade_no=str(trade_no or ""),
             )
             pay_data["status"] = "PAID"
         return payment, pay_data
@@ -1223,24 +1277,32 @@ class PaymentService:
         provider_trade_no: str | None = None,
     ) -> dict:
         """充值支付成功：记 SALE（实付）、入账本金/赠送金、充值单 PAID。"""
-        if payment.status == "PAID" or recharge.status == "PAID":
-            if payment.status == "PAID" and recharge.status == "PAID":
-                return {"already_paid": True, "status": "PAID"}
-            raise AppException(50042, "充值支付与充值单状态不一致，已暂停重复入账，请人工核对")
-
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
 
         # 统一充值单锁序：RechargeOrder → Payment，与 _lock_order_then_payment 一致。
         # 回调入口可能已持有充值单锁；反向先锁 Payment 会与并发结算形成死锁环。
         locked_r = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == recharge.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one()
         locked_p = (
-            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
+            await db.execute(
+                select(Payment)
+                .where(Payment.id == payment.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one()
         recharge, payment = locked_r, locked_p
-        if payment.status == "PAID" or recharge.status == "PAID":
+        if (
+            recharge.status == "PAID"
+            or payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED")
+        ):
             if payment.status == "PAID" and recharge.status == "PAID":
                 return {"already_paid": True, "status": "PAID"}
             raise AppException(50042, "充值支付与充值单状态不一致，已暂停重复入账，请人工核对")
@@ -1303,6 +1365,7 @@ class PaymentService:
                     .where(Payment.recharge_order_id == current.id)
                     .order_by(Payment.id.desc())
                     .limit(1)
+                    .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
         if not payment:
@@ -1384,13 +1447,27 @@ class PaymentService:
             return None
         order_id, recharge_id = peek[0], peek[1]
         if order_id:
-            await db.execute(select(Order).where(Order.id == int(order_id)).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         elif recharge_id:
             await db.execute(
-                select(RechargeOrder).where(RechargeOrder.id == int(recharge_id)).with_for_update()
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
+        # FOR UPDATE 是当前读；populate_existing 同步刷新当前 Session 中可能已加载的旧 ORM 快照。
         return (
-            await db.execute(select(Payment).where(Payment.id == int(payment_id)).with_for_update())
+            await db.execute(
+                select(Payment)
+                .where(Payment.id == int(payment_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
 
     @classmethod
@@ -1407,14 +1484,20 @@ class PaymentService:
             raise AppException(40302, "退款记录缺少有效订单关联")
         order = (
             await db.execute(
-                select(Order).where(Order.id == order_id).with_for_update()
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "退款关联订单不存在")
         payment = (
             await db.execute(
-                select(Payment).where(Payment.id == int(refund.payment_id)).with_for_update()
+                select(Payment)
+                .where(Payment.id == int(refund.payment_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not payment:
@@ -1686,6 +1769,73 @@ class PaymentService:
         }
 
     @classmethod
+    async def _mark_order_payment_unknown_after_amount_mismatch(
+        cls, db: AsyncSession, payment_id: int
+    ) -> Payment:
+        """即时收款金额不匹配时，锁内刷新并持久化 UNKNOWN，不能覆盖并发回调的 PAID。"""
+        current = await cls._lock_order_then_payment(db, int(payment_id))
+        if current is None:
+            raise AppException(40401, "支付记录不存在")
+        if current.status not in ("PAID", "PARTIAL_REFUND", "REFUNDED", "UNKNOWN"):
+            old_status = current.status
+            current.status = "UNKNOWN"
+            await record_payment_status(
+                db,
+                payment_id=current.id,
+                from_status=old_status,
+                to_status="UNKNOWN",
+                source="IMMEDIATE_AMOUNT_MISMATCH",
+                remark="渠道即时结果缺少金额或金额不匹配，等待查单核实",
+            )
+            await db.flush()
+        # 请求层收到 AppException 后会 rollback；这里先提交核验状态，避免 UNKNOWN 被回滚丢失。
+        await db.commit()
+        return current
+
+    @classmethod
+    async def _mark_recharge_payment_unknown_after_amount_mismatch(
+        cls, db: AsyncSession, recharge_id: int, payment_id: int
+    ) -> Payment:
+        """充值即时金额不匹配时按 RechargeOrder→Payment 当前读收敛，保留并发成功回调。"""
+        recharge = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        payment = (
+            await db.execute(
+                select(Payment)
+                .where(Payment.id == int(payment_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if recharge is None or payment is None:
+            raise AppException(40491, "充值单或支付单不存在")
+        if recharge.status == "PAID" or payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
+            await db.commit()
+            if recharge.status != "PAID" or payment.status != "PAID":
+                raise AppException(50042, "充值支付与充值单状态不一致，已暂停自动处理，请人工核对")
+            return payment
+        if payment.status != "UNKNOWN":
+            old_status = payment.status
+            payment.status = "UNKNOWN"
+            await record_payment_status(
+                db,
+                payment_id=payment.id,
+                from_status=old_status,
+                to_status="UNKNOWN",
+                source="RECHARGE_AMOUNT_MISMATCH",
+                remark="充值渠道即时结果缺少金额或金额不匹配，等待查单核实",
+            )
+            await db.flush()
+        await db.commit()
+        return payment
+
+    @classmethod
     async def _settle_mock_payment(
         cls,
         db: AsyncSession,
@@ -1698,7 +1848,23 @@ class PaymentService:
 
         if get_settings().is_production:
             raise AppException(40301, "生产环境禁止执行 mock 支付结算", status_code=403)
-        if payment.status == "PAID":
+        # 支付单创建后会先 commit 再请求渠道；结算前必须重新按 Order→Payment 当前读锁定，
+        # 不能依赖网络请求前留在 Session 中的旧 ORM 对象。
+        locked_payment = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_payment is None or locked_payment.order_id is None:
+            raise AppException(40401, "支付记录或订单关联不存在")
+        payment = locked_payment
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(payment.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            raise AppException(40402, "订单不存在")
+        if payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             return
         old_p = payment.status
         payment.status = "PAID"
@@ -1718,7 +1884,23 @@ class PaymentService:
         provider: str,
         provider_trade_no: str,
     ) -> None:
-        if payment.status == "PAID":
+        # 即时付款码请求在外部渠道调用前已提交支付单；渠道返回期间可能先到异步成功回调。
+        # 因此这里必须重新获取 Order→Payment 当前读锁，防止旧对象重复记 SALE/更新订单状态。
+        locked_payment = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_payment is None or locked_payment.order_id is None:
+            raise AppException(40401, "支付记录或订单关联不存在")
+        payment = locked_payment
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(payment.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            raise AppException(40402, "订单不存在")
+        if payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             return
         old_p = payment.status
         payment.status = "PAID"
@@ -1742,7 +1924,12 @@ class PaymentService:
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
         locked = (
-            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == order.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40402, "订单不存在")
@@ -1756,13 +1943,15 @@ class PaymentService:
             "READY",
             "COMPLETED",
         ):
-            progress = await cls.payment_progress(db, order)
+            progress = await cls.payment_progress(db, order, current_read=True)
             existing = (
                 await db.execute(
                     select(Payment)
                     .where(Payment.order_id == order.id, Payment.status == "PAID")
                     .order_by(Payment.id.desc())
                     .limit(1)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
             if existing and progress.get("fully_paid"):
@@ -1786,6 +1975,8 @@ class PaymentService:
                         Payment.provider.in_(("WECHAT", "ALIPAY")),
                     )
                     .order_by(Payment.id.desc())
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).scalars().all()
         )
@@ -1796,7 +1987,7 @@ class PaymentService:
                 status_code=409,
             )
 
-        remaining = await cls.remaining_amount(db, order)
+        remaining = await cls.remaining_amount(db, order, current_read=True)
         if remaining <= 0:
             raise AppException(40010, "订单已支付")
 
@@ -1863,7 +2054,7 @@ class PaymentService:
         tender = await cls._finalize_tender(
             db, payment=payment, order=order, provider="CASH", source="POS_CASH"
         )
-        progress = await cls.payment_progress(db, order)
+        progress = await cls.payment_progress(db, order, current_read=True)
         logger.info(
             "收银现金入账 order=%s payment=%s amount=%s operator=%s fully=%s",
             order.order_no,
@@ -2473,13 +2664,12 @@ class PaymentService:
             row.succeeded_at = now_local()
             # 先锁订单再锁支付单，避免与支付回调的 Order→Payment 锁序死锁。
             payment, order = await cls._lock_order_then_payment_for_refund(db, row)
-            success_sum = await db.scalar(
-                select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                    PaymentRefund.payment_id == payment.id,
-                    PaymentRefund.status == "SUCCESS",
-                )
-            ) or Decimal("0")
-            # 当前行刚置 SUCCESS，sum 已包含
+            refund_rows = await cls._refund_rows_current(db, int(payment.id))
+            success_sum = sum(
+                (money(refund_row.amount) for refund_row in refund_rows if refund_row.status == "SUCCESS"),
+                money(0),
+            )
+            # 当前行刚置 SUCCESS，当前读已包含
             old_status = payment.status
             payment.status = (
                 "REFUNDED" if money(Decimal(str(success_sum))) >= money(payment.amount) else "PARTIAL_REFUND"
@@ -2531,7 +2721,7 @@ class PaymentService:
                             store_id=order.store_id,
                         )
                 # 按订单净已收判断：分笔退满一笔不得误标整单 REFUNDED
-                net = await cls.order_net_collected(db, order.id)
+                net = await cls.order_net_collected(db, order.id, current_read=True)
                 total = money(order.total_amount)
                 if net <= 0:
                     # 公益台账与营销归因冲减必须和退款 SUCCESS 同事务写入 Outbox。
@@ -2636,6 +2826,15 @@ class PaymentService:
                                 event_kind=kind,
                                 payload=payload,
                             )
+                    # 推荐退款学习无论同步偏好重算是否成功都必须入队；
+                    # 否则同步成功路径不会产生 Outbox 事件，画像负向学习会被漏掉。
+                    await enqueue_outbox(
+                        db,
+                        aggregate_type="refund",
+                        aggregate_id=int(row.id),
+                        event_kind="taste_learning_refund",
+                        payload={"order_id": int(order.id), "refund_id": int(row.id)},
+                    )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status
             row.fail_reason = row.fail_reason or fail_reason or (
@@ -2673,6 +2872,8 @@ class PaymentService:
         operator_id: int | None = None,
         pos_refund_request_id: int | None = None,
         idempotency_key: str | None = None,
+        pos_refund_execution_token: str | None = None,
+        pos_refund_execution_epoch: int | None = None,
     ) -> PaymentRefund:
         # Keep refund-row locks behind the shared Order/RechargeOrder → Payment
         # lock order. Callback and compensation paths use the same order before
@@ -2681,6 +2882,33 @@ class PaymentService:
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
+        # POS 审批执行权必须在同一事务内由数据库 token + epoch 验证。
+        # 旧 worker 即使在租约过期后恢复，也不能创建/绑定渠道退款单。
+        pos_request = None
+        if pos_refund_request_id is not None:
+            if not pos_refund_execution_token or pos_refund_execution_epoch is None:
+                raise AppException(40954, "POS 退款执行权缺失，拒绝创建渠道退款单")
+            pos_request = (
+                await db.execute(
+                    select(PosRefundRequest)
+                    .where(PosRefundRequest.id == int(pos_refund_request_id))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if (
+                pos_request is None
+                or int(pos_request.order_id) != int(payment.order_id or 0)
+                or pos_request.status != "PROCESSING"
+                or str(pos_request.execution_token or "") != str(pos_refund_execution_token)
+                or int(pos_request.execution_epoch or 0) != int(pos_refund_execution_epoch)
+            ):
+                raise AppException(40954, "POS 退款执行权已失效，拒绝创建渠道退款单")
+            lease_until = pos_request.execution_lease_until
+            if not pos_request.refund_id and (
+                lease_until is None or ensure_local_aware(lease_until) <= now_local()
+            ):
+                raise AppException(40954, "POS 退款执行租约已过期，拒绝创建渠道退款单")
+
         # HTTP 客户端可用 Idempotency-Key 安全重试退款请求。
         # 必须在支付终态检查之前查询，才能在“部分退款成功但响应丢失”后返回原退款单，
         # 而不是再次向渠道发起一笔新的部分退款。
@@ -2713,22 +2941,20 @@ class PaymentService:
         if amount <= 0:
             raise AppException(40051, "退款金额非法")
 
-        # 进行中/未知/异常待处理的退款单：禁止再开一笔，避免重复退款
-        inflight = await db.scalar(
-            select(func.count()).select_from(PaymentRefund).where(
-                PaymentRefund.payment_id == payment.id,
-                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
-            )
-        ) or 0
-        if int(inflight) > 0:
+        # _lock_order_then_payment 的初始定位查询可能已建立 RR 快照；资金判断必须改用
+        # 父级锁之后的 FOR UPDATE 当前读，避免漏掉等待期间刚提交的退款状态。
+        refund_rows = await cls._refund_rows_current(db, int(payment.id))
+        inflight = sum(
+            1 for refund_row in refund_rows
+            if refund_row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")
+        )
+        if inflight > 0:
             raise AppException(40054, "已有退款处理中，请勿重复提交")
 
-        refunded_success = await db.scalar(
-            select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                PaymentRefund.payment_id == payment.id,
-                PaymentRefund.status == "SUCCESS",
-            )
-        ) or Decimal("0")
+        refunded_success = sum(
+            (money(refund_row.amount) for refund_row in refund_rows if refund_row.status == "SUCCESS"),
+            money(0),
+        )
         remain = money(payment.amount) - money(Decimal(str(refunded_success)))
         if remain <= 0:
             raise AppException(40053, "可退余额为 0，不可再退")
@@ -2783,23 +3009,12 @@ class PaymentService:
             raise
 
         if pos_refund_request_id is not None:
-            pos_request = (
-                await db.execute(
-                    select(PosRefundRequest)
-                    .where(PosRefundRequest.id == int(pos_refund_request_id))
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
-            if (
-                pos_request is None
-                or int(pos_request.order_id) != int(payment.order_id or 0)
-                or pos_request.status not in ("PROCESSING", "FAILED")
-            ):
-                raise AppException(40954, "POS 退款申请状态已变化，无法绑定渠道退款单")
             # 在调用渠道前先建立精确关联，避免极快的异步 SUCCESS 回调早于 POS refund_id 落库。
+            # 这里复用前面已锁定并验证 token/epoch 的申请行，不重新查询，保持原子绑定。
             pos_request.refund_id = row.id
             pos_request.payment_id = payment.id
             pos_request.status = "PROCESSING"
+            pos_request.execution_lease_until = None
             pos_request.fail_reason = None
 
         # 短事务：落库 PENDING 退款单和 POS 关联并释放行锁后再调第三方
@@ -3333,6 +3548,24 @@ class PaymentService:
             order = await db.get(Order, int(order_id))
             return bool(order and order.payment_status == "PAID")
 
+    @staticmethod
+    def _channel_trade_is_terminal_unpaid(
+        provider: str, trade_state: str | None, *, cancel_action: str | None = None
+    ) -> bool:
+        """仅把可证明未支付的渠道终态视为可本地关单；未知/处理中必须保留 PENDING。"""
+        provider_u = (provider or "").upper()
+        state = (trade_state or "").strip().upper()
+        if provider_u == "WECHAT":
+            # 微信支付 v2/v3：NOTPAY、USERPAYING 均不是终态，不能据此关本地单。
+            return state in {"CLOSED", "REVOKED", "PAYERROR"}
+        if provider_u == "ALIPAY":
+            # TRADE_CLOSED 也可能表示支付成功后全额退款，必须由撤销响应确认 action=close。
+            return (
+                state == "TRADE_CLOSED"
+                and (cancel_action or "").strip().lower() == "close"
+            )
+        return False
+
     @classmethod
     async def close_channel_payments(cls, db: AsyncSession, order: Order) -> bool:
         """超时关单时同步撤销渠道交易，并把本地 PENDING 支付单置 CLOSED。
@@ -3365,14 +3598,19 @@ class PaymentService:
         late_paid = False
         for payment in pending:
             provider_u = (payment.provider or "").upper()
+            alipay_cancel_action = None
             try:
-                # 1. 调渠道关单/撤销
+                # 1. 调渠道关单/撤销；支付宝必须保留 action，区分关闭未支付与自动退款。
                 if provider_u == "WECHAT" and _wechat_pay_configured():
                     await wechat_pay_client.close_order(payment_no=payment.payment_no)
                 elif provider_u == "ALIPAY" and _alipay_pay_configured():
-                    await alipay_client.trade_cancel(payment_no=payment.payment_no)
+                    cancel_result = await alipay_client.trade_cancel(
+                        payment_no=payment.payment_no
+                    )
+                    if isinstance(cancel_result, dict):
+                        alipay_cancel_action = str(cancel_result.get("action") or "")
                 # 2. 关单后再查一次单，确认渠道状态（防止关单与支付竞态）
-                synced, _meta = await cls.sync_payment_status(db, payment)
+                synced, meta = await cls.sync_payment_status(db, payment)
                 if synced.status == "PAID":
                     late_paid = True
                     logger.warning(
@@ -3381,7 +3619,20 @@ class PaymentService:
                         payment.payment_no,
                     )
                     continue
-                # 3. 本地支付单置 CLOSED
+                if not cls._channel_trade_is_terminal_unpaid(
+                    provider_u,
+                    meta.get("trade_state"),
+                    cancel_action=alipay_cancel_action,
+                ):
+                    # NOTPAY / USERPAYING / UNKNOWN / 查单未配置等都不能证明渠道已终态。
+                    logger.warning(
+                        "渠道状态未确认终态，保留本地 PENDING order=%s payment=%s state=%s",
+                        order.order_no,
+                        payment.payment_no,
+                        meta.get("trade_state"),
+                    )
+                    continue
+                # 3. 只有渠道明确报告未支付终态，才允许本地支付单置 CLOSED。
                 await cls._close_pending_payment(
                     db, payment, reason="超时关单同步撤销渠道交易"
                 )
@@ -3431,11 +3682,16 @@ class PaymentService:
 
         late_paid = False
         for snap in snaps:
+            alipay_cancel_action = None
             try:
                 if snap.provider == "WECHAT" and _wechat_pay_configured():
                     await wechat_pay_client.close_order(payment_no=snap.payment_no)
                 elif snap.provider == "ALIPAY" and _alipay_pay_configured():
-                    await alipay_client.trade_cancel(payment_no=snap.payment_no)
+                    cancel_result = await alipay_client.trade_cancel(
+                        payment_no=snap.payment_no
+                    )
+                    if isinstance(cancel_result, dict):
+                        alipay_cancel_action = str(cancel_result.get("action") or "")
             except Exception as e:
                 logger.warning(
                     "关单撤销渠道交易失败 order=%s payment=%s: %s",
@@ -3444,13 +3700,14 @@ class PaymentService:
                     e,
                 )
 
+            terminal_unpaid = False
             try:
                 async with AsyncSessionLocal() as db:
                     payment = await db.get(Payment, int(snap.id))
                     if not payment:
                         await db.commit()
                         continue
-                    synced, _meta = await cls.sync_payment_status(db, payment)
+                    synced, meta = await cls.sync_payment_status(db, payment)
                     await db.commit()
                     if synced.status == "PAID":
                         late_paid = True
@@ -3460,6 +3717,10 @@ class PaymentService:
                             snap.payment_no,
                         )
                         continue
+                    terminal_unpaid = cls._channel_trade_is_terminal_unpaid(
+                        snap.provider, meta.get("trade_state"),
+                        cancel_action=alipay_cancel_action,
+                    )
             except Exception as e:
                 logger.warning(
                     "关单后查单失败 order=%s payment=%s: %s",
@@ -3467,6 +3728,16 @@ class PaymentService:
                     snap.payment_no,
                     e,
                 )
+
+            if not terminal_unpaid:
+                # 包括渠道关单失败后查单异常、UNKNOWN、NOTPAY、USERPAYING：
+                # 这些状态都不能证明顾客未付款，必须保留 PENDING 等待后续补偿。
+                logger.warning(
+                    "渠道未确认未支付终态，保留本地 PENDING order=%s payment=%s",
+                    order_no,
+                    snap.payment_no,
+                )
+                continue
 
             try:
                 async with AsyncSessionLocal() as db:

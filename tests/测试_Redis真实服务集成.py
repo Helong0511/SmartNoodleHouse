@@ -88,3 +88,92 @@ async def test_real_redis_menu_cache_lock_fencing_and_version_invalidation(monke
     finally:
         await redis_client.delete(*keys)
         await redis_client.aclose()
+
+
+
+@pytest.mark.asyncio
+async def test_real_redis_reco_cache_generation_and_owner_fencing(monkeypatch):
+    """真实 Redis 验证个性化推荐的代际读取、旧 owner 拒绝发布和失效隔离。"""
+    from app.core.cache_keys import (
+        reco_generation_key,
+        reco_key,
+        reco_rebuild_lock_key,
+    )
+    from app.services import reco_cache
+
+    redis_client = Redis.from_url(REDIS_TEST_URL, decode_responses=True, protocol=2)
+    customer_id = secrets.randbelow(2_000_000_000) + 1
+    store_id = secrets.randbelow(2_000_000_000) + 1
+    scene, bucket, fingerprint = "menu", "lunch", "integration"
+    generation = 41
+    generation_key = reco_generation_key(customer_id)
+    lock_key = reco_rebuild_lock_key(
+        customer_id, store_id, scene, bucket, fingerprint, generation
+    )
+    cache_key = reco_key(
+        customer_id, store_id, scene, bucket, fingerprint, generation
+    )
+    next_generation_cache_key = reco_key(
+        customer_id, store_id, scene, bucket, fingerprint, generation + 1
+    )
+
+    async def get_live_redis():
+        return redis_client
+
+    monkeypatch.setattr(reco_cache, "get_redis", get_live_redis)
+    try:
+        assert await redis_client.ping() is True
+        await redis_client.set(generation_key, str(generation), ex=3600)
+
+        owner = await reco_cache.try_acquire_reco_lock(
+            customer_id, store_id, scene, bucket, fingerprint,
+            generation=generation,
+        )
+        assert owner
+
+        payload = {"items": [{"id": 101}], "generation": generation}
+        assert await reco_cache.set_cached_reco_if_owner(
+            customer_id, store_id, scene, bucket, payload, fingerprint,
+            owner, expected_generation=generation,
+        )
+        cached = await reco_cache.get_cached_reco(
+            customer_id, store_id, scene, bucket, fingerprint,
+        )
+        assert cached is not None
+        assert cached["items"] == payload["items"]
+        assert cached["cache_hit"] is True
+
+        # 租约被接管后，旧 owner 不得覆盖同一代际的缓存。
+        await redis_client.set(lock_key, "new-owner", ex=30)
+        assert not await reco_cache.set_cached_reco_if_owner(
+            customer_id, store_id, scene, bucket,
+            {"items": [{"id": 999}]}, fingerprint, owner,
+            expected_generation=generation,
+        )
+        assert await redis_client.get(cache_key) is not None
+
+        # 画像撤权/更新推进共享代际；旧代际缓存即使仍存在也不可再被读取。
+        await reco_cache.invalidate_customer(customer_id, raise_on_error=True)
+        assert await reco_cache.get_reco_generation(customer_id) == generation + 1
+        assert await redis_client.get(cache_key) is not None
+        assert await reco_cache.get_cached_reco(
+            customer_id, store_id, scene, bucket, fingerprint,
+        ) is None
+
+        # 旧计算结果即使仍持有旧 token，也不能发布到旧代际或新代际键。
+        assert not await reco_cache.set_cached_reco_if_owner(
+            customer_id, store_id, scene, bucket,
+            {"items": [{"id": 777}]}, fingerprint, owner,
+            expected_generation=generation,
+        )
+        assert await redis_client.get(next_generation_cache_key) is None
+    finally:
+        await reco_cache.release_reco_lock(
+            customer_id, store_id, scene, bucket, fingerprint,
+            owner if "owner" in locals() else None,
+            generation=generation,
+        )
+        await redis_client.delete(
+            generation_key, lock_key, cache_key, next_generation_cache_key,
+        )
+        await redis_client.aclose()

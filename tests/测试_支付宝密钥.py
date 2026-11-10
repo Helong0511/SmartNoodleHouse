@@ -1,4 +1,8 @@
 """支付宝 RSA 密钥加载（PKCS8 / PKCS1）测试。"""
+import base64
+import json
+from types import SimpleNamespace
+
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -8,6 +12,7 @@ from app.utils.alipay_keys import (
     load_alipay_private_key,
     load_alipay_public_key,
     parse_alipay_http_json,
+    verify_alipay_response_signature,
 )
 
 
@@ -137,3 +142,91 @@ async def test_alipay_gateway_request_uses_post(monkeypatch):
     assert b"charset=utf-8" in captured["content"]
     assert "application/x-www-form-urlencoded" in captured["headers"].get("Content-Type", "")
     assert "alipay_system_oauth_token_response" in data
+
+
+def _signed_gateway_response(response_body, private_pem, *, escaped_slashes=False):
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    content = json.dumps(
+        response_body, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+    if escaped_slashes:
+        content = content.replace("/", r"\/")
+    private_key = load_alipay_private_key(private_pem)
+    signature = private_key.sign(
+        content.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256()
+    )
+    return {
+        "alipay_trade_query_response": response_body,
+        "sign": base64.b64encode(signature).decode("ascii"),
+    }
+
+
+def test_verify_alipay_gateway_response_signature_and_reject_tampering():
+    private_pem, _, public_pem = _gen_pair()
+    body = {
+        "code": "10000",
+        "msg": "Success",
+        "qr_code": "https://qr.alipay.com/a/b",
+        "nested": {"z": "中文", "a": 1},
+    }
+    response = _signed_gateway_response(body, private_pem)
+    assert verify_alipay_response_signature(response, body, public_pem)
+
+    # 兼容支付宝 JSON 响应中将 URL 斜杠序列化为 \\/ 的形式。
+    escaped = _signed_gateway_response(body, private_pem, escaped_slashes=True)
+    assert verify_alipay_response_signature(escaped, body, public_pem)
+
+    tampered = dict(response)
+    tampered["alipay_trade_query_response"] = {**body, "code": "40004"}
+    assert not verify_alipay_response_signature(
+        tampered, tampered["alipay_trade_query_response"], public_pem
+    )
+    assert not verify_alipay_response_signature(
+        {"alipay_trade_query_response": body}, body, public_pem
+    )
+
+
+@pytest.mark.asyncio
+async def test_alipay_gateway_call_requires_valid_signed_response(monkeypatch):
+    from app.core.exceptions import AppException
+    from app.services import alipay_client
+
+    private_pem, _, public_pem = _gen_pair()
+    settings = SimpleNamespace(
+        alipay_app_id="2021000000000000",
+        alipay_private_key=private_pem,
+        alipay_public_key=public_pem,
+        alipay_notify_url="https://example.invalid/alipay/notify",
+    )
+    body = {"code": "10000", "msg": "Success", "trade_status": "TRADE_CLOSED"}
+    signed = _signed_gateway_response(body, private_pem)
+
+    monkeypatch.setattr(alipay_client, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        alipay_client, "sign_alipay_params_rsa2", lambda *_: "request-signature"
+    )
+    monkeypatch.setattr(
+        alipay_client, "alipay_gateway_request",
+        lambda *args, **kwargs: _return_value(signed),
+    )
+    result = await alipay_client._gateway_call(
+        "alipay.trade.query", {"out_trade_no": "PAY-VERIFY"}
+    )
+    assert result == body
+
+    monkeypatch.setattr(
+        alipay_client, "alipay_gateway_request",
+        lambda *args, **kwargs: _return_value(
+            {"alipay_trade_query_response": body}
+        ),
+    )
+    with pytest.raises(AppException, match="验签失败"):
+        await alipay_client._gateway_call(
+            "alipay.trade.query", {"out_trade_no": "PAY-VERIFY"}
+        )
+
+
+async def _return_value(value):
+    return value

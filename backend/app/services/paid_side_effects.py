@@ -342,13 +342,24 @@ async def _handle_pref_recompute(db: AsyncSession, row) -> None:
     if not order or not order.customer_id:
         return
     await PreferenceService.recompute_for_customer(db, order.customer_id)
-    # 智能推荐：整单退款记负向事件（幂等）；部分退款由既有偏好降权覆盖
+    # 推荐负向学习由独立 taste_learning_refund Outbox 事件处理，失败必须重试。
+
+
+
+@register_outbox_handler("refund", "taste_learning_refund")
+async def _handle_taste_learning_refund(db: AsyncSession, row) -> None:
+    """退款负向推荐学习独立重试；整单退款才写入合成负向事件，失败向 Outbox 传播。"""
+    from app.models import Order, PaymentRefund
     from app.services.taste_learning_service import TasteLearningService
 
-    try:
-        await TasteLearningService.record_full_refund_events(db, order.id)
-    except Exception:
-        logger.exception("推荐画像退款学习失败 order_id=%s", order.id)
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if not refund:
+        return
+    order = await db.get(Order, int(refund.order_id))
+    if not order or not order.customer_id:
+        return
+    # 服务内部仅在 payment_status=REFUNDED 时记录整单退款事件；部分退款安全 no-op。
+    await TasteLearningService.record_full_refund_events(db, int(order.id))
 
 
 @register_outbox_handler("order", "coupon_release")
