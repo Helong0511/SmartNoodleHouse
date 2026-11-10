@@ -346,3 +346,13 @@ Outbox worker（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/servi
 - 即时渠道金额缺失/不匹配时，不再直接改写旧 ORM 对象。改为重新锁定并刷新当前支付单；仅在尚未 PAID/退款终态时转 UNKNOWN，写状态历史并先提交，再向调用方返回金额错误，避免请求异常回滚掉 UNKNOWN，也避免覆盖并发成功回调。
 - 充值即时金额不匹配路径按 RechargeOrder→Payment 当前读锁定；两者任一已 PAID 时不做降级，状态分叉则 fail-closed 报人工核对；未支付时持久化 UNKNOWN 和状态历史。充值最终入账本身也移除锁前状态短路，并在 RechargeOrder→Payment 锁后刷新 ORM，再判断双边 PAID/终态，避免旧对象触发重复充值或把退款终态覆盖成 PAID。即时渠道返回的 `provider_trade_no` 也延后到持锁后的充值结算函数中写入，避免外部请求返回期间迟到回调已更新字段、旧对象再覆盖。
 - 新增测试覆盖回调先成功时不降级、不重复记账，以及金额不匹配时 UNKNOWN 必须持久化。
+
+
+## 2026-11-10 支付宝同步网关响应验签
+
+- 支付宝 OpenAPI 的交易查询、撤销、退款等同步响应必须验证顶层 sign，不能仅依赖 HTTPS。
+- 客户端在读取业务 code、trade_status、action、fund_change 前，先用 ALIPAY_PUBLIC_KEY 按 RSA2/SHA-256 验证对应的 alipay_*_response JSON 节点。
+- 缺失签名、响应节点异常或签名不匹配均 fail-closed；不会继续使用未经验证的交易状态做支付入账、退款或关单决策。
+- 验签实现与回归测试：backend/app/utils/alipay_keys.py、backend/app/services/alipay_client.py、tests/测试_支付宝密钥.py。
+- 官方说明：https://developer.alibaba.com/docs/doc.htm?articleId=105975&docType=1&treeId=293；https://jaq-doc.alibaba.com/docs/doc.htm?articleId=104613&docType=1&treeId=140。
+- 最新 HEAD 的 CI 未完成前，不把该项登记为 CI 通过。
