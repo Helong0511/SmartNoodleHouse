@@ -20,13 +20,15 @@ function friendlyNetError(err) {
   return appendDevApiHint(raw || '人脸授权失败', resolveApiBase())
 }
 
+const FACE_CONSENT_VERSION = 'face-welcome-2026-11-v1'
+
 function confirmAction(label) {
   return new Promise((resolve) => {
     my.confirm({
-      title: '人脸活体验证',
-      content: `${label || '请按提示完成动作'}，完成后点击「去拍照」使用前置摄像头采集。`,
-      confirmButtonText: '去拍照',
-      cancelButtonText: '取消',
+      title: '人脸信息单独授权',
+      content: `人脸信息属于敏感个人信息。选择同意后，前置摄像头照片将上传至系统服务器即时提取特征；业务档案仅保存加密后的人脸特征，不将原始照片作为人脸档案保存。仅用于本店到店迎宾识别，不用于广告营销。拒绝不影响点餐、支付等服务；可随时在个人中心撤回，撤回后删除人脸档案。仅在授权有效且实现迎宾目的所必需期间保存。请先完成动作：${label || '按提示完成动作'}。`,
+      confirmButtonText: '同意并去拍照',
+      cancelButtonText: '不同意',
       success: (r) => resolve(!!r.confirm),
     })
   })
@@ -97,15 +99,8 @@ async function enrollFaceWelcome() {
     if (!ok) throw new Error('已取消人脸授权')
     actionCompleted = ok
   } else {
-    const ok = await new Promise((resolve) => {
-      my.confirm({
-        title: '开启人脸迎宾',
-        content: '将使用前置摄像头采集人脸，仅用于到店迎宾，可随时关闭。',
-        confirmButtonText: '去拍照',
-        cancelButtonText: '取消',
-        success: (r) => resolve(!!r.confirm),
-      })
-    })
+    // Development-only no-challenge mode still requires the same separate face-data consent.
+    const ok = await confirmAction('无需动作挑战，请确认后继续')
     if (!ok) throw new Error('已取消人脸授权')
     actionCompleted = ok
   }
@@ -125,6 +120,8 @@ async function enrollFaceWelcome() {
   try {
     return await api.post('/miniprogram/face/consent-base64', {
       image_base64: b64,
+      face_consent_accepted: true,
+      face_consent_version: FACE_CONSENT_VERSION,
       liveness_token: token,
       action_completed: actionCompleted,
       claimed_action: challenge && challenge.action,

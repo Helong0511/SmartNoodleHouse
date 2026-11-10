@@ -90,7 +90,7 @@ async def test_consent_base64_requires_liveness_before_decode():
             # 故意缺 liveness_token
         }
     )
-    body = FaceConsentBase64Request(image_base64="a" * 900)
+    body = FaceConsentBase64Request(image_base64="a" * 900, face_consent_accepted=True, face_consent_version="face-welcome-2026-11-v1")
     with patch(
         "app.api.miniprogram_face._require_face_welcome_enabled",
         new_callable=AsyncMock,
@@ -112,3 +112,27 @@ async def test_alipay_new_customer_has_customer_no():
     cust = CustomerService._new_guest_customer()
     assert cust.customer_no
     assert str(cust.customer_no).strip()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted,version", [
+    (False, "face-welcome-2026-11-v1"),
+    (True, None),
+    (True, "old-policy-version"),
+])
+async def test_consent_base64_requires_versioned_separate_face_consent(accepted, version):
+    from app.api.miniprogram_face import FaceConsentBase64Request, consent_face_base64
+
+    customer = SimpleNamespace(id=7)
+    req = MagicMock()
+    with patch("app.api.miniprogram_face._require_face_welcome_enabled", new_callable=AsyncMock):
+        with patch("app.api.miniprogram_face._enforce_liveness_challenge", new_callable=AsyncMock) as enforce:
+            body = FaceConsentBase64Request(
+                image_base64="a" * 900,
+                face_consent_accepted=accepted,
+                face_consent_version=version,
+            )
+            with pytest.raises(AppException) as ei:
+                await consent_face_base64(req, body, AsyncMock(), customer)
+    assert ei.value.code == 40344
+    enforce.assert_not_awaited()
