@@ -99,6 +99,7 @@ jobs:
             exit 1
           fi
           python -m uvicorn --help | grep -F -- '--workers'
+          python -m uvicorn --help | grep -F -- '--no-access-log'
           python - <<'PY'
           import os
           import socket
