@@ -92,3 +92,26 @@ async def test_public_media_is_served_only_while_referenced_by_store(db_session,
     with pytest.raises(AppException) as exc:
         await get_public_media(key, db_session)
     assert exc.value.status_code == 404
+
+@pytest.mark.asyncio
+async def test_s3_storage_propagates_non_missing_object_errors():
+    class S3InternalFailure(Exception):
+        response = {"Error": {"Code": "InternalError", "Message": "simulated outage"}}
+
+    class FailingS3Client:
+        def get_object(self, **kwargs):
+            raise S3InternalFailure("simulated outage")
+
+        def delete_object(self, **kwargs):
+            raise S3InternalFailure("simulated outage")
+
+    storage = object.__new__(object_storage.S3ObjectStorage)
+    storage.client = FailingS3Client()
+    storage.bucket = "private-bucket"
+
+    with pytest.raises(S3InternalFailure, match="simulated outage"):
+        await storage.get_bytes("products/unavailable.webp")
+
+    with pytest.raises(S3InternalFailure, match="simulated outage"):
+        await storage.delete("products/unavailable.webp")
+
