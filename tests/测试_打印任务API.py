@@ -107,3 +107,84 @@ async def test_retry_print_job_triggers_process():
         assert job.status == "RETRYING"
     finally:
         app.dependency_overrides.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_resolve_uncertain_print_job_confirms_not_printed_and_queues_retry():
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    user = _staff_user()
+    job = SimpleNamespace(id=7, store_id=1, status="UNCERTAIN")
+    fake_db = MagicMock()
+    fake_db.get = AsyncMock(return_value=job)
+    fake_db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
+    fake_db.commit = AsyncMock()
+    fake_db.rollback = AsyncMock()
+
+    async def override_db():
+        yield fake_db
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=set())):
+            with patch("app.api.print_jobs.AuditService.log_staff", AsyncMock()) as audit:
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    res = await client.post(
+                        "/api/print-jobs/7/resolve-uncertain",
+                        json={"outcome": "NOT_PRINTED", "reason": "已检查出纸口和打印队列，确认未出纸"},
+                    )
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert data["status"] == "RETRYING"
+        assert data["retry_queued"] is True
+        assert data["outcome"] == "NOT_PRINTED"
+        audit.assert_awaited_once()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_resolve_uncertain_print_job_confirms_printed_without_retry():
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    user = _staff_user()
+    job = SimpleNamespace(id=8, store_id=1, status="UNCERTAIN")
+    fake_db = MagicMock()
+    fake_db.get = AsyncMock(return_value=job)
+    fake_db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
+    fake_db.commit = AsyncMock()
+    fake_db.rollback = AsyncMock()
+
+    async def override_db():
+        yield fake_db
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=set())):
+            with patch("app.api.print_jobs.AuditService.log_staff", AsyncMock()) as audit:
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    res = await client.post(
+                        "/api/print-jobs/8/resolve-uncertain",
+                        json={"outcome": "PRINTED", "reason": "已在厨房出纸口找到本订单完整小票"},
+                    )
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert data["status"] == "SUCCESS"
+        assert data["retry_queued"] is False
+        assert data["outcome"] == "PRINTED"
+        audit.assert_awaited_once()
+    finally:
+        app.dependency_overrides.clear()
