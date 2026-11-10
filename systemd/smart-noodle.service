@@ -39,7 +39,8 @@ ExecStart=REPLACE_DEPLOY_ROOT/backend/.venv/bin/uvicorn app.main:app \
   --port 8000 \
   --workers 2 \
   --timeout-keep-alive 5 \
-  --timeout-graceful-shutdown 30
+  --timeout-graceful-shutdown 30 \
+  --no-access-log
 
 ExecReload=/bin/kill -HUP $MAINPID
 KillMode=mixed
