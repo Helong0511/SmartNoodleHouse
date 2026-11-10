@@ -172,3 +172,16 @@
 - 回归测试覆盖有效签名、转义斜杠、中文嵌套字段、篡改响应、缺少签名，以及客户端对未签名响应拒绝处理。
 - 官方依据：支付宝开放平台同步返回验签说明（https://developer.alibaba.com/docs/doc.htm?articleId=105975&docType=1&treeId=293）；标准网关响应签名说明（https://jaq-doc.alibaba.com/docs/doc.htm?articleId=104613&docType=1&treeId=140）；交易查询响应示例（https://jaq-doc.alibaba.com/docs/api.htm?apiId=757&docType=4）。
 - 关联提交：d351b3ec5298ab6f2c7cb8a7ebff0da3d69c35d4、3fa6d301a3a3d4f73e5ba0db5c6aa1d0da3afeb7、c9374ef076b219106bd3db5d2789768a13879a81、9ec373d2047789761657d5d2e606c05448187c66、56c4e61953aa7062bcb2ebbd8aed9bb7a7c61367、aed8f1240e3c8ae9334da72c34c9191e549244b9。最新 HEAD 的 CI 尚未完成，验签实现必须以最新 CI 结果验收。
+
+
+### 2026-11-10 合并与对象存储/模型授权增量复核
+
+- PR #115 已于 2026-11-10 合并到 main，合并提交 `cc3cb05dec1a8c7fbc2b337b82c80fa3b34b9aad`；对应 head `d3493ce501b398ecb26910ab24b3efd50a2f255d` 的 CI 12/12 jobs success。该批修复覆盖配置 fail-closed、日志脱敏、小程序发布环境校验、数据库初始化保护、支付/财务一致性等；不代表外部平台/生产环境验收完成。
+- Issue #110 复核更正：当前 `backend/app/services/object_storage.py` 已实现 boto3 S3/MinIO adapter（put/get/delete），带有异步线程隔离、连接/读取超时、连接池与重试设置；依赖静态扫描也已能找到真实 boto3 import。仍未闭环：boto3 被默认 requirements/lock 无条件安装；缺少真实 MinIO/S3-compatible 集成测试；私有对象签名 URL 能力未实现；AWS 默认 endpoint 与 MinIO endpoint 配置需要分别验证。
+- 对象存储启动时惰性初始化问题已在 PR #116 修复：应用 lifespan 启动时调用 `get_storage()`，SDK/配置/backend 错误会导致启动退出，不再拖到首次上传才暴露。PR #116 的最新 SHA 与 CI 状态须以 Actions 为准；尚未合并前不得标记为 main 已修复。
+- Issue #109 复核：`face_extractor.py` 当前使用 `FaceAnalysis(name="buffalo_l")`，512D embedding；依赖约束仍为 `insightface>=0.7.3,<0.8`。官方 Model Zoo 明确所有预训练模型仅限非商业研究用途，代码 MIT 许可不覆盖模型权利。不得通过升级 InsightFace 2.1 规避模型授权；门店商业识别须先取得 buffalo_l 商业授权，或更换具有明确商业许可的模型并完成实际 CPU 推理/精度/并发/内存验收。生产启用人脸功能仍是发布阻塞项，默认关闭，不能用于登录/支付/高风险认证。
+- 官方资料：
+  - https://github.com/deepinsight/insightface/blob/master/model_zoo/README.md
+  - https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md
+  - https://github.com/deepinsight/insightface/blob/master/README.md
+  - https://pypi.org/project/insightface/2.1/
