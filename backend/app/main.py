@@ -97,6 +97,7 @@ async def _warmup_recognition_and_tts() -> None:
                     db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
                 )
         if face_enabled:
+
             def _load_live() -> None:
                 from app.services.face_extractor import _face_app_live
 
