@@ -271,7 +271,16 @@ async def test_stale_print_recovery_emits_critical_uncertain_result_alert(db_ses
 
     await db_session.refresh(job)
     assert reclaimed == 1
-    assert job.status == "RETRYING"
+    assert job.status == "UNCERTAIN"
     assert job.locked_at is None
     assert job.locked_by is None
+    assert job.next_retry_at is None
+    assert job.last_error.startswith("PRINT_RESULT_UNKNOWN:")
     assert any("PRINT RESULT UNCERTAIN" in record.message for record in caplog.records)
+
+    # 自动 claim 只接受 RETRYING/FAILED；待核验任务不会被 worker 重打。
+    claim = await PrintService.claim_print_job(db_session, job.id, worker="must-not-claim")
+    assert claim is None
+    await db_session.refresh(job)
+    assert job.status == "UNCERTAIN"
+    assert job.attempt_count == 1
