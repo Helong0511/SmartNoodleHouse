@@ -67,3 +67,26 @@ def test_startup_gate_blocks_face_profile_warmup_in_all_environments():
 
     assert is_face_recognition_allowed(development) is False
     assert is_face_recognition_allowed(production_approved) is False
+
+
+
+def test_face_service_layer_blocks_direct_profile_reads_and_writes():
+    import numpy as np
+
+    from app.services.face_service import FaceEmbeddingCache, FaceService
+
+    cache = FaceEmbeddingCache()
+    blocked = "人脸识别功能临时关闭"
+
+    with pytest.raises(RuntimeError, match=blocked):
+        asyncio.run(cache.warmup(None))
+    with pytest.raises(RuntimeError, match=blocked):
+        asyncio.run(cache.get_profiles(None))
+    with pytest.raises(RuntimeError, match=blocked):
+        asyncio.run(cache.promote(None, 123))
+    with pytest.raises(RuntimeError, match=blocked):
+        asyncio.run(cache.best_match(None, np.zeros(512, dtype=np.float32), 0.5))
+    with pytest.raises(RuntimeError, match=blocked):
+        asyncio.run(FaceService.register_face(None, 123, [0.0] * 512))
+    with pytest.raises(RuntimeError, match=blocked):
+        asyncio.run(FaceService.reencrypt_stale_profiles(None))
