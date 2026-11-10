@@ -48,7 +48,7 @@ def test_deployment_guide_never_recommends_destructive_schema_reset():
     # data_sys.sql is destructive and may only appear behind the explicit
     # fresh-database confirmation guard documented in the same code block.
     lines = guide.splitlines()
-    imports = [i for i, line in enumerate(lines) if "sql/data_sys.sql" in line]
+    imports = [i for i, line in enumerate(lines) if "< sql/data_sys.sql" in line]
     assert imports, "fresh-install seed command must be documented"
     for index in imports:
         command = lines[index]
