@@ -1,6 +1,6 @@
 """Add durable execution fencing to POS refund approvals.
 
-Revision ID: 0051_pos_refund_execution_fencing
+Revision ID: 0051_pos_refund_fencing
 Revises: 0050_menu_db_generation
 """
 from __future__ import annotations
