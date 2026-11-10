@@ -139,11 +139,11 @@ class S3ObjectStorage(ObjectStorage):
 
     async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
         await asyncio.to_thread(self._put_sync, key, data, content_type)
+        # 没有 CDN 公网基址时，返回应用内受引用校验的公共媒体路由；
+        # 不能把 s3:// 或 MinIO 管理端点交给浏览器/小程序作为图片地址。
         if self.public_base:
             return f"{self.public_base}/{key}"
-        if self.endpoint:
-            return f"{self.endpoint}/{self.bucket}/{key}"
-        return f"s3://{self.bucket}/{key}"
+        return f"/api/media/public/{key}"
 
     async def get_bytes(self, key: str) -> bytes:
         def _read_object() -> bytes:
