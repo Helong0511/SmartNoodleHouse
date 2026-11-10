@@ -20,13 +20,15 @@ function friendlyNetError(err) {
   return appendDevApiHint(raw || '人脸授权失败', resolveApiBase())
 }
 
+const FACE_CONSENT_VERSION = 'face-welcome-2026-11-v1'
+
 function confirmAction(label) {
   return new Promise((resolve) => {
     my.confirm({
-      title: '人脸活体验证',
-      content: `${label || '请按提示完成动作'}，完成后点击「去拍照」使用前置摄像头采集。`,
-      confirmButtonText: '去拍照',
-      cancelButtonText: '取消',
+      title: '人脸信息单独授权',
+      content: `人脸信息属于敏感个人信息。选择同意后，将采集前置摄像头照片并提取人脸特征，经网络传输后加密保存在系统服务器，仅用于本店到店迎宾识别，不用于广告营销。拒绝不影响点餐、支付等服务；可随时在个人中心撤回，撤回后删除人脸特征。保存期限为授权有效期间。请先完成动作：${label || '按提示完成动作'}。`,
+      confirmButtonText: '同意并去拍照',
+      cancelButtonText: '不同意',
       success: (r) => resolve(!!r.confirm),
     })
   })
@@ -125,6 +127,8 @@ async function enrollFaceWelcome() {
   try {
     return await api.post('/miniprogram/face/consent-base64', {
       image_base64: b64,
+      face_consent_accepted: true,
+      face_consent_version: FACE_CONSENT_VERSION,
       liveness_token: token,
       action_completed: actionCompleted,
       claimed_action: challenge && challenge.action,
