@@ -3549,15 +3549,18 @@ class PaymentService:
             return bool(order and order.payment_status == "PAID")
 
     @staticmethod
-    def _channel_trade_is_terminal_unpaid(provider: str, trade_state: str | None) -> bool:
-        """仅把渠道明确报告的未支付终态视为可本地关单；未知/处理中必须保留 PENDING。"""
+    def _channel_trade_is_terminal_unpaid(
+        provider: str, trade_state: str | None, *, cancel_action: str | None = None
+    ) -> bool:
+        """仅把可证明未支付的渠道终态视为可本地关单；未知/处理中必须保留 PENDING。"""
         provider_u = (provider or "").upper()
         state = (trade_state or "").strip().upper()
         if provider_u == "WECHAT":
             # 微信支付 v2/v3：NOTPAY、USERPAYING 均不是终态，不能据此关本地单。
             return state in {"CLOSED", "REVOKED", "PAYERROR"}
         if provider_u == "ALIPAY":
-            return state == "TRADE_CLOSED"
+            # TRADE_CLOSED 也可能表示支付成功后全额退款，必须由撤销响应确认 action=close。
+            return state == "TRADE_CLOSED" and (cancel_action or "").strip().lower() == "close"
         return False
 
     @classmethod
@@ -3592,12 +3595,15 @@ class PaymentService:
         late_paid = False
         for payment in pending:
             provider_u = (payment.provider or "").upper()
+            alipay_cancel_action = None
             try:
-                # 1. 调渠道关单/撤销
+                # 1. 调渠道关单/撤销；支付宝必须保留 action，区分关闭未支付与自动退款。
                 if provider_u == "WECHAT" and _wechat_pay_configured():
                     await wechat_pay_client.close_order(payment_no=payment.payment_no)
                 elif provider_u == "ALIPAY" and _alipay_pay_configured():
-                    await alipay_client.trade_cancel(payment_no=payment.payment_no)
+                    cancel_result = await alipay_client.trade_cancel(payment_no=payment.payment_no)
+                    if isinstance(cancel_result, dict):
+                        alipay_cancel_action = str(cancel_result.get("action") or "")
                 # 2. 关单后再查一次单，确认渠道状态（防止关单与支付竞态）
                 synced, meta = await cls.sync_payment_status(db, payment)
                 if synced.status == "PAID":
@@ -3609,7 +3615,7 @@ class PaymentService:
                     )
                     continue
                 if not cls._channel_trade_is_terminal_unpaid(
-                    provider_u, meta.get("trade_state")
+                    provider_u, meta.get("trade_state"), cancel_action=alipay_cancel_action
                 ):
                     # NOTPAY / USERPAYING / UNKNOWN / 查单未配置等都不能证明渠道已终态。
                     logger.warning(
@@ -3669,11 +3675,14 @@ class PaymentService:
 
         late_paid = False
         for snap in snaps:
+            alipay_cancel_action = None
             try:
                 if snap.provider == "WECHAT" and _wechat_pay_configured():
                     await wechat_pay_client.close_order(payment_no=snap.payment_no)
                 elif snap.provider == "ALIPAY" and _alipay_pay_configured():
-                    await alipay_client.trade_cancel(payment_no=snap.payment_no)
+                    cancel_result = await alipay_client.trade_cancel(payment_no=snap.payment_no)
+                    if isinstance(cancel_result, dict):
+                        alipay_cancel_action = str(cancel_result.get("action") or "")
             except Exception as e:
                 logger.warning(
                     "关单撤销渠道交易失败 order=%s payment=%s: %s",
@@ -3700,7 +3709,8 @@ class PaymentService:
                         )
                         continue
                     terminal_unpaid = cls._channel_trade_is_terminal_unpaid(
-                        snap.provider, meta.get("trade_state")
+                        snap.provider, meta.get("trade_state"),
+                        cancel_action=alipay_cancel_action,
                     )
             except Exception as e:
                 logger.warning(
