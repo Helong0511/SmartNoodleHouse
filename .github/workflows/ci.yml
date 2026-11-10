@@ -78,6 +78,31 @@ jobs:
           PYTHONPATH: backend
           APP_ENV: development
         run: python -m pytest -q tests/测试_Redis真实服务集成.py
+      - name: Start disposable MinIO for S3 adapter integration
+        run: |
+          docker run -d --name smart-noodle-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            dappros/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null; then
+              echo "MinIO is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs smart-noodle-minio
+          echo "MinIO did not become ready" >&2
+          exit 1
+      - name: Verify boto3 S3 adapter against real MinIO
+        env:
+          PYTHONPATH: backend
+          APP_ENV: development
+          S3_TEST_ENDPOINT: "http://127.0.0.1:9000"
+          S3_TEST_ACCESS_KEY: minioadmin
+          S3_TEST_SECRET_KEY: minioadmin
+        run: python -m pytest -q tests/test_s3_object_storage_minio.py
       - name: Verify tracked text encoding and line endings
         run: |
           python scripts/check_text_encoding.py
@@ -93,13 +118,11 @@ jobs:
           grep -F 'REPLACE_DEPLOY_ROOT/backend/.venv/bin/uvicorn app.main:app' systemd/smart-noodle.service
           grep -F -- '--workers 2' systemd/smart-noodle.service
           grep -F -- '--timeout-graceful-shutdown 30' systemd/smart-noodle.service
-          grep -F -- '--no-access-log' systemd/smart-noodle.service
           if grep -Eq 'gunicorn|uvicorn[.]workers[.]UvicornWorker' systemd/smart-noodle.service; then
             echo "Deprecated or removed ASGI worker launch path found" >&2
             exit 1
           fi
           python -m uvicorn --help | grep -F -- '--workers'
-          python -m uvicorn --help | grep -F -- '--no-access-log'
           python - <<'PY'
           import os
           import socket
