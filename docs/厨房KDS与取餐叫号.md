@@ -292,3 +292,15 @@ A：
 
 **Q：生产环境后端启动失败，提示缺少 DISPLAY_SCREEN_TOKEN？**
 A：在 `.env` 中配置 `DISPLAY_SCREEN_TOKEN` 后重启后端。
+
+
+## 打印结果未知（UNCERTAIN）处置
+
+若打印 Worker 在打印请求期间崩溃或超时，打印机可能已接收小票，但应用无法确认是否实际出纸。系统会将超时的 `PRINTING` 任务隔离为 `UNCERTAIN`，不会自动重打；该状态不属于自动重试队列。
+
+1. 在管理端打印任务列表筛选 `UNCERTAIN`，核对门店、订单号、任务时间及打印机实际出纸记录。
+2. 若确认已出纸，调用 `POST /api/print-jobs/{job_id}/resolve-uncertain`，提交 `outcome=PRINTED` 和核验原因，任务转为 `SUCCESS`。
+3. 若确认未出纸，提交 `outcome=NOT_PRINTED` 和核验原因，任务转为 `RETRYING` 并恢复重试队列。
+4. 处置操作要求当前用户具备厨房权限、通过门店范围校验，并写入员工审计日志。状态更新使用条件写入；并发处置或旧 Worker 不得覆盖已作出的人工决定。
+
+`UNCERTAIN` 不能仅因等待超时而自动转为重试。TCP/云打印的请求超时不代表打印机未接收任务；除非打印服务商提供并验证可靠的幂等任务查询能力，否则不得宣称 exactly-once。
