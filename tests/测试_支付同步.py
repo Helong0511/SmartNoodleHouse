@@ -827,3 +827,143 @@ async def test_recharge_settlement_never_downgrades_refunded_payment():
 
     assert exc.value.code == 50042
     assert current_payment.status == "REFUNDED"
+
+
+@pytest.mark.parametrize(
+    ("provider", "trade_state", "expected"),
+    [
+        ("WECHAT", "CLOSED", True),
+        ("WECHAT", "REVOKED", True),
+        ("WECHAT", "PAYERROR", True),
+        ("WECHAT", "NOTPAY", False),
+        ("WECHAT", "USERPAYING", False),
+        ("WECHAT", "UNKNOWN", False),
+        ("ALIPAY", "TRADE_CLOSED", True),
+        ("ALIPAY", "WAIT_BUYER_PAY", False),
+        ("ALIPAY", "TRADE_SUCCESS", False),
+        ("OTHER", "CLOSED", False),
+    ],
+)
+def test_channel_trade_must_be_explicit_terminal_unpaid(provider, trade_state, expected):
+    assert PaymentService._channel_trade_is_terminal_unpaid(provider, trade_state) is expected
+
+
+class _PaymentCloseSessionContext:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return self.db
+
+    async def __aexit__(self, *args):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_close_channel_payments_by_id_keeps_pending_when_close_and_query_are_uncertain():
+    """渠道关单超时且查单 UNKNOWN 时，不能把本地支付单误关为 CLOSED。"""
+    order = SimpleNamespace(id=701, order_no="O701", payment_status="UNPAID")
+    payment = SimpleNamespace(
+        id=702, payment_no="PAY702", provider="WECHAT",
+        channel="WECHAT_MINIPROGRAM", status="PENDING",
+    )
+    rows = MagicMock()
+    rows.scalars.return_value = [payment]
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[order, payment])
+    db.execute = AsyncMock(return_value=rows)
+    db.commit = AsyncMock()
+
+    with patch(
+        "app.services.payment_service.AsyncSessionLocal",
+        side_effect=lambda: _PaymentCloseSessionContext(db),
+    ), patch(
+        "app.services.payment_service._wechat_pay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service.wechat_pay_client.close_order",
+        new_callable=AsyncMock, side_effect=TimeoutError("provider timeout"),
+    ), patch.object(
+        PaymentService, "sync_payment_status", new_callable=AsyncMock,
+        return_value=(payment, {"trade_state": "UNKNOWN"}),
+    ), patch.object(
+        PaymentService, "_lock_order_then_payment", new_callable=AsyncMock,
+    ) as lock_payment, patch.object(
+        PaymentService, "_close_pending_payment", new_callable=AsyncMock,
+    ) as close_local:
+        late_paid = await PaymentService.close_channel_payments_by_id(order.id)
+
+    assert late_paid is False
+    lock_payment.assert_not_awaited()
+    close_local.assert_not_awaited()
+    assert payment.status == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_close_channel_payments_by_id_keeps_pending_when_channel_query_raises():
+    """关单接口失败后，查单本身异常也必须保留 PENDING。"""
+    order = SimpleNamespace(id=711, order_no="O711", payment_status="UNPAID")
+    payment = SimpleNamespace(
+        id=712, payment_no="PAY712", provider="WECHAT",
+        channel="WECHAT_MINIPROGRAM", status="PENDING",
+    )
+    rows = MagicMock()
+    rows.scalars.return_value = [payment]
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[order, payment])
+    db.execute = AsyncMock(return_value=rows)
+    db.commit = AsyncMock()
+
+    with patch(
+        "app.services.payment_service.AsyncSessionLocal",
+        side_effect=lambda: _PaymentCloseSessionContext(db),
+    ), patch(
+        "app.services.payment_service._wechat_pay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service.wechat_pay_client.close_order",
+        new_callable=AsyncMock, side_effect=TimeoutError("provider timeout"),
+    ), patch.object(
+        PaymentService, "sync_payment_status", new_callable=AsyncMock,
+        side_effect=TimeoutError("query timeout"),
+    ), patch.object(
+        PaymentService, "_lock_order_then_payment", new_callable=AsyncMock,
+    ) as lock_payment, patch.object(
+        PaymentService, "_close_pending_payment", new_callable=AsyncMock,
+    ) as close_local:
+        late_paid = await PaymentService.close_channel_payments_by_id(order.id)
+
+    assert late_paid is False
+    lock_payment.assert_not_awaited()
+    close_local.assert_not_awaited()
+    assert payment.status == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_close_channel_payments_keeps_pending_for_nonterminal_channel_state():
+    """同步关单路径也必须等待渠道明确的未支付终态。"""
+    order = SimpleNamespace(id=721, order_no="O721", payment_status="UNPAID")
+    payment = SimpleNamespace(
+        id=722, payment_no="PAY722", provider="WECHAT",
+        channel="WECHAT_MINIPROGRAM", status="PENDING",
+    )
+    rows = MagicMock()
+    rows.scalars.return_value = [payment]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=rows)
+
+    with patch(
+        "app.services.payment_service._wechat_pay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service.wechat_pay_client.close_order",
+        new_callable=AsyncMock,
+    ) as close_channel, patch.object(
+        PaymentService, "sync_payment_status", new_callable=AsyncMock,
+        return_value=(payment, {"trade_state": "USERPAYING"}),
+    ), patch.object(
+        PaymentService, "_close_pending_payment", new_callable=AsyncMock,
+    ) as close_local:
+        late_paid = await PaymentService.close_channel_payments(db, order)
+
+    assert late_paid is False
+    close_channel.assert_awaited_once_with(payment_no="PAY722")
+    close_local.assert_not_awaited()
+    assert payment.status == "PENDING"
