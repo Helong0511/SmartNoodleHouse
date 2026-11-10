@@ -151,3 +151,52 @@ async def alipay_gateway_request(params: dict[str, Any], *, timeout: float = 20.
             headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"},
         )
     return parse_alipay_http_json(resp.content, resp.headers.get("content-type"))
+
+
+def verify_alipay_response_signature(
+    response: dict[str, Any],
+    response_body: dict[str, Any],
+    public_key_pem: str,
+) -> bool:
+    """使用支付宝公钥验证 OpenAPI 同步响应签名；缺签名/结构异常一律拒绝。
+
+    标准网关对响应节点 JSON 签名，字段按字典序组织；部分响应会转义 URL
+    中的斜杠。按官方说明兼容两种序列化形式，但绝不跳过 RSA2 验签。
+    """
+    signature_text = response.get("sign")
+    if not isinstance(signature_text, str) or not signature_text.strip():
+        return False
+    if not isinstance(response_body, dict) or not response_body:
+        return False
+
+    try:
+        signature_bytes = base64.b64decode(signature_text, validate=True)
+        public_key = load_alipay_public_key(public_key_pem)
+    except (ValueError, TypeError):
+        return False
+
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    canonical = json.dumps(
+        response_body,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    candidates = (canonical, canonical.replace("/", r"\\/"))
+    for content in candidates:
+        try:
+            public_key.verify(
+                signature_bytes,
+                content.encode("utf-8"),
+                padding.PKCS1v15(),
+                hashes.SHA256(),
+            )
+            return True
+        except InvalidSignature:
+            continue
+        except Exception:
+            return False
+    return False
