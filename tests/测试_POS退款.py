@@ -532,3 +532,20 @@ async def test_mixed_payment_refunds_reuse_one_fencing_claim_and_accumulate_once
     assert request.executed_amount == money("10.00")
     assert result.status == "SUCCESS"
     assert db.commit.await_count >= 3
+
+
+def test_pos_refund_execution_claim_matches_current_owner_only():
+    """旧 worker 的迟到响应不能覆盖已接管的执行者关联。"""
+    from types import SimpleNamespace
+    from app.services.pos_refund_service import PosRefundService
+
+    current = SimpleNamespace(execution_token="new-owner", execution_epoch=12)
+    assert PosRefundService._execution_claim_matches(
+        current, claim_token="new-owner", claim_epoch=12
+    )
+    assert not PosRefundService._execution_claim_matches(
+        current, claim_token="old-owner", claim_epoch=11
+    )
+    assert not PosRefundService._execution_claim_matches(
+        current, claim_token="new-owner", claim_epoch=11
+    )
