@@ -3560,7 +3560,10 @@ class PaymentService:
             return state in {"CLOSED", "REVOKED", "PAYERROR"}
         if provider_u == "ALIPAY":
             # TRADE_CLOSED 也可能表示支付成功后全额退款，必须由撤销响应确认 action=close。
-            return state == "TRADE_CLOSED" and (cancel_action or "").strip().lower() == "close"
+            return (
+                state == "TRADE_CLOSED"
+                and (cancel_action or "").strip().lower() == "close"
+            )
         return False
 
     @classmethod
@@ -3601,7 +3604,9 @@ class PaymentService:
                 if provider_u == "WECHAT" and _wechat_pay_configured():
                     await wechat_pay_client.close_order(payment_no=payment.payment_no)
                 elif provider_u == "ALIPAY" and _alipay_pay_configured():
-                    cancel_result = await alipay_client.trade_cancel(payment_no=payment.payment_no)
+                    cancel_result = await alipay_client.trade_cancel(
+                        payment_no=payment.payment_no
+                    )
                     if isinstance(cancel_result, dict):
                         alipay_cancel_action = str(cancel_result.get("action") or "")
                 # 2. 关单后再查一次单，确认渠道状态（防止关单与支付竞态）
@@ -3615,7 +3620,9 @@ class PaymentService:
                     )
                     continue
                 if not cls._channel_trade_is_terminal_unpaid(
-                    provider_u, meta.get("trade_state"), cancel_action=alipay_cancel_action
+                    provider_u,
+                    meta.get("trade_state"),
+                    cancel_action=alipay_cancel_action,
                 ):
                     # NOTPAY / USERPAYING / UNKNOWN / 查单未配置等都不能证明渠道已终态。
                     logger.warning(
@@ -3680,7 +3687,9 @@ class PaymentService:
                 if snap.provider == "WECHAT" and _wechat_pay_configured():
                     await wechat_pay_client.close_order(payment_no=snap.payment_no)
                 elif snap.provider == "ALIPAY" and _alipay_pay_configured():
-                    cancel_result = await alipay_client.trade_cancel(payment_no=snap.payment_no)
+                    cancel_result = await alipay_client.trade_cancel(
+                        payment_no=snap.payment_no
+                    )
                     if isinstance(cancel_result, dict):
                         alipay_cancel_action = str(cancel_result.get("action") or "")
             except Exception as e:
