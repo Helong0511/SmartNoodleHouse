@@ -48,7 +48,7 @@ async def main():
             return
 
         if not password:
-            print("未找到管理员账号。请先执行 sql/struct.sql + sql/data_sys.sql，并设置强密码：")
+            print("未找到管理员账号。请确认数据库已通过 Alembic 迁移且 SUPER_ADMIN 角色已初始化，再设置强密码：")
             print("  set ADMIN_INITIAL_PASSWORD=YourStrongPass123!")
             print("  python scripts/初始化管理员.py")
             sys.exit(1)
@@ -57,7 +57,7 @@ async def main():
             await db.execute(select(Role).where(Role.code == "SUPER_ADMIN"))
         ).scalar_one_or_none()
         if not role:
-            print("未找到 SUPER_ADMIN 角色，请先执行 sql/data_sys.sql")
+            print("未找到 SUPER_ADMIN 角色。请按 docs/数据库设计.md 使用可重复的角色/权限种子脚本；不要在已有数据库上重跑含 TRUNCATE 的 sql/data_sys.sql。")
             sys.exit(1)
 
         db.add(
