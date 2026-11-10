@@ -25,6 +25,7 @@ def test_product_image_url_accepts_only_supported_storage_urls(monkeypatch):
         "/uploads/products/legacy.webp"
     )
     for unsafe in (
+        "http://cdn.example.test/assets/products/0123456789abcdef0123456789abcdef.webp",
         "https://attacker.example/products/0123456789abcdef0123456789abcdef.webp",
         "/api/media/public/../private/secret.webp",
         "/api/media/public/avatars/0123456789abcdef0123456789abcdef.webp",
