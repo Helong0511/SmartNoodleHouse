@@ -485,6 +485,11 @@ _WECHAT_REFUND_POLL_BACKOFF_SECONDS = (60, 60, 60, 60, 300, 600, 1200, 1800)
 _DEFAULT_REFUND_POLL_BACKOFF_SECONDS = (300, 600, 1200, 1800)
 
 
+def _initial_refund_poll_delay_seconds(*, provider: str | None = None) -> int:
+    """退款申请仍未终结时的首次主动查单延迟。"""
+    return _refund_poll_backoff_seconds(0, provider=provider)
+
+
 def _refund_poll_backoff_seconds(retry_count: int, *, provider: str | None = None) -> int:
     """按渠道安排未决退款查单；微信前 5 分钟每分钟一次，之后逐步衰减。
 
@@ -3153,6 +3158,14 @@ class PaymentService:
         else:
             # 受理成功，等待回调/定时查询——不得当作已退款
             row.status = "PROCESSING"
+            # The scheduler runs every minute; set an explicit provider-specific due time
+            # rather than leaving NULL (which would make the first query run immediately).
+            from datetime import timedelta
+            from app.core.response import naive_local_now
+
+            row.next_retry_at = naive_local_now() + timedelta(
+                seconds=_initial_refund_poll_delay_seconds(provider=current_payment.provider)
+            )
             await db.flush()
 
         return row
