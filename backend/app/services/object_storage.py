@@ -97,6 +97,21 @@ class S3ObjectStorage(ObjectStorage):
 
         self.bucket = (settings.s3_bucket or "").strip()
         self.public_base = (settings.s3_public_base_url or "").strip().rstrip("/")
+        if self.public_base:
+            from urllib.parse import urlsplit
+
+            public_url = urlsplit(self.public_base)
+            if (
+                public_url.scheme != "https"
+                or not public_url.hostname
+                or public_url.username
+                or public_url.password
+                or public_url.query
+                or public_url.fragment
+            ):
+                raise RuntimeError(
+                    "S3_PUBLIC_BASE_URL 必须是无凭证/查询参数的 HTTPS CDN 地址"
+                )
         self.endpoint = endpoint.rstrip("/")
         client_options = {
             # endpoint_url 留空时由 Botocore 按 Region 解析 AWS S3 官方端点。
@@ -139,10 +154,13 @@ class S3ObjectStorage(ObjectStorage):
 
     async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
         await asyncio.to_thread(self._put_sync, key, data, content_type)
-        if self.public_base:
-            return f"{self.public_base}/{key}"
-        if self.endpoint:
-            return f"{self.endpoint}/{self.bucket}/{key}"
+        # 只有商品图片与门店 Logo 属于公开媒体；其他前缀（头像等）不能
+        # 通过公共 CDN/匿名路由暴露，等待独立的鉴权读取接口。
+        if key.startswith(("products/", "stores/")):
+            if self.public_base:
+                return f"{self.public_base}/{key}"
+            return f"/api/media/public/{key}"
+        # 私有对象只保存不透明的内部标识，不把 S3/MinIO 管理端点暴露给客户端。
         return f"s3://{self.bucket}/{key}"
 
     async def get_bytes(self, key: str) -> bytes:
