@@ -47,3 +47,23 @@ def test_direct_model_entrypoints_are_blocked_before_loading():
         extract_face_embedding_bgr(np.zeros((160, 160, 3), dtype=np.uint8))
     with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
         extract_live_face_hit(np.zeros((160, 160, 3), dtype=np.uint8))
+
+
+def test_startup_gate_blocks_face_profile_warmup_in_all_environments():
+    from types import SimpleNamespace
+
+    from app.services.face_feature_gate import is_face_recognition_allowed
+
+    development = SimpleNamespace(
+        is_production=False,
+        face_recognition_legal_reviewed=False,
+        face_model_commercial_license_confirmed=False,
+    )
+    production_approved = SimpleNamespace(
+        is_production=True,
+        face_recognition_legal_reviewed=True,
+        face_model_commercial_license_confirmed=True,
+    )
+
+    assert is_face_recognition_allowed(development) is False
+    assert is_face_recognition_allowed(production_approved) is False
