@@ -17,7 +17,7 @@ def test_release_checklist_blocks_without_operator_acknowledgement():
 
     assert result.returncode == 2
     assert "[BLOCKED]" in result.stdout
-    for blocker in ("BLK-001", "BLK-002", "BLK-003", "BLK-004", "BLK-005", "BLK-006", "BLK-007", "P1-R2"):
+    for blocker in ("BLK-001", "BLK-002", "BLK-003", "BLK-004", "BLK-005", "BLK-006", "BLK-007", "BLK-008", "P1-R2"):
         assert blocker in result.stdout
     assert "BLK-007" in result.stdout
 
