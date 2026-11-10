@@ -35,9 +35,13 @@ def _assert_face_model_commercial_license() -> None:
     from app.core.config import get_settings
 
     settings = get_settings()
-    if settings.is_production and not getattr(settings, "face_recognition_legal_reviewed", False):
+    if settings.is_production and not getattr(
+        settings, "face_recognition_legal_reviewed", False
+    ):
         raise RuntimeError("生产环境禁止在完成 FACE_RECOGNITION_LEGAL_REVIEWED 审核前运行人脸模型")
-    if settings.is_production and not getattr(settings, "face_model_commercial_license_confirmed", False):
+    if settings.is_production and not getattr(
+        settings, "face_model_commercial_license_confirmed", False
+    ):
         raise RuntimeError(
             "生产环境禁止加载未确认商业授权的 InsightFace 预训练模型；"
             "取得模型商业授权并设置 FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=true 后再启用"
