@@ -185,7 +185,18 @@ def verify_alipay_response_signature(
         separators=(",", ":"),
         sort_keys=True,
     )
-    candidates = (canonical, canonical.replace("/", r"\/"))
+    ascii_canonical = json.dumps(
+        response_body,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    candidates = (
+        canonical,
+        canonical.replace("/", r"\/"),
+        ascii_canonical,
+        ascii_canonical.replace("/", r"\/"),
+    )
     for content in candidates:
         try:
             public_key.verify(
