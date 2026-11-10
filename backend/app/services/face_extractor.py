@@ -151,7 +151,6 @@ def extract_face_embedding_bgr(
     *,
     live: bool = False,
 ) -> list[float]:
-    _assert_face_model_commercial_license()
     """
     从摄像头 BGR 帧直接提特征（内存，不打开图片文件）。
     SCRFD 检测 + ArcFace 512D；InsightFace 不可用时生产 fail-closed。
@@ -159,6 +158,7 @@ def extract_face_embedding_bgr(
     live=True：到店实时路径——用较小 det_size，多人时取最大脸（门口常有陪同）。
     live=False：授权入库——要求画面仅一人，检测更严。
     """
+    _assert_face_model_commercial_license()
     if _insightface_available():
         try:
             return _extract_insightface_bgr(img, live=live)
@@ -221,12 +221,12 @@ def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float]
 
 
 def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
-    _assert_face_model_commercial_license()
     """到店实时：返回 embedding + 脸框占比/清晰度/置信度，供短时窗口择优。
 
     light=True：窗口收集期用更小缩放、跳过 CLAHE 二次检测，降 CPU；
     定稿匹配前应对 best_frame 再跑 light=False 完整提特征。
     """
+    _assert_face_model_commercial_license()
     from app.services.face_best_frame import LiveFaceHit
 
     src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0
