@@ -154,6 +154,8 @@ def extract_face_embedding(image_bytes: bytes) -> list[float]:
     从内存图片字节提取特征（小程序授权上传用）。
     到店实时识别请用 extract_face_embedding_bgr，勿落盘读文件。
     """
+    # Check the hard stop before decoding even transient image bytes.
+    _require_face_recognition_enabled()
     import cv2
 
     nparr = np.frombuffer(image_bytes, np.uint8)
