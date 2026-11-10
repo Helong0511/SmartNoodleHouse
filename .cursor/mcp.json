@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "aoci": {
-      "type": "stdio",
-      "command": "C:/Users/18307/AppData/Local/Programs/aoci/aoci.exe",
-      "args": ["--repo", "E:/SmartNoodleHouse", "mcp"]
-    }
-  }
-}
