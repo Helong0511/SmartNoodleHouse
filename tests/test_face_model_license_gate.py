@@ -95,3 +95,25 @@ def test_production_inference_entrypoints_fail_closed_before_model_use(
                 target()
         finally:
             target.cache_clear()
+
+
+
+def test_production_template_keeps_unlicensed_face_welcome_disabled():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = (root / ".env.production.example").read_text(encoding="utf-8")
+    deployment = (root / "docs/部署说明.md").read_text(encoding="utf-8")
+
+    values = {}
+    for line in env.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key, value = stripped.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+
+    assert values["ENABLE_FACE_WELCOME"].lower() == "false"
+    assert values["FACE_RECOGNITION_LEGAL_REVIEWED"].lower() == "false"
+    assert values["FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED"].lower() == "false"
+    assert "不得为了绕过启动门禁而直接把确认变量改为" in deployment
+    assert "非商业研究" in deployment
