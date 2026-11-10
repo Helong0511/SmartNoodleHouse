@@ -197,3 +197,32 @@ def test_s3_rejects_invalid_custom_endpoint(monkeypatch):
 
     with pytest.raises(RuntimeError, match="S3_ENDPOINT"):
         osmod.S3ObjectStorage()
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://:9000",
+        "https://user:secret@minio.internal:9000",
+        "https://minio.internal:9000?access_key=leak",
+    ],
+)
+def test_s3_rejects_malformed_or_credential_bearing_endpoint(monkeypatch, endpoint):
+    from app.services import object_storage as osmod
+
+    monkeypatch.setattr(
+        osmod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            storage_backend="s3",
+            s3_endpoint=endpoint,
+            s3_access_key="test-access",
+            s3_secret_key="test-secret",
+            s3_bucket="test-bucket",
+            s3_region="us-east-1",
+            s3_public_base_url="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="S3_ENDPOINT"):
+        osmod.S3ObjectStorage()
