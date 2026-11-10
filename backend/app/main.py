@@ -868,7 +868,11 @@ def create_app() -> FastAPI:
                         request=request,
                         extra={
                             "method": request.method,
-                            "query": request.url.query,
+                            "query": (
+                                None
+                                if request.url.path.startswith("/api/media/private/avatars/")
+                                else request.url.query
+                            ),
                             "ua": (request.headers.get("user-agent") or "")[:500],
                         },
                     )
