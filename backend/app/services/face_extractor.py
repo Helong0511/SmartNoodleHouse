@@ -228,6 +228,7 @@ def assess_face_quality(image_bytes: bytes) -> dict:
 
 
 def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float], dict]:
+    _require_face_recognition_enabled()
     from app.services.face_liveness import check_liveness_simple
 
     liveness = check_liveness_simple(image_bytes)
