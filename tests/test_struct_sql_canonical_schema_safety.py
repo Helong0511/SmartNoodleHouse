@@ -30,6 +30,6 @@ def test_canonical_schema_contains_no_destructive_statements():
     # operations that the destructive-keyword list above might otherwise miss.
     non_table_ddl = [
         statement for statement in statements
-        if not re.match(r"(?is)^CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\b", statement)
+        if not re.match(r"(?is)^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\b", statement)
     ]
     assert not non_table_ddl, f"unexpected DDL in canonical schema: {non_table_ddl}"
