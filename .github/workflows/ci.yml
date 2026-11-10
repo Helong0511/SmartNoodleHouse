@@ -80,11 +80,11 @@ jobs:
         run: python -m pytest -q tests/测试_Redis真实服务集成.py
       - name: Start disposable MinIO for S3 adapter integration
         run: |
+          # Pin the verified linux/amd64 manifest digest; the CI runner is ubuntu-latest.
           docker run -d --name smart-noodle-minio \
             -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            # Pin the verified linux/amd64 manifest digest; the CI runner is ubuntu-latest.
             dappros/minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2 server /data
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null; then
