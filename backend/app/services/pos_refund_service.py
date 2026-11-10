@@ -335,6 +335,19 @@ class PosRefundService:
             )
         ).scalar_one_or_none()
 
+    @staticmethod
+    def _execution_claim_matches(
+        row: PosRefundRequest,
+        *,
+        claim_token: str,
+        claim_epoch: int,
+    ) -> bool:
+        """确认当前 worker 仍拥有申请单执行权，拒绝旧 owner 的迟到收尾。"""
+        return (
+            str(getattr(row, "execution_token", "") or "") == str(claim_token)
+            and int(getattr(row, "execution_epoch", 0) or 0) == int(claim_epoch)
+        )
+
     @classmethod
     async def _recover_execution_error(
         cls,
@@ -523,6 +536,12 @@ class PosRefundService:
                 row = await cls._lock_request(db, request_id)
                 if not row:
                     raise AppException(40404, "退款申请不存在")
+                # 可能在本 worker 等待渠道响应期间，另一审批已接管并开始下一笔组合退款。
+                # 即使本笔退款事实已成功，旧 owner 也不能覆盖新 owner 的 refund_id/payment_id。
+                if not cls._execution_claim_matches(
+                    row, claim_token=claim_token, claim_epoch=claim_epoch
+                ):
+                    return row
                 if last_refund.status == "SUCCESS":
                     # 新流程在 PaymentService.refund 内已先绑定 refund_id，
                     # _finalize_refund 会在同一事务内累计 executed_amount。
