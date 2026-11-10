@@ -78,16 +78,34 @@ async def _warmup_recognition_and_tts() -> None:
 
     旧顺序「先 TTS 再人脸」会让 RecognitionWorker 空跑 40s+ 漏检，体感像「认出访客要等十几秒」。
     """
-    # 1) 实时人脸模型优先，缩短「人到→检出」
+    # 1) 仅在功能已开启且生产合规/模型商业授权均确认后预热人脸模型。
+    # 不能因为启动预热绕过正式请求路径的授权门禁。
     try:
+        from app.core.config import get_settings
+        from app.core.database import AsyncSessionLocal
+        from app.services.system_settings_service import SystemSettingsService
 
-        def _load_live() -> None:
-            from app.services.face_extractor import _face_app_live
+        settings = get_settings()
+        face_approved = not settings.is_production or (
+            settings.face_recognition_legal_reviewed
+            and settings.face_model_commercial_license_confirmed
+        )
+        face_enabled = False
+        if face_approved:
+            async with AsyncSessionLocal() as db:
+                face_enabled = await SystemSettingsService.effective_bool(
+                    db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
+                )
+        if face_enabled:
+            def _load_live() -> None:
+                from app.services.face_extractor import _face_app_live
 
-            _face_app_live()
+                _face_app_live()
 
-        await asyncio.to_thread(_load_live)
-        logger.info("InsightFace live 预热完成")
+            await asyncio.to_thread(_load_live)
+            logger.info("InsightFace live 预热完成")
+        else:
+            logger.info("跳过 InsightFace 预热：功能未开启或生产合规/商业授权尚未确认")
     except Exception:
         logger.exception("InsightFace live 预热失败")
 
@@ -580,22 +598,37 @@ async def lifespan(app: FastAPI):
         try:
             from sqlalchemy import select
 
+            from app.core.config import get_settings
             from app.core.database import AsyncSessionLocal
             from app.models import Camera
             from app.services.camera_credentials import build_connect_source
             from app.services.face_service import face_embedding_cache
+            from app.services.system_settings_service import SystemSettingsService
 
             async with AsyncSessionLocal() as db:
-                # 启动即加载授权会员人脸，保证识别时效（增量刷新仍走缓存）
-                try:
-                    n = await face_embedding_cache.warmup(db)
-                    logger.info(
-                        "启动预热人脸向量缓存 profiles=%s max=%s",
-                        n,
-                        getattr(face_embedding_cache, "_max_profiles", "?"),
+                settings = get_settings()
+                face_approved = not settings.is_production or (
+                    settings.face_recognition_legal_reviewed
+                    and settings.face_model_commercial_license_confirmed
+                )
+                face_enabled = False
+                if face_approved:
+                    face_enabled = await SystemSettingsService.effective_bool(
+                        db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
                     )
-                except Exception:
-                    logger.exception("启动预热人脸向量缓存失败")
+                if face_enabled:
+                    # 仅在功能启用且审核/授权通过后加载生物特征缓存。
+                    try:
+                        n = await face_embedding_cache.warmup(db)
+                        logger.info(
+                            "启动预热人脸向量缓存 profiles=%s max=%s",
+                            n,
+                            getattr(face_embedding_cache, "_max_profiles", "?"),
+                        )
+                    except Exception:
+                        logger.exception("启动预热人脸向量缓存失败")
+                else:
+                    logger.info("跳过人脸向量缓存预热：功能未开启或生产合规/商业授权尚未确认")
                 cams = (await db.execute(select(Camera).where(Camera.status != "DISABLED"))).scalars().all()
                 mgr = CameraManager()
                 for c in cams:
