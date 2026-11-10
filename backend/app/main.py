@@ -614,9 +614,13 @@ async def lifespan(app: FastAPI):
                 )
                 face_enabled = False
                 if face_approved:
-                    face_enabled = await SystemSettingsService.effective_bool(
-                        db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
-                    )
+                    try:
+                        face_enabled = await SystemSettingsService.effective_bool(
+                            db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
+                        )
+                    except Exception:
+                        # 人脸开关读取失败只应关闭人脸预热，不能阻断摄像头恢复。
+                        logger.exception("读取人脸功能开关失败；跳过人脸向量缓存预热")
                 if face_enabled:
                     # 仅在功能启用且审核/授权通过后加载生物特征缓存。
                     try:
