@@ -18,3 +18,21 @@ def test_miniprogram_face_enrollment_and_challenge_are_blocked():
         asyncio.run(_require_face_welcome_enabled(None))
 
     assert exc.value.code == 40344
+
+
+
+def test_direct_model_entrypoints_are_blocked_before_loading():
+    import numpy as np
+
+    from app.services.face_extractor import (
+        ensure_live_face_app,
+        extract_face_embedding_bgr,
+        extract_live_face_hit,
+    )
+
+    with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
+        ensure_live_face_app()
+    with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
+        extract_face_embedding_bgr(np.zeros((160, 160, 3), dtype=np.uint8))
+    with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
+        extract_live_face_hit(np.zeros((160, 160, 3), dtype=np.uint8))
