@@ -140,25 +140,46 @@ async def _clear_main_product_images(db: DbSession, product_id: int) -> None:
 
 
 def _assert_safe_product_image_url(url: str | None) -> str | None:
-    """餐品主图仅允许本站 uploads 相对路径或同源 /uploads/；禁止任意外链/内网。"""
+    """只允许本地上传、受引用校验的媒体路由或配置的 S3 CDN 地址。"""
     if url is None:
         return None
     s = str(url).strip()
     if not s:
         return None
-    if s.startswith("/uploads/") or s.startswith("uploads/"):
-        if ".." in s or "\\" in s:
+    if s.startswith(("/uploads/", "uploads/")):
+        if ".." in s or "\\" in s or "?" in s or "#" in s:
             raise AppException(40015, "餐品图片路径非法")
         return s if s.startswith("/") else f"/{s}"
-    parsed = urlparse(s)
-    if parsed.scheme in ("http", "https") and parsed.hostname:
-        host = (parsed.hostname or "").lower()
-        if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local"):
-            raise AppException(40015, "不允许使用内网图片地址")
-        path = parsed.path or ""
-        if not path.startswith("/uploads/"):
-            raise AppException(40015, "餐品图片须为站内 uploads 地址，请先上传")
-        return path
+    if s.startswith("/api/media/public/"):
+        key = s[len("/api/media/public/"):]
+        import re
+
+        if not re.fullmatch(r"(?:products|stores)/[0-9a-f]{32}\.(?:webp|jpg|jpeg|png|gif)", key):
+            raise AppException(40015, "餐品图片媒体路径非法")
+        return s
+    # S3_PUBLIC_BASE_URL 是运维显式配置的可信 CDN 前缀；不接受任意第三方 URL。
+    from app.core.config import get_settings
+
+    public_base = (get_settings().s3_public_base_url or "").strip().rstrip("/")
+    if public_base and s.startswith(public_base + "/"):
+        parsed = urlparse(s)
+        base = urlparse(public_base)
+        if (
+            parsed.scheme in ("http", "https")
+            and parsed.scheme == base.scheme
+            and parsed.netloc.lower() == base.netloc.lower()
+            and not parsed.username
+            and not parsed.password
+            and not parsed.query
+            and not parsed.fragment
+            and "\\" not in parsed.path
+            and ".." not in parsed.path.split("/")
+        ):
+            key = parsed.path[len(base.path.rstrip("/")):].lstrip("/")
+            import re
+
+            if re.fullmatch(r"(?:products|stores)/[0-9a-f]{32}\.(?:webp|jpg|jpeg|png|gif)", key):
+                return s
     raise AppException(40015, "餐品图片地址非法，请使用上传接口")
 
 
