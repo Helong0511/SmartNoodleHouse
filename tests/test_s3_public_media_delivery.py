@@ -53,6 +53,18 @@ async def test_s3_storage_returns_frontend_renderable_url_without_public_cdn():
     assert storage.client.last_put["Bucket"] == "private-bucket"
     assert storage.client.last_put["Key"] == key
 
+    # 头像等非公开前缀不能被映射到匿名媒体路由或公开 CDN。
+    private_url = await storage.put_bytes(
+        "avatars/abcdef0123456789abcdef0123456789.webp",
+        b"private",
+        "image/webp",
+    )
+    assert private_url == "s3://private-bucket/avatars/abcdef0123456789abcdef0123456789.webp"
+
+    storage.public_base = "https://cdn.example.test/assets"
+    cdn_url = await storage.put_bytes(key, b"image", "image/webp")
+    assert cdn_url == f"https://cdn.example.test/assets/{key}"
+
 
 @pytest.mark.asyncio
 async def test_public_media_is_served_only_while_referenced_by_store(db_session, monkeypatch):
