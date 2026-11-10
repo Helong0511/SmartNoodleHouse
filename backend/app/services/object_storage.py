@@ -80,17 +80,24 @@ class S3ObjectStorage(ObjectStorage):
             from urllib.parse import urlsplit
 
             parsed_endpoint = urlsplit(endpoint)
-            if parsed_endpoint.scheme not in ("http", "https") or not parsed_endpoint.netloc:
-                raise RuntimeError("S3_ENDPOINT 必须是包含 http:// 或 https:// 的有效 URL")
+            if (
+                parsed_endpoint.scheme not in ("http", "https")
+                or not parsed_endpoint.hostname
+                or parsed_endpoint.username
+                or parsed_endpoint.password
+                or parsed_endpoint.query
+                or parsed_endpoint.fragment
+            ):
+                raise RuntimeError("S3_ENDPOINT 必须是无内嵌凭证/查询参数的有效 http:// 或 https:// URL")
         try:
             import boto3
             from botocore.client import Config
         except ImportError as e:
             raise RuntimeError("STORAGE_BACKEND=s3 需要安装 boto3") from e
 
-        self.bucket = settings.s3_bucket
-        self.public_base = (settings.s3_public_base_url or "").rstrip("/")
-        self.endpoint = (settings.s3_endpoint or "").rstrip("/")
+        self.bucket = (settings.s3_bucket or "").strip()
+        self.public_base = (settings.s3_public_base_url or "").strip().rstrip("/")
+        self.endpoint = endpoint.rstrip("/")
         self.client = boto3.client(
             "s3",
             # endpoint_url 留空时由 Botocore 按 Region 解析 AWS S3 官方端点；
