@@ -1,19 +1,27 @@
 """打印任务：管理端列表与手动重试。"""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Query, Request
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select, update
 
 from app.api.deps import CurrentUser, DbSession, require_kitchen
 from app.core.exceptions import AppException
 from app.core.orm_safe import orm_attr_loaded
-from app.core.response import calc_pages, success, serialize_dt
+from app.core.response import calc_pages, success, serialize_dt, now_local
 from app.models import PrintJob
 from app.services.audit_service import AuditService
 from app.services.print_service import PrintService
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/print-jobs", tags=["打印任务"])
+
+
+class ResolveUncertainPrintJobIn(BaseModel):
+    outcome: Literal["PRINTED", "NOT_PRINTED"]
+    reason: str = Field(..., min_length=8, max_length=500)
 
 
 @router.get("", dependencies=[require_kitchen()])
@@ -23,7 +31,7 @@ async def list_print_jobs(
     user: CurrentUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, description="FAILED/RETRYING/SUCCESS/PRINTING/PENDING，逗号分隔"),
+    status: str | None = Query(None, description="FAILED/RETRYING/SUCCESS/PRINTING/PENDING/UNCERTAIN，逗号分隔"),
     store_id: int | None = None,
     order_id: int | None = None,
 ):
@@ -56,6 +64,7 @@ async def list_print_jobs(
             "status": j.status,
             "attempt_count": j.attempt_count,
             "next_retry_at": serialize_dt(j.next_retry_at),
+            "locked_at": serialize_dt(getattr(j, "locked_at", None)),
             "last_error": j.last_error,
             "succeeded_at": serialize_dt(j.succeeded_at),
             "created_at": serialize_dt(j.created_at) if orm_attr_loaded(j, "created_at") else None,
@@ -70,6 +79,84 @@ async def list_print_jobs(
             "page": page,
             "page_size": page_size,
             "total_pages": calc_pages(total, page_size),
+        },
+        request=request,
+    )
+
+@router.post("/{job_id}/resolve-uncertain", dependencies=[require_kitchen()])
+async def resolve_uncertain_print_job(
+    job_id: int,
+    data: ResolveUncertainPrintJobIn,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """操作员核对纸面输出后处置结果未知任务；仅当前 UNCERTAIN 状态可转换。"""
+    job = await db.get(PrintJob, int(job_id))
+    if not job:
+        raise AppException(40404, "打印任务不存在")
+    assert_store_access(user, job.store_id)
+    reason = data.reason.strip()
+    if len(reason) < 8:
+        raise AppException(40012, "核验原因去除空格后至少需要 8 个字符")
+    if job.status != "UNCERTAIN":
+        raise AppException(40911, f"当前状态 {job.status} 不是待核验状态", status_code=409)
+
+    now = now_local()
+    if data.outcome == "PRINTED":
+        new_status = "SUCCESS"
+        values = {
+            "status": new_status,
+            "succeeded_at": now,
+            "last_error": None,
+            "next_retry_at": None,
+            "locked_at": None,
+            "locked_by": None,
+        }
+    else:
+        # 操作员已核实未出纸；显式授权恢复自动队列，不在请求内直接占用打印机。
+        new_status = "RETRYING"
+        values = {
+            "status": new_status,
+            "succeeded_at": None,
+            "last_error": "MANUALLY_CONFIRMED_NOT_PRINTED",
+            "next_retry_at": now,
+            "locked_at": None,
+            "locked_by": None,
+        }
+
+    changed = await db.execute(
+        update(PrintJob)
+        .where(PrintJob.id == int(job_id), PrintJob.status == "UNCERTAIN")
+        .values(**values)
+    )
+    if not changed.rowcount:
+        await db.rollback()
+        raise AppException(40912, "打印任务状态已变化，请刷新后重新核验", status_code=409)
+    await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="print_job.resolve_uncertain",
+        module="print_job",
+        target_type="print_job",
+        target_id=int(job_id),
+        detail={
+            "outcome": data.outcome,
+            "status": new_status,
+            "reason": reason,
+            "store_id": int(job.store_id) if getattr(job, "store_id", None) else None,
+        },
+        request=request,
+        store_id=int(job.store_id) if getattr(job, "store_id", None) else None,
+    )
+    await db.commit()
+    return success(
+        {
+            "id": int(job_id),
+            "outcome": data.outcome,
+            "status": new_status,
+            "retry_queued": data.outcome == "NOT_PRINTED",
         },
         request=request,
     )
