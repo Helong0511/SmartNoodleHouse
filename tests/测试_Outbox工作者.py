@@ -151,9 +151,10 @@ async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
     # 外部平台/设备副作用事件不能在 worker 崩溃后盲目回到 PENDING。
     assert "delivery_manual" in [str(v) for v in compiled.params.values()]
     assert "webhook_task" in [str(v) for v in compiled.params.values()]
-    assert any('"action": "confirm_order"' in str(v) for v in compiled.params.values())
-    assert any('"action": "cancel_order"' in str(v) for v in compiled.params.values())
-    assert any('"action": "reply_urge"' in str(v) for v in compiled.params.values())
+    # 动作标识匹配不依赖 JSON 冒号后的固定空格。
+    assert any("confirm_order" in str(v) for v in compiled.params.values())
+    assert any("cancel_order" in str(v) for v in compiled.params.values())
+    assert any("reply_urge" in str(v) for v in compiled.params.values())
     assert not any("print_ticket" in str(v) for v in compiled.params.values())
     assert any("EXTERNAL_RESULT_UNKNOWN" in str(v) for v in compiled.params.values())
 
