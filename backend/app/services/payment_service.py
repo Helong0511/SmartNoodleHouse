@@ -3548,6 +3548,18 @@ class PaymentService:
             order = await db.get(Order, int(order_id))
             return bool(order and order.payment_status == "PAID")
 
+    @staticmethod
+    def _channel_trade_is_terminal_unpaid(provider: str, trade_state: str | None) -> bool:
+        """仅把渠道明确报告的未支付终态视为可本地关单；未知/处理中必须保留 PENDING。"""
+        provider_u = (provider or "").upper()
+        state = (trade_state or "").strip().upper()
+        if provider_u == "WECHAT":
+            # 微信支付 v2/v3：NOTPAY、USERPAYING 均不是终态，不能据此关本地单。
+            return state in {"CLOSED", "REVOKED", "PAYERROR"}
+        if provider_u == "ALIPAY":
+            return state == "TRADE_CLOSED"
+        return False
+
     @classmethod
     async def close_channel_payments(cls, db: AsyncSession, order: Order) -> bool:
         """超时关单时同步撤销渠道交易，并把本地 PENDING 支付单置 CLOSED。
@@ -3587,7 +3599,7 @@ class PaymentService:
                 elif provider_u == "ALIPAY" and _alipay_pay_configured():
                     await alipay_client.trade_cancel(payment_no=payment.payment_no)
                 # 2. 关单后再查一次单，确认渠道状态（防止关单与支付竞态）
-                synced, _meta = await cls.sync_payment_status(db, payment)
+                synced, meta = await cls.sync_payment_status(db, payment)
                 if synced.status == "PAID":
                     late_paid = True
                     logger.warning(
@@ -3596,7 +3608,18 @@ class PaymentService:
                         payment.payment_no,
                     )
                     continue
-                # 3. 本地支付单置 CLOSED
+                if not cls._channel_trade_is_terminal_unpaid(
+                    provider_u, meta.get("trade_state")
+                ):
+                    # NOTPAY / USERPAYING / UNKNOWN / 查单未配置等都不能证明渠道已终态。
+                    logger.warning(
+                        "渠道状态未确认终态，保留本地 PENDING order=%s payment=%s state=%s",
+                        order.order_no,
+                        payment.payment_no,
+                        meta.get("trade_state"),
+                    )
+                    continue
+                # 3. 只有渠道明确报告未支付终态，才允许本地支付单置 CLOSED。
                 await cls._close_pending_payment(
                     db, payment, reason="超时关单同步撤销渠道交易"
                 )
@@ -3659,13 +3682,14 @@ class PaymentService:
                     e,
                 )
 
+            terminal_unpaid = False
             try:
                 async with AsyncSessionLocal() as db:
                     payment = await db.get(Payment, int(snap.id))
                     if not payment:
                         await db.commit()
                         continue
-                    synced, _meta = await cls.sync_payment_status(db, payment)
+                    synced, meta = await cls.sync_payment_status(db, payment)
                     await db.commit()
                     if synced.status == "PAID":
                         late_paid = True
@@ -3675,6 +3699,9 @@ class PaymentService:
                             snap.payment_no,
                         )
                         continue
+                    terminal_unpaid = cls._channel_trade_is_terminal_unpaid(
+                        snap.provider, meta.get("trade_state")
+                    )
             except Exception as e:
                 logger.warning(
                     "关单后查单失败 order=%s payment=%s: %s",
@@ -3682,6 +3709,16 @@ class PaymentService:
                     snap.payment_no,
                     e,
                 )
+
+            if not terminal_unpaid:
+                # 包括渠道关单失败后查单异常、UNKNOWN、NOTPAY、USERPAYING：
+                # 这些状态都不能证明顾客未付款，必须保留 PENDING 等待后续补偿。
+                logger.warning(
+                    "渠道未确认未支付终态，保留本地 PENDING order=%s payment=%s",
+                    order_no,
+                    snap.payment_no,
+                )
+                continue
 
             try:
                 async with AsyncSessionLocal() as db:
