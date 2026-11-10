@@ -22,6 +22,8 @@ router = APIRouter(prefix="/print-jobs", tags=["打印任务"])
 class ResolveUncertainPrintJobIn(BaseModel):
     outcome: Literal["PRINTED", "NOT_PRINTED"]
     reason: str = Field(..., min_length=8, max_length=500)
+    worker_stopped: bool = False
+    printer_queue_checked: bool = False
 
 
 @router.get("", dependencies=[require_kitchen()])
@@ -101,6 +103,8 @@ async def resolve_uncertain_print_job(
         raise AppException(40012, "核验原因去除空格后至少需要 8 个字符")
     if job.status != "UNCERTAIN":
         raise AppException(40911, f"当前状态 {job.status} 不是待核验状态", status_code=409)
+    if data.outcome == "NOT_PRINTED" and not (data.worker_stopped and data.printer_queue_checked):
+        raise AppException(40013, "确认未打印前，必须先确认原打印 Worker 已停止且打印机队列已核查")
 
     now = now_local()
     if data.outcome == "PRINTED":
@@ -144,6 +148,8 @@ async def resolve_uncertain_print_job(
             "outcome": data.outcome,
             "status": new_status,
             "reason": reason,
+            "worker_stopped": bool(data.worker_stopped),
+            "printer_queue_checked": bool(data.printer_queue_checked),
             "store_id": int(job.store_id) if getattr(job, "store_id", None) else None,
         },
         request=request,
