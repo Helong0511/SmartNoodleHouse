@@ -866,7 +866,8 @@ class _PaymentCloseSessionContext:
 
 
 @pytest.mark.asyncio
-async def test_close_channel_payments_by_id_keeps_pending_when_close_and_query_are_uncertain():
+async def test_close_channel_payments_by_id_keeps_pending_when_close_and_query_are_uncertain(
+):
     """渠道关单超时且查单 UNKNOWN 时，不能把本地支付单误关为 CLOSED。"""
     order = SimpleNamespace(id=701, order_no="O701", payment_status="UNPAID")
     payment = SimpleNamespace(
@@ -976,7 +977,8 @@ async def test_close_channel_payments_keeps_pending_for_nonterminal_channel_stat
 
 
 @pytest.mark.asyncio
-async def test_close_channel_payments_by_id_closes_only_after_terminal_unpaid_confirmation():
+async def test_close_channel_payments_by_id_closes_only_after_terminal_unpaid_confirmation(
+):
     """渠道明确返回 CLOSED 后才允许本地 PENDING 转 CLOSED。"""
     order = SimpleNamespace(id=731, order_no="O731", payment_status="UNPAID")
     payment = SimpleNamespace(
@@ -1017,7 +1019,8 @@ async def test_close_channel_payments_by_id_closes_only_after_terminal_unpaid_co
 
 
 @pytest.mark.asyncio
-async def test_close_channel_payments_by_id_does_not_treat_alipay_auto_refund_as_unpaid():
+async def test_close_channel_payments_by_id_does_not_treat_alipay_auto_refund_as_unpaid(
+):
     """支付宝撤销 action=refund 表示已触发退款，TRADE_CLOSED 不可当作未付款关单。"""
     order = SimpleNamespace(id=741, order_no="O741", payment_status="UNPAID")
     payment = SimpleNamespace(
