@@ -20,6 +20,9 @@ from app.services.face_service import FaceService
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
+# Bump when the purpose, processing method, or disclosure changes.
+FACE_CONSENT_VERSION = "face-welcome-2026-11-v1"
+
 def _is_supported_face_image(raw: bytes) -> bool:
     """只接受真实 JPEG/PNG 文件头；不能用文本转义序列替代二进制魔数。"""
     return raw.startswith(b"\xff\xd8\xff") or raw.startswith(b"\x89PNG\r\n\x1a\n")
@@ -28,6 +31,8 @@ def _is_supported_face_image(raw: bytes) -> bool:
 
 class FaceConsentBase64Request(BaseModel):
     image_base64: str = Field(default="", description="摄像头实拍 JPEG/PNG 的 base64")
+    face_consent_accepted: bool = Field(default=False, description="顾客对人脸敏感个人信息处理的单独同意")
+    face_consent_version: str | None = Field(default=None, max_length=40)
     liveness_token: str | None = None
     token: str | None = Field(default=None, description="liveness_token 别名")
     action_completed: bool = False
@@ -78,6 +83,9 @@ async def consent_face_base64(
 ):
     """小程序摄像头 takePhoto 后的 base64 授权（禁止相册选图 / 禁止客户端上传 embedding）"""
     await _require_face_welcome_enabled(db)
+    # General privacy-policy agreement and liveness action do not replace separate face-data consent.
+    if body.face_consent_accepted is not True or body.face_consent_version != FACE_CONSENT_VERSION:
+        raise AppException(40344, "请先阅读人脸信息处理说明，并单独确认本次人脸信息处理")
     if body.feature is not None or body.embedding is not None or body.feature_vector is not None:
         raise AppException(40036, "禁止客户端上传人脸特征向量，仅接受摄像头实拍图片")
     liveness_mode = await _enforce_liveness_challenge(
@@ -131,6 +139,10 @@ async def consent_face_base64(
             "via": "base64",
             "anti_spoof_level": "basic",
             "liveness_mode": liveness_mode,
+            "face_consent_accepted": True,
+            "face_consent_version": FACE_CONSENT_VERSION,
+            "face_consent_purpose": "in_store_welcome",
+            "face_consent_remote_storage_disclosed": True,
         },
     )
     return success(
