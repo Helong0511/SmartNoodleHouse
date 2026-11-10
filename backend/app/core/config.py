@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     enable_face_welcome: bool = False
     # 生产环境启用人脸处理前，必须完成法务评估/告知与单独同意流程审核
     face_recognition_legal_reviewed: bool = False
+    # 仅在已取得当前 InsightFace 预训练模型商业授权并留存凭证后设为 true；与隐私法务审核分离。
+    face_model_commercial_license_confirmed: bool = False
     # 点餐页展示开关（种子默认关闭；运行时按门店 store_settings，无覆盖再看 system_settings）
     show_menu_search: bool = False
     show_menu_smart_taste: bool = False
