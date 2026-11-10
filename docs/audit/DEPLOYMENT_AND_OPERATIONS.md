@@ -229,7 +229,7 @@
 ## 10. 存储与上传
 
 - 开发：本地 `uploads/` StaticFiles 直发。
-- 生产：`STORAGE_BACKEND=s3`（[object_storage.py](file:///e:/SmartNoodleHouse/backend/app/services/object_storage.py)），启动校验要求凭证/桶配齐，否则拒绝启动。
+- 生产：`STORAGE_BACKEND=s3`（[object_storage.py](file:///e:/SmartNoodleHouse/backend/app/services/object_storage.py)），必须配置 `S3_BUCKET`；MinIO/兼容服务通常配置 `S3_ENDPOINT`。AWS S3 可留空 Endpoint，按 `S3_REGION` 使用 SDK 默认端点；`S3_ACCESS_KEY` 与 `S3_SECRET_KEY` 必须同时填写或同时留空，后者使用 AWS 标准凭证链（建议实例/任务 IAM Role），不得把长期密钥硬编码到部署文件。
 - 图片：门店 Logo 上传转 WebP、拒绝外链/ GIF/过小（测试_门店Logo.py）；餐品图 URL 白名单。
 - 人脸：仅摄像头实拍，base64 大小+像素双限，decompression bomb 防护。
 
