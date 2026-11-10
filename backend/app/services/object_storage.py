@@ -97,6 +97,21 @@ class S3ObjectStorage(ObjectStorage):
 
         self.bucket = (settings.s3_bucket or "").strip()
         self.public_base = (settings.s3_public_base_url or "").strip().rstrip("/")
+        if self.public_base:
+            from urllib.parse import urlsplit
+
+            public_url = urlsplit(self.public_base)
+            if (
+                public_url.scheme != "https"
+                or not public_url.hostname
+                or public_url.username
+                or public_url.password
+                or public_url.query
+                or public_url.fragment
+            ):
+                raise RuntimeError(
+                    "S3_PUBLIC_BASE_URL 必须是无凭证/查询参数的 HTTPS CDN 地址"
+                )
         self.endpoint = endpoint.rstrip("/")
         client_options = {
             # endpoint_url 留空时由 Botocore 按 Region 解析 AWS S3 官方端点。
