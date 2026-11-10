@@ -9,7 +9,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException
-from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa2
+from app.utils.alipay_keys import (\n    alipay_gateway_request,\n    sign_alipay_params_rsa2,\n    verify_alipay_response_signature,\n)
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,14 @@ async def _gateway_call(method: str, biz_content: dict[str, Any], *, allow_codes
     params["sign"] = sign_alipay_params_rsa2(params, settings.alipay_private_key)
     data = await alipay_gateway_request(params, timeout=20.0)
     resp_key = method.replace(".", "_") + "_response"
-    body = data.get(resp_key) or data.get("error_response") or data
+    body = data.get(resp_key) or data.get("error_response")
+    if not isinstance(body, dict) or not verify_alipay_response_signature(
+        data, body, settings.alipay_public_key
+    ):
+        # 支付、查单、撤销、退款等资金关键响应必须先通过支付宝公钥验签。
+        # 缺少 sign、响应结构异常或签名不匹配均 fail-closed。
+        logger.error("支付宝网关响应验签失败 method=%s", method)
+        raise AppException(50022, "支付宝网关响应验签失败，已拒绝处理")
     ok_codes = allow_codes or {"10000"}
     if str(body.get("code")) not in ok_codes:
         logger.error("支付宝 API 错误 %s: %s", method, body)
