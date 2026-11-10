@@ -185,7 +185,7 @@ def verify_alipay_response_signature(
         separators=(",", ":"),
         sort_keys=True,
     )
-    candidates = (canonical, canonical.replace("/", r"\\/"))
+    candidates = (canonical, canonical.replace("/", r"\/"))
     for content in candidates:
         try:
             public_key.verify(
