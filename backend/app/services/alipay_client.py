@@ -9,7 +9,11 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException
-from app.utils.alipay_keys import (\n    alipay_gateway_request,\n    sign_alipay_params_rsa2,\n    verify_alipay_response_signature,\n)
+from app.utils.alipay_keys import (
+    alipay_gateway_request,
+    sign_alipay_params_rsa2,
+    verify_alipay_response_signature,
+)
 
 logger = logging.getLogger(__name__)
 
