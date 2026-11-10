@@ -32,6 +32,12 @@ def test_direct_model_entrypoints_are_blocked_before_loading():
 
     with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
         ensure_live_face_app()
+    from app.services.face_extractor import extract_face_embedding
+
+    # The hard stop must run before OpenCV decodes even transient image bytes.
+    with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
+        extract_face_embedding(b"not-an-image")
+
     with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
         extract_face_embedding_bgr(np.zeros((160, 160, 3), dtype=np.uint8))
     with pytest.raises(RuntimeError, match="人脸识别功能临时关闭"):
