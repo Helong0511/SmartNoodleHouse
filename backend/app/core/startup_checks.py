@@ -273,13 +273,18 @@ def validate_settings(settings: Settings) -> None:
 
     storage = (getattr(settings, "storage_backend", None) or "local").lower()
     if is_prod and storage == "s3":
-        if not (
-            (getattr(settings, "s3_endpoint", None) or "").strip()
-            and (getattr(settings, "s3_access_key", None) or "").strip()
-            and (getattr(settings, "s3_secret_key", None) or "").strip()
-            and (getattr(settings, "s3_bucket", None) or "").strip()
-        ):
-            errors.append("STORAGE_BACKEND=s3 时须完整配置 S3_ENDPOINT/ACCESS_KEY/SECRET_KEY/BUCKET")
+        s3_endpoint = (getattr(settings, "s3_endpoint", None) or "").strip()
+        s3_access_key = (getattr(settings, "s3_access_key", None) or "").strip()
+        s3_secret_key = (getattr(settings, "s3_secret_key", None) or "").strip()
+        s3_bucket = (getattr(settings, "s3_bucket", None) or "").strip()
+        if not s3_bucket:
+            errors.append("STORAGE_BACKEND=s3 时必须配置 S3_BUCKET")
+        if bool(s3_access_key) != bool(s3_secret_key):
+            errors.append("S3_ACCESS_KEY 与 S3_SECRET_KEY 必须同时配置；使用 AWS IAM Role 时可同时留空")
+        if s3_endpoint:
+            parsed_endpoint = urlsplit(s3_endpoint)
+            if parsed_endpoint.scheme not in ("http", "https") or not parsed_endpoint.netloc:
+                errors.append("S3_ENDPOINT 必须是包含 http:// 或 https:// 的有效 URL；AWS S3 可留空使用区域默认端点")
 
     if is_prod and storage == "local":
         warnings.append("生产环境建议 STORAGE_BACKEND=s3，避免本地 uploads 直出")

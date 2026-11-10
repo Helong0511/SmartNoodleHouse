@@ -69,31 +69,42 @@ class S3ObjectStorage(ObjectStorage):
 
     def __init__(self):
         settings = get_settings()
-        if not (
-            (settings.s3_endpoint or "").strip()
-            and (settings.s3_access_key or "").strip()
-            and (settings.s3_secret_key or "").strip()
-            and (settings.s3_bucket or "").strip()
-        ):
-            raise RuntimeError("STORAGE_BACKEND=s3 但 S3 配置不完整")
+        access_key = (settings.s3_access_key or "").strip()
+        secret_key = (settings.s3_secret_key or "").strip()
+        endpoint = (settings.s3_endpoint or "").strip()
+        if not (settings.s3_bucket or "").strip():
+            raise RuntimeError("STORAGE_BACKEND=s3 但未配置 S3_BUCKET")
+        if bool(access_key) != bool(secret_key):
+            raise RuntimeError("S3_ACCESS_KEY 与 S3_SECRET_KEY 必须同时配置；使用 AWS IAM Role 时可同时留空")
+        if endpoint:
+            from urllib.parse import urlsplit
+
+            parsed_endpoint = urlsplit(endpoint)
+            if (
+                parsed_endpoint.scheme not in ("http", "https")
+                or not parsed_endpoint.hostname
+                or parsed_endpoint.username
+                or parsed_endpoint.password
+                or parsed_endpoint.query
+                or parsed_endpoint.fragment
+            ):
+                raise RuntimeError("S3_ENDPOINT 必须是无内嵌凭证/查询参数的有效 http:// 或 https:// URL")
         try:
             import boto3
             from botocore.client import Config
         except ImportError as e:
             raise RuntimeError("STORAGE_BACKEND=s3 需要安装 boto3") from e
 
-        self.bucket = settings.s3_bucket
-        self.public_base = (settings.s3_public_base_url or "").rstrip("/")
-        self.endpoint = (settings.s3_endpoint or "").rstrip("/")
-        self.client = boto3.client(
-            "s3",
-            endpoint_url=settings.s3_endpoint or None,
-            aws_access_key_id=settings.s3_access_key,
-            aws_secret_access_key=settings.s3_secret_key,
-            region_name=settings.s3_region or "us-east-1",
+        self.bucket = (settings.s3_bucket or "").strip()
+        self.public_base = (settings.s3_public_base_url or "").strip().rstrip("/")
+        self.endpoint = endpoint.rstrip("/")
+        client_options = {
+            # endpoint_url 留空时由 Botocore 按 Region 解析 AWS S3 官方端点。
+            "endpoint_url": endpoint or None,
+            "region_name": settings.s3_region or "us-east-1",
             # 对象存储调用位于异步 API 中：通过 asyncio.to_thread 隔离同步 SDK，
             # 同时显式限制连接/读取超时、连接池和重试，避免网络异常拖垮工作进程。
-            config=Config(
+            "config": Config(
                 signature_version="s3v4",
                 connect_timeout=5,
                 read_timeout=30,
@@ -101,7 +112,24 @@ class S3ObjectStorage(ObjectStorage):
                 retries={"mode": "standard", "max_attempts": 3},
                 tcp_keepalive=True,
             ),
-        )
+        }
+        if access_key:
+            # 静态凭证必须成对提供；仅在显式配置时覆盖 SDK 凭证链。
+            self.client = boto3.client(
+                "s3",
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                **client_options,
+            )
+        else:
+            # 无静态凭证时采用 AWS 标准凭证链（环境变量、共享配置、Web Identity、
+            # ECS/EC2 IAM Role 等），并在启动阶段确认能解析到凭证。
+            session = boto3.Session()
+            if session.get_credentials() is None:
+                raise RuntimeError(
+                    "S3 未配置静态凭证，且 AWS 标准凭证链未找到可用凭证（请配置 IAM Role 或凭证提供器）"
+                )
+            self.client = session.client("s3", **client_options)
 
     def _put_sync(self, key: str, data: bytes, content_type: str) -> None:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)

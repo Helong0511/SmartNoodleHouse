@@ -121,3 +121,139 @@ def test_startup_storage_initialization_accepts_configured_adapter(monkeypatch):
     expected = object()
     monkeypatch.setattr(osmod, "get_storage", lambda: expected)
     assert mainmod._initialize_object_storage(SimpleNamespace(storage_backend="local")) is None
+
+
+def test_s3_aws_default_endpoint_uses_iam_credential_chain(monkeypatch):
+    import boto3
+    from app.services import object_storage as osmod
+
+    captured = {}
+    fake_client = object()
+
+    class FakeSession:
+        def get_credentials(self):
+            return object()
+
+        def client(self, service, **kwargs):
+            captured.update(service=service, **kwargs)
+            return fake_client
+
+    monkeypatch.setattr(boto3, "Session", FakeSession)
+    monkeypatch.setattr(
+        osmod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            storage_backend="s3",
+            s3_endpoint="",
+            s3_access_key="",
+            s3_secret_key="",
+            s3_bucket="aws-bucket",
+            s3_region="us-west-2",
+            s3_public_base_url="",
+        ),
+    )
+
+    storage = osmod.S3ObjectStorage()
+
+    assert storage.client is fake_client
+    assert captured["service"] == "s3"
+    assert captured["endpoint_url"] is None
+    assert captured["region_name"] == "us-west-2"
+
+
+def test_s3_aws_iam_credential_chain_missing_fails_startup(monkeypatch):
+    import boto3
+    from app.services import object_storage as osmod
+
+    class MissingCredentialsSession:
+        def get_credentials(self):
+            return None
+
+    monkeypatch.setattr(boto3, "Session", MissingCredentialsSession)
+    monkeypatch.setattr(
+        osmod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            storage_backend="s3",
+            s3_endpoint="",
+            s3_access_key="",
+            s3_secret_key="",
+            s3_bucket="aws-bucket",
+            s3_region="us-east-1",
+            s3_public_base_url="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="凭证链未找到可用凭证"):
+        osmod.S3ObjectStorage()
+
+
+def test_s3_rejects_half_configured_static_credentials(monkeypatch):
+    from app.services import object_storage as osmod
+
+    monkeypatch.setattr(
+        osmod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            storage_backend="s3",
+            s3_endpoint="",
+            s3_access_key="only-access-key",
+            s3_secret_key="",
+            s3_bucket="aws-bucket",
+            s3_region="us-east-1",
+            s3_public_base_url="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="必须同时配置"):
+        osmod.S3ObjectStorage()
+
+
+def test_s3_rejects_invalid_custom_endpoint(monkeypatch):
+    from app.services import object_storage as osmod
+
+    monkeypatch.setattr(
+        osmod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            storage_backend="s3",
+            s3_endpoint="minio.internal:9000",
+            s3_access_key="test-access",
+            s3_secret_key="test-secret",
+            s3_bucket="test-bucket",
+            s3_region="us-east-1",
+            s3_public_base_url="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="S3_ENDPOINT"):
+        osmod.S3ObjectStorage()
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://:9000",
+        "https://user:secret@minio.internal:9000",
+        "https://minio.internal:9000?access_key=leak",
+    ],
+)
+def test_s3_rejects_malformed_or_credential_bearing_endpoint(monkeypatch, endpoint):
+    from app.services import object_storage as osmod
+
+    monkeypatch.setattr(
+        osmod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            storage_backend="s3",
+            s3_endpoint=endpoint,
+            s3_access_key="test-access",
+            s3_secret_key="test-secret",
+            s3_bucket="test-bucket",
+            s3_region="us-east-1",
+            s3_public_base_url="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="S3_ENDPOINT"):
+        osmod.S3ObjectStorage()
