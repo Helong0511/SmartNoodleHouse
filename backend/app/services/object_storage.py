@@ -69,13 +69,19 @@ class S3ObjectStorage(ObjectStorage):
 
     def __init__(self):
         settings = get_settings()
-        if not (
-            (settings.s3_endpoint or "").strip()
-            and (settings.s3_access_key or "").strip()
-            and (settings.s3_secret_key or "").strip()
-            and (settings.s3_bucket or "").strip()
-        ):
-            raise RuntimeError("STORAGE_BACKEND=s3 但 S3 配置不完整")
+        access_key = (settings.s3_access_key or "").strip()
+        secret_key = (settings.s3_secret_key or "").strip()
+        endpoint = (settings.s3_endpoint or "").strip()
+        if not (settings.s3_bucket or "").strip():
+            raise RuntimeError("STORAGE_BACKEND=s3 但未配置 S3_BUCKET")
+        if bool(access_key) != bool(secret_key):
+            raise RuntimeError("S3_ACCESS_KEY 与 S3_SECRET_KEY 必须同时配置；使用 AWS IAM Role 时可同时留空")
+        if endpoint:
+            from urllib.parse import urlsplit
+
+            parsed_endpoint = urlsplit(endpoint)
+            if parsed_endpoint.scheme not in ("http", "https") or not parsed_endpoint.netloc:
+                raise RuntimeError("S3_ENDPOINT 必须是包含 http:// 或 https:// 的有效 URL")
         try:
             import boto3
             from botocore.client import Config
@@ -87,9 +93,11 @@ class S3ObjectStorage(ObjectStorage):
         self.endpoint = (settings.s3_endpoint or "").rstrip("/")
         self.client = boto3.client(
             "s3",
-            endpoint_url=settings.s3_endpoint or None,
-            aws_access_key_id=settings.s3_access_key,
-            aws_secret_access_key=settings.s3_secret_key,
+            # endpoint_url 留空时由 Botocore 按 Region 解析 AWS S3 官方端点；
+            # 凭证同时留空时使用 AWS 标准凭证链（如 EC2/ECS/IRSA IAM Role）。
+            endpoint_url=endpoint or None,
+            aws_access_key_id=access_key or None,
+            aws_secret_access_key=secret_key or None,
             region_name=settings.s3_region or "us-east-1",
             # 对象存储调用位于异步 API 中：通过 asyncio.to_thread 隔离同步 SDK，
             # 同时显式限制连接/读取超时、连接池和重试，避免网络异常拖垮工作进程。
