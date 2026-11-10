@@ -162,3 +162,13 @@
 - 回归测试新增覆盖渠道关单超时 + UNKNOWN、关单超时 + 查单异常、处理中状态，以及渠道明确 CLOSED 后仍可安全完成本地关单。
 - 官方状态依据：微信支付交易状态枚举明确区分 CLOSED、REVOKED、PAYERROR 与 NOTPAY、USERPAYING；支付宝 TRADE_CLOSED 可能表示未付款关闭，也可能表示付款后全额退款，撤销接口 action=close 表示无退款关闭、action=refund 表示已触发退款。见微信支付查询订单文档及支付宝 alipay.trade.cancel / 交易状态说明。
 - 关联代码提交：226ef93ef407b15bbd391c302042cf4844e07355、9cdf9a29bf175f1769bf6d16d4dc592446ee0553；测试提交：5c4303a16fc6a3517ecaf2b5aa26288e0893161f、545c129d03b1ed78769682d74dae5fdacfe99dbd、f00135be0213bd408a67e66237fe728b07b69368。最终 HEAD 的 CI 仍待执行完成，未提前标记测试通过。
+
+
+### 2026-11-10 增量复核：支付宝 OpenAPI 同步响应验签
+
+- 发现 alipay_gateway_request() 只解析 HTTPS JSON，alipay_client._gateway_call() 直接信任 alipay_trade_query/cancel/refund 的响应字段，没有验证响应顶层 sign。仅有 HTTPS 不能替代支付宝响应签名校验。
+- 已新增 verify_alipay_response_signature()：使用配置的支付宝公钥对接口响应节点做 RSA2/SHA-256 验签；支持标准紧凑 JSON、键排序、URL 斜杠转义及 Unicode 转义序列化变体。
+- _gateway_call() 在检查业务 code 和读取交易状态之前先验签；响应节点缺失、sign 缺失、签名不匹配或公钥解析失败均 fail-closed，抛出 50022，不会将未验签的交易状态用于入账/退款/关单判断。
+- 回归测试覆盖有效签名、转义斜杠、中文嵌套字段、篡改响应、缺少签名，以及客户端对未签名响应拒绝处理。
+- 官方依据：支付宝开放平台同步返回验签说明（https://developer.alibaba.com/docs/doc.htm?articleId=105975&docType=1&treeId=293）；标准网关响应签名说明（https://jaq-doc.alibaba.com/docs/doc.htm?articleId=104613&docType=1&treeId=140）；交易查询响应示例（https://jaq-doc.alibaba.com/docs/api.htm?apiId=757&docType=4）。
+- 关联提交：d351b3ec5298ab6f2c7cb8a7ebff0da3d69c35d4、3fa6d301a3a3d4f73e5ba0db5c6aa1d0da3afeb7、c9374ef076b219106bd3db5d2789768a13879a81、9ec373d2047789761657d5d2e606c05448187c66、56c4e61953aa7062bcb2ebbd8aed9bb7a7c61367、aed8f1240e3c8ae9334da72c34c9191e549244b9。最新 HEAD 的 CI 尚未完成，验签实现必须以最新 CI 结果验收。
