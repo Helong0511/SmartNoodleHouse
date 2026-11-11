@@ -17,21 +17,32 @@ depends_on = None
 LEASE_TABLES = ("outbox_events", "webhook_inbox")
 
 
-def _existing_lease_tables(conn):
+def _existing_lease_tables(conn, *, require_complete: bool = False):
     inspector = sa.inspect(conn)
     for table in LEASE_TABLES:
         if not inspector.has_table(table):
+            if require_complete:
+                raise RuntimeError(
+                    f"Cannot apply 0044_worker_lease_timestamp_precision: "
+                    f"required table '{table}' is missing. Restore the canonical baseline before retrying."
+                )
             continue
         columns = {item["name"] for item in inspector.get_columns(table)}
-        if "locked_at" in columns:
-            yield table
+        if "locked_at" not in columns:
+            if require_complete:
+                raise RuntimeError(
+                    f"Cannot apply 0044_worker_lease_timestamp_precision: "
+                    f"required column '{table}.locked_at' is missing."
+                )
+            continue
+        yield table
 
 
 def upgrade() -> None:
     conn = op.get_bind()
     if conn.dialect.name != "mysql":
         return
-    for table in _existing_lease_tables(conn):
+    for table in _existing_lease_tables(conn, require_complete=True):
         op.alter_column(
             table,
             "locked_at",
