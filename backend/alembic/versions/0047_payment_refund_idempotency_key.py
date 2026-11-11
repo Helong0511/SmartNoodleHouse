@@ -91,10 +91,13 @@ def _assert_no_duplicate_keys(conn) -> None:
 
 def upgrade() -> None:
     conn = op.get_bind()
-    # payment_refunds belongs to the canonical baseline. During recovery from
-    # an incomplete legacy baseline, avoid opaque PRAGMA/ALTER failures.
+    # Refund idempotency is required for safe payment retries. Never mark
+    # this revision applied when its canonical table is absent.
     if not sa.inspect(conn).has_table("payment_refunds"):
-        return
+        raise RuntimeError(
+            "Cannot apply 0047_payment_refund_idem: required table "
+            "'payment_refunds' is missing. Restore the canonical baseline before retrying."
+        )
     if not _column_exists(conn):
         op.add_column(
             "payment_refunds",
