@@ -35,7 +35,7 @@ sudo cp nginx/snippets/proxy-common.conf /etc/nginx/snippets/proxy-common.conf
 
 # ── 4. 先部署仅 HTTP 的 ACME 引导站点 ──
 sudo mkdir -p /var/www/letsencrypt/.well-known/acme-challenge
-sudo cp nginx/acme-bootstrap.conf /etc/nginx/sites-available/smart-noodle.conf
+sudo sed 's/REPLACE_DOMAIN/你的域名.com/g' nginx/acme-bootstrap.conf | sudo tee /etc/nginx/sites-available/smart-noodle.conf >/dev/null
 sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl enable --now nginx
