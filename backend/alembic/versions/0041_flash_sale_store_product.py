@@ -80,6 +80,29 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
+    # InnoDB may require this index to support a foreign key added by a later
+    # revision. Remove any FK on product_id before dropping the supporting index
+    # or column; MySQL rejects DROP INDEX while that dependency remains.
+    if conn.dialect.name != "sqlite" and _column_exists(
+        conn, "marketing_flash_sale_stocks", "product_id"
+    ):
+        foreign_keys = conn.execute(
+            text(
+                "SELECT DISTINCT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'marketing_flash_sale_stocks' "
+                "AND COLUMN_NAME = 'product_id' "
+                "AND REFERENCED_TABLE_NAME IS NOT NULL"
+            )
+        ).fetchall()
+        for (constraint_name,) in foreign_keys:
+            safe_name = str(constraint_name).replace("`", "``")
+            conn.execute(
+                text(
+                    "ALTER TABLE marketing_flash_sale_stocks "
+                    f"DROP FOREIGN KEY `{safe_name}`"
+                )
+            )
     if _index_exists(conn, "marketing_flash_sale_stocks", "ix_mfss_product"):
         if conn.dialect.name == "sqlite":
             conn.execute(text("DROP INDEX IF EXISTS ix_mfss_product"))
