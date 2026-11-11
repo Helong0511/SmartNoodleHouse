@@ -55,7 +55,8 @@ async def test_evict_overflow_keeps_touched():
 
 
 @pytest.mark.asyncio
-async def test_best_match_hot_hit_touches():
+async def test_best_match_hot_hit_touches(monkeypatch):
+    monkeypatch.setattr("app.services.face_service.FACE_RECOGNITION_TEMPORARILY_DISABLED", False)
     cache = FaceEmbeddingCache()
     emb = _vec(7)
     cache._by_customer = {42: (1, emb.copy())}
@@ -69,7 +70,8 @@ async def test_best_match_hot_hit_touches():
 
 
 @pytest.mark.asyncio
-async def test_best_match_cold_hit_promotes():
+async def test_best_match_cold_hit_promotes(monkeypatch):
+    monkeypatch.setattr("app.services.face_service.FACE_RECOGNITION_TEMPORARILY_DISABLED", False)
     cache = FaceEmbeddingCache()
     cache._max_profiles = 8
     hot = _vec(1)
@@ -110,7 +112,8 @@ async def test_best_match_cold_hit_promotes():
 
 
 @pytest.mark.asyncio
-async def test_promote_noop_without_profile():
+async def test_promote_noop_without_profile(monkeypatch):
+    monkeypatch.setattr("app.services.face_service.FACE_RECOGNITION_TEMPORARILY_DISABLED", False)
     cache = FaceEmbeddingCache()
     db = AsyncMock()
     result = MagicMock()

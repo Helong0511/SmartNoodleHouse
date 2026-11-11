@@ -57,6 +57,7 @@ class RecognitionWorker:
             face_embedding_cache,
         )
         from app.services.face_liveness import global_tracker
+        from app.services.face_feature_gate import FACE_RECOGNITION_TEMPORARILY_DISABLED
         from app.services.system_settings_service import SystemSettingsService
         from camera.camera_manager import CameraManager
         from sqlalchemy import select
@@ -75,6 +76,14 @@ class RecognitionWorker:
         last_model_warmup_attempt = 0.0
         while not self._stop.is_set():
             try:
+                # Temporary licensing freeze takes precedence over all DB/UI feature flags.
+                if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+                    if self._face_enabled_last is not False:
+                        face_embedding_cache.invalidate()
+                    self._face_enabled_last = False
+                    await asyncio.sleep(1.0)
+                    continue
+
                 # 人脸识别必须服从全局功能开关。关闭或无法确认配置时 fail closed：
                 # 不加载模型、不读取帧、不匹配会员，也不抓拍未知访客。
                 now_mono = time.monotonic()

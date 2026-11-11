@@ -56,6 +56,7 @@ def test_face_key_version_includes_key_digest(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_face_reencrypt_stale_profiles(db_session, monkeypatch):
+    monkeypatch.setattr("app.services.face_service.FACE_RECOGNITION_TEMPORARILY_DISABLED", False)
     import json
 
     from app.core.response import now_local
