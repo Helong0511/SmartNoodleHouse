@@ -44,7 +44,7 @@
 
 ## 2. 认证与会话
 
-### 2.1 JWT 三类令牌（[backend/app/core/security.py](file:///e:/SmartNoodleHouse/backend/app/core/security.py)）
+### 2.1 JWT 三类令牌（[backend/app/core/security.py](../../backend/app/core/security.py)）
 
 | 令牌类型 | typ | 用途 | TTL | 撤销机制 |
 |---|---|---|---|---|
@@ -57,15 +57,15 @@
 1. `_JWT_RESERVED_CLAIMS` 包含 `sub/exp/iat/nbf/jti/iss/aud/typ/ver/cam/store`，extra claims 经 `_safe_extra_claims` 过滤，标准声明最后写入，杜绝客户端通过 extra 覆盖 `typ/sub/aud` 提权。
 2. `decode_token` 强制 `require_exp/iat/sub/nbf/aud`，并校验 issuer 与 audience。
 3. 顾客令牌渠道仅允许 `wechat/alipay`，其他值强制回落 `wechat`，防伪造 channel。
-4. 流票据不可用于业务接口（[deps.py](file:///e:/SmartNoodleHouse/backend/app/api/deps.py) StaffOrCustomer 拒绝 typ=stream）。
+4. 流票据不可用于业务接口（[deps.py](../../backend/app/api/deps.py) StaffOrCustomer 拒绝 typ=stream）。
 
-### 2.2 令牌撤销（[backend/app/api/deps.py](file:///e:/SmartNoodleHouse/backend/app/api/deps.py)）
+### 2.2 令牌撤销（[backend/app/api/deps.py](../../backend/app/api/deps.py)）
 
 - `CurrentUser` / `CurrentCustomer` 依赖均从 DB 读取当前 `token_version`，与 JWT 中 `ver` 比对，不一致立即 401。
 - 修改密码、登出、封禁账号时 bump token_version，旧令牌立即失效。
 - 顾客侧还提供 `/miniprogram/session/revoke` 显式撤销入口。
 
-### 2.3 小程序登录（[backend/app/services/miniprogram_auth.py](file:///e:/SmartNoodleHouse/backend/app/services/miniprogram_auth.py)）
+### 2.3 小程序登录（[backend/app/services/miniprogram_auth.py](../../backend/app/services/miniprogram_auth.py)）
 
 - 微信：服务端真实调用 `sns/jscode2session`，不信任客户端传入的 openid。
 - 支付宝：服务端真实调用 `alipay.system.oauth.token`，优先 `open_id`，不接受客户端 user_id。
@@ -75,14 +75,14 @@
 ### 2.4 密码与登录
 
 - 密码 `bcrypt`（passlib）。
-- 登录失败锁定 + 审计日志（[测试_认证锁定与日志.py](file:///e:/SmartNoodleHouse/tests/测试_认证锁定与日志.py)）。
+- 登录失败锁定 + 审计日志（[测试_认证锁定与日志.py](../../tests/测试_认证锁定与日志.py)）。
 - `/api/auth/login` 限流 10 次/60 秒，`verify-password` 20 次/60 秒。
 
 ---
 
 ## 3. 支付与回调安全
 
-### 3.1 微信支付 V3（[backend/app/services/payment_verify.py](file:///e:/SmartNoodleHouse/backend/app/services/payment_verify.py)）
+### 3.1 微信支付 V3（[backend/app/services/payment_verify.py](../../backend/app/services/payment_verify.py)）
 
 - 平台公钥验签：RSA2 + SHA256。
 - 时间戳偏差超 300 秒拒绝（防重放）。
@@ -113,13 +113,13 @@
 
 ### 3.5 超时关单
 
-- [order_lifecycle.py](file:///e:/SmartNoodleHouse/backend/app/services/order_lifecycle.py) 超时关单调用支付渠道 `trade_cancel/close`，防止"本地关单 → 用户晚到账 → 永久挂账"。
+- [order_lifecycle.py](../../backend/app/services/order_lifecycle.py) 超时关单调用支付渠道 `trade_cancel/close`，防止"本地关单 → 用户晚到账 → 永久挂账"。
 
 ---
 
 ## 4. 多租户与越权
 
-### 4.1 服务层强制门店隔离（[backend/app/services/store_scope.py](file:///e:/SmartNoodleHouse/backend/app/services/store_scope.py)）
+### 4.1 服务层强制门店隔离（[backend/app/services/store_scope.py](../../backend/app/services/store_scope.py)）
 
 - `require_bound_store(user, store_id)`：非超管强制覆盖为本人归属门店，员工访问未授权门店抛 403。
 - `assert_store_access(user, store_id)`：单条记录归属校验。
@@ -146,11 +146,11 @@
 
 ### 5.1 人脸数据
 
-- 人脸向量使用 Fernet 加密 + AAD/nonce 防重放（[secret_encryption.py](file:///e:/SmartNoodleHouse/backend/app/services/secret_encryption.py)）。
+- 人脸向量使用 Fernet 加密 + AAD/nonce 防重放（[secret_encryption.py](../../backend/app/services/secret_encryption.py)）。
 - `FACE_ENCRYPTION_KEY_PREVIOUS` 支持旧密文解密，密钥轮换不停机。
 - 注册仅允许 `member_status=active` 会员（P0-022）。
 - 活体检测：随机动作挑战（blink/mouth/turn）+ Redis token 一次性，防照片/视频重放（P0-016）。
-- base64 上传必须先通过活体校验，再解码图片（[测试_人脸活体接线.py](file:///e:/SmartNoodleHouse/tests/测试_人脸活体接线.py)）。
+- base64 上传必须先通过活体校验，再解码图片（[测试_人脸活体接线.py](../../tests/测试_人脸活体接线.py)）。
 - 禁止客户端上传 embedding/feature_vector，仅接受摄像头实拍图。
 - 图片 10MB 上限 + 最小 1024 字节，Pillow `Image.MAX_IMAGE_PIXELS` 防 decompression bomb（P0-024）。
 - 顾客可撤销授权，撤销后不再用于迎宾匹配。
@@ -168,7 +168,7 @@
 
 ### 5.3 PII 清理
 
-- [pii_cleanup_service.py](file:///e:/SmartNoodleHouse/backend/app/services/pii_cleanup_service.py) 完成时间超 30 天的订单脱敏：手机号/地址等替换为不可逆占位。
+- [pii_cleanup_service.py](../../backend/app/services/pii_cleanup_service.py) 完成时间超 30 天的订单脱敏：手机号/地址等替换为不可逆占位。
 - 访客抓拍按保留期清理。
 - Webhook 请求头日志自动脱敏 `Authorization/Cookie/token/Set-Cookie`（P0-021）。
 
@@ -176,7 +176,7 @@
 
 ## 6. 限流、DoS 与可用性
 
-### 6.1 API 限流（[backend/app/core/rate_limit.py](file:///e:/SmartNoodleHouse/backend/app/core/rate_limit.py)）
+### 6.1 API 限流（[backend/app/core/rate_limit.py](../../backend/app/core/rate_limit.py)）
 
 - Redis Lua Token Bucket 使用 Redis `TIME` 作为权威时钟，以原子 `HSET + PEXPIRE` 更新令牌桶状态；固定 TTL 防止计数键永久残留，并降低固定窗口边界突发。
 - 敏感路径独立配额：
@@ -200,7 +200,7 @@
 
 ### 6.2 WebSocket 防护
 
-- [ws_conn_quota.py](file:///e:/SmartNoodleHouse/backend/app/services/ws_conn_quota.py) 连接数 / 订阅频率限制。
+- [ws_conn_quota.py](../../backend/app/services/ws_conn_quota.py) 连接数 / 订阅频率限制。
 - Pub/Sub 通过 Redis 跨 worker 广播，单进程宕机不丢消息。
 
 ### 6.3 Webhook 限体
@@ -209,7 +209,7 @@
 
 ### 6.4 Webhook IP 白名单
 
-- [ip_allowlist.py](file:///e:/SmartNoodleHouse/backend/app/core/ip_allowlist.py) 仅信任 `TRUSTED_PROXY_IPS` 列表内反代写入的 `X-Forwarded-For`，防伪造源 IP。
+- [ip_allowlist.py](../../backend/app/core/ip_allowlist.py) 仅信任 `TRUSTED_PROXY_IPS` 列表内反代写入的 `X-Forwarded-For`，防伪造源 IP。
 - 生产环境未配置白名单且开启 require 时拒绝启动。
 
 ---
@@ -220,7 +220,7 @@
 
 - 全量 SQLAlchemy ORM / Core 参数化，未发现字符串拼接 SQL。
 - 复杂查询使用 `aliased()` 独立别名避免 auto-correlation 吞子查询（项目记忆中的教训）。
-- [intrusion_detection.py](file:///e:/SmartNoodleHouse/backend/app/core/intrusion_detection.py) 中间件检测：
+- [intrusion_detection.py](../../backend/app/core/intrusion_detection.py) 中间件检测：
   - SQL 注入关键字/模式（union select、sleep、benchmark 等）
   - 路径遍历（`../`、`..\\`、编码变体）
   - 命令注入（`;`、`|`、反引号、`$()`）
@@ -229,7 +229,7 @@
 
 ### 7.2 打印注入
 
-- [print_service.py](file:///e:/SmartNoodleHouse/backend/app/services/print_service.py) 清理 ESC/GS 控制字符，防恶意菜品名向小票打印机注入指令。
+- [print_service.py](../../backend/app/services/print_service.py) 清理 ESC/GS 控制字符，防恶意菜品名向小票打印机注入指令。
 
 ### 7.3 XSS / 点击劫持
 
@@ -261,13 +261,13 @@
 ### 8.2 脱敏
 
 - 序列化时自动脱敏：`password/token/secret/authorization/cookie/id_card/phone` 等字段。
-- 操作日志查询按门店可见范围隔离（[测试_审计日志可见范围.py](file:///e:/SmartNoodleHouse/tests/测试_审计日志可见范围.py)）。
+- 操作日志查询按门店可见范围隔离（[测试_审计日志可见范围.py](../../tests/测试_审计日志可见范围.py)）。
 
 ---
 
 ## 9. 生产配置与启动校验
 
-[backend/app/core/startup_checks.py](file:///e:/SmartNoodleHouse/backend/app/core/startup_checks.py) `validate_settings` 在生产环境强制：
+[backend/app/core/startup_checks.py](../../backend/app/core/startup_checks.py) `validate_settings` 在生产环境强制：
 
 - APP_ENV 合法
 - JWT_SECRET 非空/非默认/熵足够/长度 ≥ 32
@@ -292,7 +292,7 @@
 
 ### 9.1 Docs 暴露
 
-- 生产环境关闭 `/docs`、`/redoc`、`/openapi.json`（[main.py:313-315](file:///e:/SmartNoodleHouse/backend/app/main.py)）。
+- 生产环境关闭 `/docs`、`/redoc`、`/openapi.json`（[main.py:313-315](../../backend/app/main.py)）。
 
 ---
 
@@ -308,7 +308,7 @@
 
 ## 11. 已知风险与遗留事项
 
-详见 [REMAINING_ISSUES.md](file:///e:/SmartNoodleHouse/docs/audit/REMAINING_ISSUES.md)。安全相关重点：
+详见 [REMAINING_ISSUES.md](REMAINING_ISSUES.md)。安全相关重点：
 
 1. **历史密钥泄露**：仓库 git 历史中曾出现真实微信 AppSecret / 支付宝私钥 / AES Key，必须在平台控制台轮换（BLK-002）。
 2. **限流故障分级**：敏感路径已由 `RATE_LIMIT_FAIL_CLOSED_PATHS` fail-closed，普通路径 fail-open；需持续确保生产配置不漏掉新增认证/支付/回调路由。
@@ -330,4 +330,4 @@
 | 启动校验 | 测试_启动打印防护.py、测试_生产种子与平台.py |
 | PII/隐私 | 测试_PII清理.py、测试_智能推荐_13隐私合规.py、测试_手机号仅官方授权.py |
 
-**历史测试记录**：`791 passed, 8 skipped, 0 failed`（2026-09-29 本地记录，详见 [TEST_REPORT.md](file:///e:/SmartNoodleHouse/docs/audit/TEST_REPORT.md)；不可作为当前 main 的 CI 结果）。当前 main 的验证结果请查看 GitHub Actions 对应 commit。
+**历史测试记录**：`791 passed, 8 skipped, 0 failed`（2026-09-29 本地记录，详见 [TEST_REPORT.md](TEST_REPORT.md)；不可作为当前 main 的 CI 结果）。当前 main 的验证结果请查看 GitHub Actions 对应 commit。
