@@ -84,6 +84,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
+    # Earlier revisions may have been interrupted before this optional table
+    # was created. MySQL commits DDL independently, so rollback must tolerate it.
+    if not sa.inspect(conn).has_table(TABLE):
+        return
     columns, unique_constraints, indexes, _ = _schema_objects(conn)
     if "scope_store_id" not in columns:
         return
