@@ -51,7 +51,6 @@ RestartSec=5
 # 上传目录与文件日志需可写
 ReadWritePaths=REPLACE_DEPLOY_ROOT/uploads
 ReadWritePaths=REPLACE_DEPLOY_ROOT/logs
-ReadWritePaths=/var/log
 
 NoNewPrivileges=true
 PrivateTmp=true
