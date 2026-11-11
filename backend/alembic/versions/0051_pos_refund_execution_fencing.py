@@ -52,7 +52,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    columns = {item["name"] for item in sa.inspect(conn).get_columns("pos_refund_requests")}
+    # Some supported legacy installations do not have the optional POS refund
+    # approval table. A downgrade must not fail while inspecting an absent table.
+    inspector = sa.inspect(conn)
+    if not inspector.has_table("pos_refund_requests"):
+        return
+    columns = {item["name"] for item in inspector.get_columns("pos_refund_requests")}
     if "execution_lease_until" in columns:
         op.drop_column("pos_refund_requests", "execution_lease_until")
     if "execution_token" in columns:
