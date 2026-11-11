@@ -19,6 +19,7 @@ LEASE_TABLES = ("outbox_events", "webhook_inbox")
 
 def _existing_lease_tables(conn, *, require_complete: bool = False):
     inspector = sa.inspect(conn)
+    existing = []
     for table in LEASE_TABLES:
         if not inspector.has_table(table):
             if require_complete:
@@ -35,7 +36,10 @@ def _existing_lease_tables(conn, *, require_complete: bool = False):
                     f"required column '{table}.locked_at' is missing."
                 )
             continue
-        yield table
+        existing.append(table)
+    # Return only after validating every table, so callers cannot mutate the
+    # first table before discovering that a later required table is absent.
+    return existing
 
 
 def upgrade() -> None:
