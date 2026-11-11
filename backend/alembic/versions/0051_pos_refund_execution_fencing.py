@@ -16,7 +16,12 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    columns = {item["name"] for item in sa.inspect(conn).get_columns("pos_refund_requests")}
+    inspector = sa.inspect(conn)
+    # POS refund approvals are optional on legacy deployments. Do not mark
+    # partially absent feature tables as an inspection error during upgrade.
+    if not inspector.has_table("pos_refund_requests"):
+        return
+    columns = {item["name"] for item in inspector.get_columns("pos_refund_requests")}
     if "execution_epoch" not in columns:
         op.add_column(
             "pos_refund_requests",
