@@ -91,7 +91,7 @@ def test_production_inference_entrypoints_fail_closed_before_model_use(
     else:
         target.cache_clear()
         try:
-            with pytest.raises(RuntimeError, match="未确认商业授权"):
+            with pytest.raises(RuntimeError, match="临时关闭"):
                 target()
         finally:
             target.cache_clear()
