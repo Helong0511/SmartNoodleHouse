@@ -23,13 +23,13 @@ def _load():
     return module
 
 
-def test_upgrade_and_downgrade_skip_absent_worker_tables(monkeypatch):
+def test_upgrade_and_downgrade_require_both_worker_tables(monkeypatch):
     migration = _load()
     conn = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
     altered = []
     inspector = SimpleNamespace(
-        has_table=lambda table: table == "webhook_inbox",
-        get_columns=lambda table: [{"name": "id"}, {"name": "locked_at"}],
+        has_table=lambda _table: True,
+        get_columns=lambda _table: [{"name": "id"}, {"name": "locked_at"}],
     )
     monkeypatch.setattr(migration.sa, "inspect", lambda _conn: inspector)
     monkeypatch.setattr(
@@ -38,14 +38,40 @@ def test_upgrade_and_downgrade_skip_absent_worker_tables(monkeypatch):
     )
 
     migration.upgrade()
-    assert [item[0][0] for item in altered] == ["webhook_inbox"]
+    assert [item[0][0] for item in altered] == ["outbox_events", "webhook_inbox"]
 
     altered.clear()
+    migration.downgrade()
+    assert [item[0][0] for item in altered] == ["outbox_events", "webhook_inbox"]
+
+
+def test_upgrade_fails_when_a_required_worker_table_is_absent_but_downgrade_skips_it(monkeypatch):
+    import pytest
+
+    migration = _load()
+    conn = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
+    altered = []
+    inspector = SimpleNamespace(
+        has_table=lambda table: table == "webhook_inbox",
+        get_columns=lambda _table: [{"name": "id"}, {"name": "locked_at"}],
+    )
+    monkeypatch.setattr(migration.sa, "inspect", lambda _conn: inspector)
+    monkeypatch.setattr(
+        migration, "op",
+        SimpleNamespace(get_bind=lambda: conn, alter_column=lambda *a, **kw: altered.append((a, kw))),
+    )
+
+    with pytest.raises(RuntimeError, match="required table 'outbox_events'"):
+        migration.upgrade()
+    assert altered == []
+
     migration.downgrade()
     assert [item[0][0] for item in altered] == ["webhook_inbox"]
 
 
-def test_upgrade_and_downgrade_are_noops_when_both_worker_tables_are_absent(monkeypatch):
+def test_upgrade_fails_when_both_worker_tables_are_absent_and_downgrade_is_safe(monkeypatch):
+    import pytest
+
     migration = _load()
     conn = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
     altered = []
@@ -56,6 +82,7 @@ def test_upgrade_and_downgrade_are_noops_when_both_worker_tables_are_absent(monk
         SimpleNamespace(get_bind=lambda: conn, alter_column=lambda *a, **kw: altered.append((a, kw))),
     )
 
-    migration.upgrade()
+    with pytest.raises(RuntimeError, match="required table 'outbox_events'"):
+        migration.upgrade()
     migration.downgrade()
     assert altered == []
