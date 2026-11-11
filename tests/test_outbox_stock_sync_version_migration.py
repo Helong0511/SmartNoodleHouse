@@ -78,13 +78,16 @@ def test_downgrade_is_safe_when_outbox_events_table_is_absent():
         engine.dispose()
 
 
-def test_upgrade_is_safe_when_outbox_events_table_is_absent():
+def test_upgrade_fails_clearly_when_required_outbox_events_table_is_absent():
+    import pytest
+
     engine = sa.create_engine("sqlite:///:memory:")
     try:
         migration = _load_migration()
         with engine.begin() as conn:
             migration.op = Operations(MigrationContext.configure(conn))
-            migration.upgrade()
+            with pytest.raises(RuntimeError, match="required table.*outbox_events"):
+                migration.upgrade()
             assert sa.inspect(conn).has_table("outbox_events") is False
     finally:
         engine.dispose()
