@@ -26,6 +26,8 @@ def upgrade() -> None:
     conn = op.get_bind()
     if conn.dialect.name == "mysql":
         inspector = sa.inspect(conn)
+        # Validate the complete table/column set before the first MySQL DDL;
+        # otherwise a missing second table could leave the first altered.
         for table in LEASE_TABLES:
             if not inspector.has_table(table):
                 raise RuntimeError(
@@ -38,6 +40,7 @@ def upgrade() -> None:
                     f"Cannot apply 0044_worker_lease_timestamp_precision: "
                     f"required column '{table}.locked_at' is missing."
                 )
+        for table in LEASE_TABLES:
             op.alter_column(
                 table,
                 "locked_at",
