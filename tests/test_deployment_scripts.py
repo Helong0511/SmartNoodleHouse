@@ -163,3 +163,33 @@ def test_private_avatar_signed_queries_are_not_written_to_access_logs():
     assert "--no-access-log" in service
     assert 'request.url.path.startswith("/api/media/private/avatars/")' in main
 
+
+
+def test_nginx_static_locations_keep_server_security_headers():
+    config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
+    required_headers = (
+        "Strict-Transport-Security",
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+        "Content-Security-Policy",
+    )
+
+    def location_block(marker: str) -> str:
+        start = config.index(marker)
+        opening = config.index("{", start)
+        depth = 0
+        for index in range(opening, len(config)):
+            if config[index] == "{":
+                depth += 1
+            elif config[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    return config[opening + 1:index]
+        raise AssertionError(f"Unclosed Nginx location: {marker}")
+
+    for marker in ("location /assets/ {", "location /uploads/ {"):
+        block = location_block(marker)
+        for header in required_headers:
+            assert f"add_header {header} " in block, f"{marker} missing {header}"
