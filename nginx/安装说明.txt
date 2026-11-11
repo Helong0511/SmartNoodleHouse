@@ -63,7 +63,8 @@ curl -sI https://你的域名.com/health    # 公网探针：须 nginx 已配置
 # 或：curl -sI https://你的域名.com/api/ready
 
 # ── 7. 证书自动续期 ──
-# Certbot renewal uses the saved webroot authenticator; deploy hook refreshes OCSP trust and reloads Nginx.\nsudo certbot renew --dry-run
+# Certbot renewal uses the saved webroot authenticator; deploy hook refreshes OCSP trust and reloads Nginx.
+sudo certbot renew --dry-run
 # Ubuntu 22.04 certbot 默认带 systemd timer，无需额外 cron
 
 # ── 常见问题 ──
