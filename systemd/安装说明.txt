@@ -22,8 +22,8 @@
 # 若使用其他路径，所有 REPLACE_DEPLOY_ROOT 须一致。
 
 # ── 2. 目录权限 ──
-sudo mkdir -p /var/www/smart-noodle/uploads /etc/smart-noodle/certs
-sudo chown -R www-data:www-data /var/www/smart-noodle/uploads
+sudo mkdir -p /var/www/smart-noodle/uploads /var/www/smart-noodle/logs /etc/smart-noodle/certs
+sudo chown -R www-data:www-data /var/www/smart-noodle/uploads /var/www/smart-noodle/logs
 sudo chmod 640 /var/www/smart-noodle/.env
 # 项目代码可读即可；venv 须 www-data 可执行
 sudo chown -R root:www-data /var/www/smart-noodle/backend/.venv
@@ -49,7 +49,7 @@ sudo systemctl reload nginx
 
 # ── 6. 多实例 / 多 Worker ──
 # PROCESS_ROLE 推荐 auto：Uvicorn --workers N 时各 worker 争抢 Redis Leader 锁，
-# 仅持锁进程跑 scheduler / TTS / 人脸识别，避免重复调度。
+# 仅持锁进程跑 scheduler / TTS，避免重复调度；人脸识别当前由后端全局 hard-stop 暂停，不会因抢到 Leader 锁而启动。
 # 水平扩展多机时：仅一台可设 PROCESS_ROLE=leader（仍受 Redis 锁保护），其余 PROCESS_ROLE=worker。
 # systemd 单元已强制 Environment=PROCESS_ROLE=auto，覆盖 .env 中误写的 leader。
 
