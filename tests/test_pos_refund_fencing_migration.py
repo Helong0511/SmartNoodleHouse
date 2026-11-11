@@ -67,3 +67,15 @@ def test_downgrade_removes_only_fencing_columns_when_table_exists():
             assert columns == {"id", "status"}
     finally:
         engine.dispose()
+
+
+def test_upgrade_is_safe_when_optional_pos_refund_table_is_absent():
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        migration = _load_migration()
+        with engine.begin() as conn:
+            migration.op = Operations(MigrationContext.configure(conn))
+            migration.upgrade()
+            assert not sa.inspect(conn).has_table("pos_refund_requests")
+    finally:
+        engine.dispose()
