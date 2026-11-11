@@ -28,10 +28,16 @@ def upgrade() -> None:
         inspector = sa.inspect(conn)
         for table in LEASE_TABLES:
             if not inspector.has_table(table):
-                continue
+                raise RuntimeError(
+                    f"Cannot apply 0044_worker_lease_timestamp_precision: "
+                    f"required table '{table}' is missing. Restore the canonical baseline before retrying."
+                )
             columns = {item["name"] for item in inspector.get_columns(table)}
             if "locked_at" not in columns:
-                continue
+                raise RuntimeError(
+                    f"Cannot apply 0044_worker_lease_timestamp_precision: "
+                    f"required column '{table}.locked_at' is missing."
+                )
             op.alter_column(
                 table,
                 "locked_at",
