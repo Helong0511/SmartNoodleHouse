@@ -38,8 +38,16 @@ def scan_sensitive_logs() -> int:
         )
         return 0
 
+    log_files = sorted(log_root.rglob("*.log"))
+    if not log_files:
+        print(
+            "[SKIP] 仓库内 logs/backend 目录存在，但没有可扫描的 .log 文件；"
+            "这不代表生产主机、外部日志平台或历史归档已完成扫描。"
+        )
+        return 0
+
     findings = 0
-    for path in sorted(log_root.rglob("*.log")):
+    for path in log_files:
         try:
             with path.open("r", encoding="utf-8", errors="replace") as stream:
                 for line_no, line in enumerate(stream, 1):
