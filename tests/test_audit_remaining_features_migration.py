@@ -63,3 +63,20 @@ def test_upgrade_recovers_missing_reconcile_diffs_table(monkeypatch):
             assert "cost_price" in product_columns
     finally:
         engine.dispose()
+
+
+def test_upgrade_fails_clearly_when_required_products_table_is_missing(monkeypatch):
+    import pytest
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            module = _load_migration()
+            monkeypatch.setattr(
+                module, "op", Operations(MigrationContext.configure(conn))
+            )
+            with pytest.raises(RuntimeError, match="required table.*products"):
+                module.upgrade()
+            assert not sa.inspect(conn).has_table("products")
+    finally:
+        engine.dispose()
