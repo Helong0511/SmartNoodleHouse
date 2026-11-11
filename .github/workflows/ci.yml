@@ -356,49 +356,27 @@ jobs:
           MYSQL_PWD: root
         run: |
           set -euo pipefail
-          # Reproduce a completed 0035 first-table DDL followed by process interruption.
-          alembic downgrade 0034_points_exchange_expire
+          # Preserve the real, fully-created first 0035 table while rolling back
+          # its revision marker. Drop its dependent tables first, then rename it
+          # out of the way so the downgrade cannot remove the committed DDL.
           mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
-          CREATE TABLE table_parties (
-            id bigint UNSIGNED NOT NULL AUTO_INCREMENT,
-            store_id bigint UNSIGNED NOT NULL,
-            table_id bigint UNSIGNED NOT NULL,
-            host_customer_id bigint UNSIGNED NOT NULL,
-            status varchar(20) NOT NULL DEFAULT 'OPEN',
-            revision int NOT NULL DEFAULT 1,
-            expires_at datetime(3) NOT NULL,
-            closed_at datetime(3) NULL DEFAULT NULL,
-            created_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-            updated_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-            PRIMARY KEY (id),
-            INDEX idx_tp_store_table_status (store_id, table_id, status),
-            CONSTRAINT fk_tp_store FOREIGN KEY (store_id) REFERENCES stores (id),
-            CONSTRAINT fk_tp_table FOREIGN KEY (table_id) REFERENCES tables (id),
-            CONSTRAINT fk_tp_host FOREIGN KEY (host_customer_id) REFERENCES customers (id)
-          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+          DROP TABLE shared_cart_items;
+          DROP TABLE table_party_members;
+          RENAME TABLE table_parties TO table_parties_partial_recovery;
           SQL
+          alembic downgrade 0034_points_exchange_expire
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci -e "RENAME TABLE table_parties_partial_recovery TO table_parties"
           alembic upgrade head
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('table_parties','table_party_members','shared_cart_items')")" = "3"
           # Reproduce 0036 interruption after payment_reconcile_batches committed.
-          alembic downgrade 0035_table_party_shared_cart
+          # Preserve its real table while removing the child table and rolling back
+          # the revision marker; 0048 must tolerate the partial DDL state.
           mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
-          CREATE TABLE payment_reconcile_batches (
-            id bigint UNSIGNED NOT NULL AUTO_INCREMENT,
-            channel varchar(20) NOT NULL,
-            bill_date date NOT NULL,
-            status varchar(20) NOT NULL DEFAULT 'PENDING',
-            local_count int NOT NULL DEFAULT 0,
-            channel_count int NOT NULL DEFAULT 0,
-            mismatch_count int NOT NULL DEFAULT 0,
-            source_filename varchar(255) NULL,
-            error_message varchar(500) NULL,
-            created_by bigint UNSIGNED NULL,
-            created_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-            updated_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-            PRIMARY KEY (id),
-            UNIQUE KEY uk_prb_channel_bill (channel, bill_date)
-          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+          DROP TABLE payment_reconcile_diffs;
+          RENAME TABLE payment_reconcile_batches TO payment_reconcile_batches_partial_recovery;
           SQL
+          alembic downgrade 0035_table_party_shared_cart
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci -e "RENAME TABLE payment_reconcile_batches_partial_recovery TO payment_reconcile_batches"
           alembic upgrade head
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_diffs'")" = "1"
           # Leave the disposable CI schema at the latest migration head.
