@@ -6,7 +6,7 @@ Revises: 0042_privacy_opt_in_default
 from __future__ import annotations
 
 from alembic import op
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 revision = "0043_delivery_refund_fingerprint"
 down_revision = "0042_privacy_opt_in_default"
@@ -65,7 +65,7 @@ def upgrade() -> None:
     conn = op.get_bind()
     # The canonical baseline owns delivery_refunds; tolerate a partially
     # applied legacy baseline without issuing ALTER against a missing table.
-    if not sa.inspect(conn).has_table("delivery_refunds"):
+    if not inspect(conn).has_table("delivery_refunds"):
         return
     if not _column_exists(conn):
         if conn.dialect.name == "sqlite":
@@ -99,6 +99,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
+    if not inspect(conn).has_table("delivery_refunds"):
+        return
     index_exists, _ = _index_state(conn)
     if index_exists:
         if conn.dialect.name == "sqlite":
