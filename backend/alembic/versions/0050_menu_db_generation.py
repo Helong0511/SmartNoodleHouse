@@ -38,7 +38,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    columns = {item["name"] for item in sa.inspect(conn).get_columns("stores")}
+    inspector = sa.inspect(conn)
+    # Some legacy/partial schemas do not contain the optional stores table.
+    # Rolling back this revision must not fail while inspecting an absent table.
+    if not inspector.has_table("stores"):
+        return
+    columns = {item["name"] for item in inspector.get_columns("stores")}
     if "menu_schedule_id" in columns:
         op.drop_column("stores", "menu_schedule_id")
     if "menu_generation" in columns:
