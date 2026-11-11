@@ -25,7 +25,10 @@ def _load():
 
 def test_upgrade_and_downgrade_require_both_worker_tables(monkeypatch):
     migration = _load()
-    conn = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
+    conn = SimpleNamespace(
+        dialect=SimpleNamespace(name="mysql"),
+        execute=lambda *_args, **_kwargs: SimpleNamespace(scalar=lambda: None),
+    )
     altered = []
     inspector = SimpleNamespace(
         has_table=lambda _table: True,
@@ -49,7 +52,10 @@ def test_upgrade_fails_when_a_required_worker_table_is_absent_but_downgrade_skip
     import pytest
 
     migration = _load()
-    conn = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
+    conn = SimpleNamespace(
+        dialect=SimpleNamespace(name="mysql"),
+        execute=lambda *_args, **_kwargs: SimpleNamespace(scalar=lambda: None),
+    )
     altered = []
     inspector = SimpleNamespace(
         has_table=lambda table: table == "webhook_inbox",
@@ -73,7 +79,10 @@ def test_upgrade_fails_when_both_worker_tables_are_absent_and_downgrade_is_safe(
     import pytest
 
     migration = _load()
-    conn = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
+    conn = SimpleNamespace(
+        dialect=SimpleNamespace(name="mysql"),
+        execute=lambda *_args, **_kwargs: SimpleNamespace(scalar=lambda: None),
+    )
     altered = []
     inspector = SimpleNamespace(has_table=lambda _table: False)
     monkeypatch.setattr(migration.sa, "inspect", lambda _conn: inspector)
