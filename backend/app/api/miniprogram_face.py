@@ -16,6 +16,7 @@ from app.core.exceptions import AppException
 from app.core.response import success
 from app.models import FaceProfile
 from app.services.face_extractor import extract_face_embedding_with_quality
+from app.services.face_feature_gate import FACE_RECOGNITION_TEMPORARILY_DISABLED
 from app.services.face_service import FaceService
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
@@ -45,6 +46,8 @@ class FaceConsentBase64Request(BaseModel):
 
 async def _require_face_welcome_enabled(db: AsyncSession) -> None:
     """功能总开关关闭时拒绝注册/挑战/撤销以外的开启路径。"""
+    if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+        raise AppException(40344, "人脸识别功能临时关闭，待完成模型商业授权核验后再恢复")
     from app.services.system_settings_service import SystemSettingsService
 
     settings = get_settings()
