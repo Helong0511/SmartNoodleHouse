@@ -41,7 +41,7 @@ sudo rm -f /etc/nginx/sites-enabled/default
 # ── 5. 首次申请 SSL 证书（域名须已解析到本机）──
 # 若 HTTP 跳转导致 certbot 失败，可临时注释 smart-noodle.conf 中
 # server { listen 80; return 301 ... } 整段，申请完再恢复。
-# 首次签发证书前先创建可解析的 CA 引导文件；签发后 deploy hook 会替换为 fullchain + 系统根 CA。
+# 首次签发证书前先创建可解析的 CA 引导文件；签发后 deploy hook 会替换为 chain.pem + 系统根 CA。
 sudo install -m 0644 /etc/ssl/certs/ca-certificates.crt /etc/nginx/ssl-trusted-chain.pem
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d 你的域名.com
