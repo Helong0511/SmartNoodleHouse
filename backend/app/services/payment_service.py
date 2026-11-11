@@ -3264,7 +3264,10 @@ class PaymentService:
                     raise AppException(40302, "微信退款查询本次退款金额与本地申请不匹配")
                 if query_total_amount != money(payment.amount):
                     raise AppException(40302, "微信退款查询原订单总金额与本地支付金额不匹配")
-                if str(amount_info.get("currency") or "CNY").upper() != "CNY":
+                currency_raw = amount_info.get("currency")
+                if not currency_raw:
+                    raise AppException(50302, "微信退款查询缺少币种，拒绝确认退款成功")
+                if str(currency_raw).strip().upper() != "CNY":
                     raise AppException(40302, "微信退款查询币种必须为 CNY")
         return query_status
 
