@@ -63,10 +63,13 @@ def _index_state(conn) -> tuple[bool, bool]:
 
 def upgrade() -> None:
     conn = op.get_bind()
-    # The canonical baseline owns delivery_refunds; tolerate a partially
-    # applied legacy baseline without issuing ALTER against a missing table.
+    # delivery_refunds is required for idempotent refund callback processing.
+    # Never record this revision as applied while the canonical table is absent.
     if not inspect(conn).has_table("delivery_refunds"):
-        return
+        raise RuntimeError(
+            "Cannot apply 0043_delivery_refund_fingerprint: required table "
+            "'delivery_refunds' is missing. Restore the canonical baseline before retrying."
+        )
     if not _column_exists(conn):
         if conn.dialect.name == "sqlite":
             conn.execute(text(
