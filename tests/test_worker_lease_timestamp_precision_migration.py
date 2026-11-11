@@ -96,3 +96,30 @@ def test_downgrade_converts_both_tables_when_no_microseconds_exist(monkeypatch):
         "outbox_events",
         "webhook_inbox",
     ]
+
+
+def test_upgrade_fails_when_a_required_worker_table_is_missing(monkeypatch):
+    migration = _load_migration()
+    conn = _Connection()
+    alterations = []
+
+    class _PartialInspector:
+        def has_table(self, table):
+            return table == "webhook_inbox"
+
+        def get_columns(self, table):
+            return [{"name": "id"}, {"name": "locked_at"}]
+
+    monkeypatch.setattr(migration.sa, "inspect", lambda _conn: _PartialInspector())
+    monkeypatch.setattr(
+        migration,
+        "op",
+        SimpleNamespace(
+            get_bind=lambda: conn,
+            alter_column=lambda *args, **kwargs: alterations.append((args, kwargs)),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="required table 'outbox_events'"):
+        migration.upgrade()
+    assert alterations == []
