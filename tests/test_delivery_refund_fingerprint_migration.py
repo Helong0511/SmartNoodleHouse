@@ -109,12 +109,15 @@ def test_upgrade_keeps_exact_unique_index_unchanged():
         engine.dispose()
 
 
-def test_upgrade_is_safe_when_delivery_refunds_table_is_absent():
+def test_upgrade_fails_clearly_when_required_delivery_refunds_table_is_absent():
+    import pytest
+
     engine = sa.create_engine("sqlite:///:memory:")
     try:
         with engine.begin() as conn:
             module = _load_migration()
-            _run_upgrade(conn, module)
+            with pytest.raises(RuntimeError, match="required table.*delivery_refunds"):
+                _run_upgrade(conn, module)
             assert not sa.inspect(conn).has_table("delivery_refunds")
     finally:
         engine.dispose()
