@@ -18,7 +18,7 @@
 
 # ── 1. 安装 Nginx 与 certbot ──
 sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx
+sudo apt install -y nginx certbot python3-certbot-nginx ca-certificates
 sudo systemctl enable nginx
 
 # ── 2. 修改配置中的占位符 ──
