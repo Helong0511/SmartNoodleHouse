@@ -346,7 +346,63 @@ jobs:
         run: |
           python -m pytest -q --tb=short -m mysql \
             tests/测试_审计遗留加固.py tests/测试_数据库LeaderEpoch.py
-
+      - name: Verify MySQL recovery after partially applied 0035 and 0036
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+          APP_ENV: development
+          APP_DEBUG: "true"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+          MYSQL_PWD: root
+        run: |
+          set -euo pipefail
+          # Reproduce a completed 0035 first-table DDL followed by process interruption.
+          alembic downgrade 0034_points_exchange_expire
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
+          CREATE TABLE table_parties (
+            id bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+            store_id bigint UNSIGNED NOT NULL,
+            table_id bigint UNSIGNED NOT NULL,
+            host_customer_id bigint UNSIGNED NOT NULL,
+            status varchar(20) NOT NULL DEFAULT 'OPEN',
+            revision int NOT NULL DEFAULT 1,
+            expires_at datetime(3) NOT NULL,
+            closed_at datetime(3) NULL DEFAULT NULL,
+            created_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+            updated_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+            PRIMARY KEY (id),
+            INDEX idx_tp_store_table_status (store_id, table_id, status),
+            CONSTRAINT fk_tp_store FOREIGN KEY (store_id) REFERENCES stores (id),
+            CONSTRAINT fk_tp_table FOREIGN KEY (table_id) REFERENCES tables (id),
+            CONSTRAINT fk_tp_host FOREIGN KEY (host_customer_id) REFERENCES customers (id)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+          SQL
+          alembic upgrade head
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('table_parties','table_party_members','shared_cart_items')")" = "3"
+          # Reproduce 0036 interruption after payment_reconcile_batches committed.
+          alembic downgrade 0035_table_party_shared_cart
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
+          CREATE TABLE payment_reconcile_batches (
+            id bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+            channel varchar(20) NOT NULL,
+            bill_date date NOT NULL,
+            status varchar(20) NOT NULL DEFAULT 'PENDING',
+            local_count int NOT NULL DEFAULT 0,
+            channel_count int NOT NULL DEFAULT 0,
+            mismatch_count int NOT NULL DEFAULT 0,
+            source_filename varchar(255) NULL,
+            error_message varchar(500) NULL,
+            created_by bigint UNSIGNED NULL,
+            created_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+            updated_at datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+            PRIMARY KEY (id),
+            UNIQUE KEY uk_prb_channel_bill (channel, bill_date)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+          SQL
+          alembic upgrade head
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_diffs'")" = "1"
+          # Leave the disposable CI schema at the latest migration head.
+          
   frontend-build:
     runs-on: ubuntu-latest
     strategy:
