@@ -121,7 +121,7 @@
 
 ## 5. Nginx（[nginx/smart-noodle.conf](file:///e:/SmartNoodleHouse/nginx/smart-noodle.conf)）
 
-- HTTPS：TLS 参数抽离到 snippets/ssl-common.conf（TLS 1.2/1.3、强加密套件）。
+- HTTPS：TLS 参数抽离到 nginx/snippets/ssl-params.conf（TLS 1.2/1.3、强加密套件）。
 - 代理通用参数：snippets/proxy-common.conf（X-Forwarded-*、超时）。
 - 上传大小限制（与 Webhook 512KB / 图片上传独立配置区分）。
 - WebSocket：`/api/ws` 路径升级头 + 更长 read timeout 支撑长连接。
@@ -271,11 +271,13 @@
 
 ---
 
-## 12. 容器化说明
+## 12. 部署方式边界
 
-- 仓库存在部署模板与 Dockerfile 引用（BASELINE §1），生产密钥通过环境变量注入，镜像不含 `.env`。
-- 多副本部署时全部副本 `PROCESS_ROLE=auto`，由 Redis 锁选出单 Leader。
-- 摄像头硬件相关能力仅适合在带摄像头的门店主机以 Leader 运行；纯云端副本应 `PROCESS_ROLE=worker` 且不配置摄像头。
+- 当前生产部署目标为原生 Ubuntu + Nginx + systemd + MySQL + Redis，不使用 Docker；`deploy/nginx.conf` 仅为迁移提示，不是容器编排或可直接部署的 Docker 配置。
+- 生产密钥通过受控环境文件注入，`.env` 不得进入版本库、构建产物或公开镜像。
+- 多 worker 由 systemd 启动 Uvicorn 原生多进程管理器，所有进程使用 `PROCESS_ROLE=auto`，通过 Redis Leader 锁选出单一调度 Leader；这不是 Docker 多副本部署说明。
+- 摄像头硬件能力仅应在实际连接摄像头的门店主机按 Leader 角色验收；纯云端部署应关闭相关硬件功能并按 `PROCESS_ROLE=worker` 运行。
+- 如未来引入 Docker/容器编排，必须单独完成镜像供应链、非 root 用户、密钥注入、持久化存储、健康探针、Leader 锁和摄像头设备映射审查，不得将其视为当前已支持的生产部署方式。
 
 ---
 
