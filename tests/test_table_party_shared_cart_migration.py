@@ -70,3 +70,31 @@ def test_upgrade_recovers_when_only_table_parties_exists(monkeypatch):
             assert {"party_id", "product_id", "quantity"}.issubset(cart_columns)
     finally:
         engine.dispose()
+
+
+def test_upgrade_preflights_all_required_parent_tables_before_creating_any_table(monkeypatch):
+    import pytest
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            for ddl in (
+                "CREATE TABLE stores (id INTEGER PRIMARY KEY)",
+                "CREATE TABLE tables (id INTEGER PRIMARY KEY)",
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY)",
+                # products is deliberately absent.
+            ):
+                conn.exec_driver_sql(ddl)
+
+            module = _load_migration()
+            monkeypatch.setattr(
+                module, "op", Operations(MigrationContext.configure(conn))
+            )
+            with pytest.raises(RuntimeError, match="required canonical.*products"):
+                module.upgrade()
+            tables = set(sa.inspect(conn).get_table_names())
+            assert "table_parties" not in tables
+            assert "table_party_members" not in tables
+            assert "shared_cart_items" not in tables
+    finally:
+        engine.dispose()
