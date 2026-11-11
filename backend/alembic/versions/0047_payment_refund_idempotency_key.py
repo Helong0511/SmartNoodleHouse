@@ -91,6 +91,10 @@ def _assert_no_duplicate_keys(conn) -> None:
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # payment_refunds belongs to the canonical baseline. During recovery from
+    # an incomplete legacy baseline, avoid opaque PRAGMA/ALTER failures.
+    if not sa.inspect(conn).has_table("payment_refunds"):
+        return
     if not _column_exists(conn):
         op.add_column(
             "payment_refunds",
