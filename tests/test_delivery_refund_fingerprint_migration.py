@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 
 import sqlalchemy as sa
+import pytest
 
 
 MIGRATION_PATH = (
@@ -121,3 +122,69 @@ def test_upgrade_fails_clearly_when_required_delivery_refunds_table_is_absent():
             assert not sa.inspect(conn).has_table("delivery_refunds")
     finally:
         engine.dispose()
+
+
+@pytest.mark.mysql
+def test_mysql_upgrade_repairs_wrong_and_prefix_indexes_in_isolated_schema():
+    """Exercise MySQL information_schema inspection against a real server."""
+    import os
+    import uuid
+
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("TEST_DATABASE_URL is required for the MySQL migration test")
+
+    url = sa.engine.make_url(database_url).set(drivername="mysql+pymysql")
+    schema_name = "refund_fp_migration_" + uuid.uuid4().hex
+    admin_engine = sa.create_engine(url.set(database=None))
+    schema_engine = None
+    try:
+        with admin_engine.begin() as conn:
+            conn.exec_driver_sql(
+                "CREATE DATABASE `" + schema_name + "` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+        schema_engine = sa.create_engine(url.set(database=schema_name))
+        with schema_engine.begin() as conn:
+            conn.exec_driver_sql(
+                "CREATE TABLE delivery_refunds ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+                "platform VARCHAR(32) NOT NULL, "
+                "event_fingerprint VARCHAR(64) NULL) ENGINE=InnoDB"
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX uq_delivery_refund_event_fingerprint "
+                "ON delivery_refunds (platform)"
+            )
+            module = _load_migration()
+            _run_upgrade(conn, module)
+            assert module._index_state(conn) == (True, True)
+
+            conn.exec_driver_sql(
+                "DROP INDEX uq_delivery_refund_event_fingerprint ON delivery_refunds"
+            )
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX uq_delivery_refund_event_fingerprint "
+                "ON delivery_refunds (event_fingerprint)"
+            )
+            _run_upgrade(conn, module)
+            assert module._index_state(conn) == (True, True)
+
+            conn.exec_driver_sql(
+                "DROP INDEX uq_delivery_refund_event_fingerprint ON delivery_refunds"
+            )
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX uq_delivery_refund_event_fingerprint "
+                "ON delivery_refunds (platform(8), event_fingerprint(8))"
+            )
+            _run_upgrade(conn, module)
+            assert module._index_state(conn) == (True, True)
+            _run_upgrade(conn, module)
+            assert module._index_state(conn) == (True, True)
+    finally:
+        if schema_engine is not None:
+            schema_engine.dispose()
+        with admin_engine.begin() as conn:
+            conn.exec_driver_sql("DROP DATABASE IF EXISTS `" + schema_name + "`")
+        admin_engine.dispose()
+
