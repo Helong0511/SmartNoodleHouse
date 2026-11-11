@@ -44,7 +44,12 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d 你的域名.com
 
-# certbot 会自动写入 ssl_certificate 路径；也可手动取消 smart-noodle.conf 内注释
+# certbot 会自动写入 ssl_certificate 路径；也可手动取消 smart-noodle.conf 内注释。
+# OCSP 验证信任文件须同时包含证书链（中间 CA）和系统根 CA；证书续期后自动刷新。
+sudo install -m 0755 nginx/refresh-ocsp-trust.sh /usr/local/sbin/smart-noodle-refresh-ocsp-trust
+sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+sudo ln -sf /usr/local/sbin/smart-noodle-refresh-ocsp-trust /etc/letsencrypt/renewal-hooks/deploy/smart-noodle-refresh-ocsp-trust
+sudo RENEWED_LINEAGE="/etc/letsencrypt/live/你的域名.com" /usr/local/sbin/smart-noodle-refresh-ocsp-trust
 
 # ── 6. 验证 ──
 sudo nginx -t
