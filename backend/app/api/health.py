@@ -1,4 +1,4 @@
-"""轻量就绪探测：DB + Redis（供 LB/探针，无鉴权）。"""
+"""Separate process liveness from dependency readiness probes."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Response
@@ -8,12 +8,17 @@ from app.api.deps import DbSession
 from app.core.redis_client import get_redis
 
 router = APIRouter(tags=["健康检查"])
-# 供 LB/探针直连的根路径挂载（与 /api/health 同一 handler，独立 router 实例避免重复注册）
+# Root routes are used by the reverse proxy / infrastructure probes.
 root_router = APIRouter(tags=["健康检查"])
 
 
+async def liveness():
+    """Process-only liveness: do not restart a healthy process for a dependency outage."""
+    return {"status": "ok"}
+
+
 async def readiness(response: Response, db: DbSession):
-    """存活+就绪：MySQL SELECT 1、Redis PING。失败 HTTP 503。"""
+    """Readiness requires both MySQL and Redis; failures return HTTP 503."""
     checks: dict[str, bool] = {"database": False, "redis": False}
     try:
         await db.execute(text("SELECT 1"))
@@ -33,7 +38,7 @@ async def readiness(response: Response, db: DbSession):
     return {"status": "ok" if ok else "degraded", "checks": checks}
 
 
-router.add_api_route("/health", readiness, methods=["GET"])
+router.add_api_route("/health", liveness, methods=["GET"])
 router.add_api_route("/ready", readiness, methods=["GET"])
-root_router.add_api_route("/health", readiness, methods=["GET"])
+root_router.add_api_route("/health", liveness, methods=["GET"])
 root_router.add_api_route("/ready", readiness, methods=["GET"])
