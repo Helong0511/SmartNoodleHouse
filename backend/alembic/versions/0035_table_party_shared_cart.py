@@ -33,6 +33,18 @@ def _table_exists(conn, table: str) -> bool:
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # These canonical parent tables are referenced by the three new tables.
+    # Preflight all of them before MySQL's independently committed DDL starts.
+    required_parent_tables = ("stores", "tables", "customers", "products")
+    missing_parent_tables = [
+        table for table in required_parent_tables if not _table_exists(conn, table)
+    ]
+    if missing_parent_tables:
+        missing = ", ".join(missing_parent_tables)
+        raise RuntimeError(
+            "Cannot apply 0035_table_party_shared_cart: required canonical "
+            f"parent table(s) missing: {missing}. Restore the canonical baseline before retrying."
+        )
     if conn.dialect.name == "sqlite":
         conn.execute(
             text(
