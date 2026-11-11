@@ -18,7 +18,7 @@
 
 # ── 1. 安装 Nginx 与 certbot ──
 sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx
+sudo apt install -y nginx certbot python3-certbot-nginx ca-certificates
 sudo systemctl enable nginx
 
 # ── 2. 修改配置中的占位符 ──
@@ -33,18 +33,26 @@ sudo systemctl enable nginx
 sudo cp nginx/snippets/ssl-params.conf   /etc/nginx/snippets/ssl-params.conf
 sudo cp nginx/snippets/proxy-common.conf /etc/nginx/snippets/proxy-common.conf
 
-# ── 4. 安装站点配置 ──
-sudo cp nginx/smart-noodle.conf /etc/nginx/sites-available/smart-noodle.conf
+# ── 4. 先部署仅 HTTP 的 ACME 引导站点 ──
+sudo mkdir -p /var/www/letsencrypt/.well-known/acme-challenge
+sudo sed 's/REPLACE_DOMAIN/你的域名.com/g' nginx/acme-bootstrap.conf | sudo tee /etc/nginx/sites-available/smart-noodle.conf >/dev/null
 sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl enable --now nginx
 
-# ── 5. 首次申请 SSL 证书（域名须已解析到本机）──
-# 若 HTTP 跳转导致 certbot 失败，可临时注释 smart-noodle.conf 中
-# server { listen 80; return 301 ... } 整段，申请完再恢复。
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d 你的域名.com
+# ── 5. 使用 webroot 首次签发证书（域名须已解析到本机，80 端口可访问）──
+sudo certbot certonly --webroot -w /var/www/letsencrypt -d 你的域名.com
 
-# certbot 会自动写入 ssl_certificate 路径；也可手动取消 smart-noodle.conf 内注释
+# 将 nginx/smart-noodle.conf 中 REPLACE_ 占位符替换为真实路径/域名，
+# 并取消注释 ssl_certificate 与 ssl_certificate_key 两行。
+sudo cp nginx/smart-noodle.conf /etc/nginx/sites-available/smart-noodle.conf
+
+# OCSP trust 文件先用系统根 CA 引导；下面的 deploy hook 随后补齐证书中间链。
+sudo install -m 0644 /etc/ssl/certs/ca-certificates.crt /etc/nginx/ssl-trusted-chain.pem
+sudo install -m 0755 nginx/refresh-ocsp-trust.sh /usr/local/sbin/smart-noodle-refresh-ocsp-trust
+sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+sudo ln -sf /usr/local/sbin/smart-noodle-refresh-ocsp-trust /etc/letsencrypt/renewal-hooks/deploy/smart-noodle-refresh-ocsp-trust
+sudo RENEWED_LINEAGE="/etc/letsencrypt/live/你的域名.com" /usr/local/sbin/smart-noodle-refresh-ocsp-trust
 
 # ── 6. 验证 ──
 sudo nginx -t
@@ -55,6 +63,7 @@ curl -sI https://你的域名.com/health    # 公网探针：须 nginx 已配置
 # 或：curl -sI https://你的域名.com/api/ready
 
 # ── 7. 证书自动续期 ──
+# Certbot renewal uses the saved webroot authenticator; deploy hook refreshes OCSP trust and reloads Nginx.
 sudo certbot renew --dry-run
 # Ubuntu 22.04 certbot 默认带 systemd timer，无需额外 cron
 

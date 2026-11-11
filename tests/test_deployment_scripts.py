@@ -211,3 +211,72 @@ def test_private_avatar_signed_queries_are_not_written_to_access_logs():
     assert "--no-access-log" in service
     assert 'request.url.path.startswith("/api/media/private/avatars/")' in main
 
+
+
+def test_nginx_http_acme_challenge_is_exempt_from_https_redirect():
+    config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "nginx" / "acme-bootstrap.conf").read_text(encoding="utf-8")
+    install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
+
+    assert "location ^~ /.well-known/acme-challenge/ {" in config
+    assert "try_files $uri =404;" in config
+    assert "location / {" in config
+    assert "return 301 https://$host$request_uri;" in config
+    assert "location ^~ /.well-known/acme-challenge/ {" in bootstrap
+    assert "certbot certonly --webroot" in install
+    assert "REPLACE_DOMAIN/你的域名.com/g" in install
+    assert "renewal-hooks/deploy" in install
+    assert "\\nsudo certbot renew" not in install
+    assert "sudo certbot renew --dry-run" in install
+
+
+def test_nginx_static_locations_keep_server_security_headers():
+    config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
+    required_headers = (
+        "Strict-Transport-Security",
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+        "Content-Security-Policy",
+    )
+
+    def location_block(marker: str) -> str:
+        start = config.index(marker)
+        opening = config.index("{", start)
+        depth = 0
+        for index in range(opening, len(config)):
+            if config[index] == "{":
+                depth += 1
+            elif config[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    return config[opening + 1:index]
+        raise AssertionError(f"Unclosed Nginx location: {marker}")
+
+    for marker in ("location /assets/ {", "location /uploads/ {"):
+        block = location_block(marker)
+        for header in required_headers:
+            assert f"add_header {header} " in block, f"{marker} missing {header}"
+
+
+def test_nginx_ocsp_trust_bundle_refresh_includes_chain_and_system_roots():
+    ssl = (ROOT / "nginx" / "snippets" / "ssl-params.conf").read_text(encoding="utf-8")
+    script = (ROOT / "nginx" / "refresh-ocsp-trust.sh").read_text(encoding="utf-8")
+    install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
+
+    assert "ssl_trusted_certificate /etc/nginx/ssl-trusted-chain.pem;" in ssl
+    assert 'RENEWED_LINEAGE' in script
+    assert 'chain="${lineage}/chain.pem"' in script
+    assert "/etc/ssl/certs/ca-certificates.crt" in script
+    assert "nginx -t" in script
+    assert "systemctl reload nginx" in script
+    assert "renewal-hooks/deploy" in install
+
+
+def test_nginx_ocsp_stapling_verification_has_trusted_ca_bundle():
+    config = (ROOT / "nginx" / "snippets" / "ssl-params.conf").read_text(encoding="utf-8")
+    assert "ssl_stapling_verify on;" in config
+    assert "ssl_trusted_certificate /etc/nginx/ssl-trusted-chain.pem;" in config
+    install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
+    assert "ca-certificates" in install
