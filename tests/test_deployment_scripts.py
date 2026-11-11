@@ -178,6 +178,8 @@ def test_nginx_http_acme_challenge_is_exempt_from_https_redirect():
     assert "certbot certonly --webroot" in install
     assert "REPLACE_DOMAIN/你的域名.com/g" in install
     assert "renewal-hooks/deploy" in install
+    assert "\\nsudo certbot renew" not in install
+    assert "sudo certbot renew --dry-run" in install
 
 
 def test_nginx_static_locations_keep_server_security_headers():
