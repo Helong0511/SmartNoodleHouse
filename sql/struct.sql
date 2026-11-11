@@ -818,7 +818,6 @@ CREATE TABLE IF NOT EXISTS `order_items` (
 -- ----------------------------
 -- Table structure for order_status_history
 -- ----------------------------
-DROP TABLE IF EXISTS `order_status_history`;
 CREATE TABLE IF NOT EXISTS `order_status_history` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `order_id` bigint UNSIGNED NOT NULL COMMENT '订单 → orders.id',

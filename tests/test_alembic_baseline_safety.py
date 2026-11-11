@@ -41,10 +41,11 @@ def test_baseline_allows_canonical_create_table_statements():
     )
 
 
-def test_current_canonical_schema_order_reset_is_never_executed():
+def test_current_canonical_schema_has_no_reset_statement():
     raw = (ROOT / "sql" / "struct.sql").read_text(encoding="utf-8")
     sql = _migration()._extract_schema_section(raw)
     statements = _migration()._split_sql_statements(sql)
-    reset = next(stmt for stmt in statements if stmt.upper().startswith("DROP TABLE"))
-    assert "order_status_history" in reset
-    assert _migration()._should_skip_statement(reset)
+
+    assert not any(stmt.upper().startswith(("DROP ", "TRUNCATE ", "DELETE ")) for stmt in statements)
+    assert statements
+    assert all(stmt.upper().startswith("CREATE TABLE IF NOT EXISTS ") for stmt in statements)

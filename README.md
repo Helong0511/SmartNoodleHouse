@@ -68,15 +68,20 @@
 
 ## 数据库初始化与升级
 
-**重要：初始化 SQL 不是升级脚本。** `sql/struct.sql` 仅用于全新空库结构初始化；`sql/data_sys.sql` 含多张业务表的 `TRUNCATE`，只能在全新、隔离、确认无任何业务数据的数据库中执行。禁止将初始化 SQL 用于已有营业库或生产库升级。
+**重要：数据库结构统一由 Alembic 管理。** `sql/struct.sql` 是 `0001_baseline` 使用的 canonical schema 来源，不是升级命令；不要把它直接导入已有数据库。`sql/data_sys.sql` 含多张业务表的 `TRUNCATE`，只能在全新、隔离、确认无任何业务数据的数据库中执行一次。
 
-全新空库初始化（先确认目标库名、数据库主机与备份策略；不要在已有业务数据的库上执行）：
+全新空库初始化（必须确认数据库名称、主机和实例；若数据库已存在，请停止并先确认其中没有业务数据）：
 
 ```bash
-# 创建全新数据库结构；该脚本不会替代已有库的 Alembic 迁移
-mysql -u root -p < sql/struct.sql
+# 只创建一个全新的空数据库；若数据库已存在，此命令会失败并要求先人工核实
+mysql -u root -p -e "CREATE DATABASE smart_noodle_house CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# data_sys.sql 有显式保护；必须在本次连接中明确确认“全新空库”
+# 确保 DATABASE_URL 指向刚创建的空库；Alembic 从 canonical schema 建立结构并记录迁移版本
+cd backend
+alembic upgrade head
+cd ..
+
+# data_sys.sql 有显式保护；仅全新空库允许在本次连接中明确确认一次
 mysql --database=smart_noodle_house --init-command="SET @SMART_NOODLE_FRESH_INSTALL_CONFIRM='YES'" -u root -p < sql/data_sys.sql
 
 # 仅新库初始化门店种子；禁止对已有库重复灌入
@@ -100,12 +105,12 @@ alembic upgrade head
 
 | 脚本 | 说明 |
 |---|---|
-| `sql/struct.sql` | 全新空库结构初始化；不会删除数据库，不是已有库升级脚本 |
-| `sql/data_sys.sql` | **破坏性初始化种子**：含全表 TRUNCATE，必须显式确认，仅限全新空库 |
-| `sql/data_custom.sql` | 门店经营初始化种子，仅按新库初始化流程执行 |
+| `sql/struct.sql` | Alembic `0001_baseline` 的结构基线来源，不是已有库升级命令 |
+| `sql/data_sys.sql` | **破坏性初始化种子**：含多表 TRUNCATE，必须显式确认，仅限全新空库执行一次 |
+| `sql/data_custom.sql` | 门店经营初始化种子，仅按新库初始化流程执行一次 |
 | `sql/data_test.sql` | 仅本地测试数据，禁止写入生产 |
 
-不得对已有数据库执行上述初始化 SQL 或重新灌入种子。生产升级必须先备份、验证可恢复，再执行 Alembic。
+不得对已有数据库执行初始化种子或重复灌入门店种子。生产升级必须先备份、验证可恢复，再执行 Alembic。
 
 ## 生产环境 MySQL / Redis 连接示例
 
