@@ -193,3 +193,9 @@ def test_nginx_static_locations_keep_server_security_headers():
         block = location_block(marker)
         for header in required_headers:
             assert f"add_header {header} " in block, f"{marker} missing {header}"
+
+
+def test_nginx_ocsp_stapling_verification_has_trusted_ca_bundle():
+    config = (ROOT / "nginx" / "snippets" / "ssl-params.conf").read_text(encoding="utf-8")
+    assert "ssl_stapling_verify on;" in config
+    assert "ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;" in config
