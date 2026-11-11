@@ -68,7 +68,8 @@ def test_match_hot_matrix_faster_than_python_renorm_loop_at_scale():
 
 
 @pytest.mark.asyncio
-async def test_best_match_releases_lock_during_cold_match():
+async def test_best_match_releases_lock_during_cold_match(monkeypatch):
+    monkeypatch.setattr("app.services.face_service.FACE_RECOGNITION_TEMPORARILY_DISABLED", False)
     cache = FaceEmbeddingCache()
     cache._by_customer = {1: (1, _unit(1))}
     cache._matrix_dirty = True
