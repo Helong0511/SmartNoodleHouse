@@ -28,13 +28,17 @@ def _run(conn, direction):
     getattr(module, direction)()
 
 
-def test_upgrade_and_downgrade_are_safe_when_outbox_table_is_absent():
+def test_upgrade_fails_clearly_when_required_outbox_table_is_absent():
+    import pytest
+
     engine = sa.create_engine("sqlite:///:memory:")
     try:
         with engine.begin() as conn:
-            _run(conn, "upgrade")
-            _run(conn, "downgrade")
+            with pytest.raises(RuntimeError, match="required table.*outbox_events"):
+                _run(conn, "upgrade")
             assert not sa.inspect(conn).has_table("outbox_events")
+            # Downgrade remains safe after an interrupted/absent-table upgrade.
+            _run(conn, "downgrade")
     finally:
         engine.dispose()
 
