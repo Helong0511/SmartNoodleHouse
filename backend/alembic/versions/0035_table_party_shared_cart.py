@@ -33,13 +33,11 @@ def _table_exists(conn, table: str) -> bool:
 
 def upgrade() -> None:
     conn = op.get_bind()
-    if _table_exists(conn, "table_parties"):
-        return
     if conn.dialect.name == "sqlite":
         conn.execute(
             text(
                 """
-                CREATE TABLE table_parties (
+                CREATE TABLE IF NOT EXISTS table_parties (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     store_id INTEGER NOT NULL,
                     table_id INTEGER NOT NULL,
@@ -60,7 +58,7 @@ def upgrade() -> None:
         conn.execute(
             text(
                 """
-                CREATE TABLE table_party_members (
+                CREATE TABLE IF NOT EXISTS table_party_members (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     party_id INTEGER NOT NULL,
                     customer_id INTEGER NOT NULL,
@@ -80,7 +78,7 @@ def upgrade() -> None:
         conn.execute(
             text(
                 """
-                CREATE TABLE shared_cart_items (
+                CREATE TABLE IF NOT EXISTS shared_cart_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     party_id INTEGER NOT NULL,
                     added_by_customer_id INTEGER NOT NULL,
