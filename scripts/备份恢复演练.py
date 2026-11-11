@@ -2,7 +2,8 @@
 
 用法：
   python scripts/备份恢复演练.py
-  python scripts/备份恢复演练.py --restore-drill   # 需要单独配置 DRILL_DATABASE_URL
+  DRILL_DATABASE_ISOLATION_CONFIRMED=YES python scripts/备份恢复演练.py --restore-drill
+  # 需要单独配置 DRILL_DATABASE_URL，并由操作员确认目标库与生产物理隔离
 """
 from __future__ import annotations
 
@@ -18,15 +19,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _database_identity(url: str) -> tuple[str, int, str]:
-    cleaned = re.sub(r"^mysql\+[^:]+://", "mysql://", url.strip())
+    cleaned = re.sub(r"^mysql\\+[^:]+://", "mysql://", url.strip())
     parsed = urlparse(cleaned)
     if parsed.scheme != "mysql" or not parsed.hostname or not parsed.path.strip("/"):
         raise ValueError("DRILL_DATABASE_URL 必须是有效的 MySQL URL")
     return (
-        (parsed.hostname or "").lower(),
+        (parsed.hostname or "").lower().rstrip("."),
         int(parsed.port or 3306),
         unquote(parsed.path.strip("/").split("?", 1)[0]),
     )
+
+
+def _isolation_confirmation_error(value: str | None) -> str | None:
+    """Require an explicit operator attestation; URL comparison cannot detect DNS/proxy aliases."""
+    if (value or "").strip() != "YES":
+        return (
+            "恢复演练前必须人工确认 DRILL_DATABASE_URL 指向与生产物理隔离的数据库；"
+            "确认后设置 DRILL_DATABASE_ISOLATION_CONFIRMED=YES"
+        )
+    return None
 
 
 def main() -> int:
@@ -34,6 +45,9 @@ def main() -> int:
     parser.add_argument("--restore-drill", action="store_true")
     parser.add_argument("--keep-days", type=int, default=14)
     args = parser.parse_args()
+
+    if args.keep_days < 1:
+        parser.error("--keep-days 必须大于 0")
 
     backup = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "备份数据库.py"), "--keep-days", str(args.keep_days)],
@@ -78,6 +92,13 @@ def main() -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 3
+
+    confirmation_error = _isolation_confirmation_error(
+        os.environ.get("DRILL_DATABASE_ISOLATION_CONFIRMED")
+    )
+    if confirmation_error:
+        print(confirmation_error, file=sys.stderr)
+        return 4
 
     child_env = os.environ.copy()
     child_env["DATABASE_URL"] = drill
