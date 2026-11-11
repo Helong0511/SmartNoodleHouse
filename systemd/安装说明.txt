@@ -49,7 +49,7 @@ sudo systemctl reload nginx
 
 # ── 6. 多实例 / 多 Worker ──
 # PROCESS_ROLE 推荐 auto：Uvicorn --workers N 时各 worker 争抢 Redis Leader 锁，
-# 仅持锁进程跑 scheduler / TTS / 人脸识别，避免重复调度。
+# 仅持锁进程跑 scheduler / TTS，避免重复调度；人脸识别当前由后端全局 hard-stop 暂停，不会因抢到 Leader 锁而启动。
 # 水平扩展多机时：仅一台可设 PROCESS_ROLE=leader（仍受 Redis 锁保护），其余 PROCESS_ROLE=worker。
 # systemd 单元已强制 Environment=PROCESS_ROLE=auto，覆盖 .env 中误写的 leader。
 
