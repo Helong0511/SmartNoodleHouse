@@ -227,6 +227,6 @@ def test_nginx_ocsp_trust_bundle_refresh_includes_chain_and_system_roots():
 def test_nginx_ocsp_stapling_verification_has_trusted_ca_bundle():
     config = (ROOT / "nginx" / "snippets" / "ssl-params.conf").read_text(encoding="utf-8")
     assert "ssl_stapling_verify on;" in config
-    assert "ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;" in config
+    assert "ssl_trusted_certificate /etc/nginx/ssl-trusted-chain.pem;" in config
     install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
     assert "ca-certificates" in install
