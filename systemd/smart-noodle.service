@@ -9,7 +9,7 @@
 #
 # 多进程说明：
 #   - 本单元 PROCESS_ROLE=auto（或 worker）：Uvicorn 多 worker 争抢 Redis Leader 锁
-#   - 仅抢到锁的进程启动 scheduler / TTS / 人脸识别，避免重复 Worker
+#   - 仅抢到锁的进程启动 scheduler / TTS；人脸识别另受后端全局 hard-stop 禁止启动，避免重复 Worker
 # =============================================================================
 
 [Unit]
