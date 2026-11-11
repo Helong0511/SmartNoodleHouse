@@ -76,7 +76,7 @@ def test_upgrade_fails_clearly_when_required_products_table_is_missing(monkeypat
             monkeypatch.setattr(
                 module, "op", Operations(MigrationContext.configure(conn))
             )
-            with pytest.raises(RuntimeError, match="required table.*products"):
+            with pytest.raises(RuntimeError, match=r"required canonical parent table\(s\) missing: products"):
                 module.upgrade()
             assert not sa.inspect(conn).has_table("products")
     finally:
