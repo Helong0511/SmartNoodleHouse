@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _database_identity(url: str) -> tuple[str, int, str]:
-    cleaned = re.sub(r"^mysql\\+[^:]+://", "mysql://", url.strip())
+    cleaned = re.sub(r"^mysql\+[^:]+://", "mysql://", url.strip())
     parsed = urlparse(cleaned)
     if parsed.scheme != "mysql" or not parsed.hostname or not parsed.path.strip("/"):
         raise ValueError("DRILL_DATABASE_URL 必须是有效的 MySQL URL")
