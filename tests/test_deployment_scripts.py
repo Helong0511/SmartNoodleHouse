@@ -165,6 +165,31 @@ def test_sensitive_log_scan_reports_missing_local_log_directory_as_skipped(
     assert "不代表生产主机" in output
 
 
+def test_sensitive_log_scan_reports_empty_local_log_directory_as_skipped(
+    tmp_path, monkeypatch, capsys
+):
+    module_path = ROOT / "scripts" / "上线前运维检查清单.py"
+    spec = importlib.util.spec_from_file_location("predeploy_checklist_empty", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    (tmp_path / "logs" / "backend").mkdir(parents=True)
+    monkeypatch.setattr(
+        module.Path,
+        "resolve",
+        lambda self: tmp_path / "scripts" / "上线前运维检查清单.py",
+    )
+    result = module.scan_sensitive_logs()
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "[SKIP]" in output
+    assert "[PASS]" not in output
+    assert "没有可扫描的 .log 文件" in output
+    assert "不代表生产主机" in output
+
+
 def test_nginx_denies_direct_customer_avatar_static_access():
     config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
     assert "location ^~ /uploads/avatars/ {" in config
