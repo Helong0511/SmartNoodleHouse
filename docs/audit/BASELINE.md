@@ -18,7 +18,7 @@
 | `miniprogram-wechat/` | 微信小程序 | 点餐、支付、会员、桌台码 |
 | `miniprogram-alipay/` | 支付宝小程序 | 同上，平台差异独立实现 |
 | `camera/` | 人脸识别摄像头模块 | 独立 Python 包，被后端 import |
-| `deploy/` | 部署脚本 | Docker / systemd / nginx 模板 |
+| `deploy/` | 迁移提示 | 仅保留指向 `nginx/` 与 `systemd/` 的迁移说明，不是 Docker 或可直接部署模板 |
 | `nginx/` | 反向代理配置 | 限流、WebSocket、上传大小 |
 | `systemd/` | 进程管理 | gunicorn/uvicorn 服务单元 |
 | `sql/` | SQL 脚本 | 初始化、索引、对账 |
@@ -290,7 +290,7 @@
 
 ## 10. 部署基线
 
-- Docker / systemd / nginx 模板：[deploy/](file:///e:/SmartNoodleHouse/deploy/)、[systemd/](file:///e:/SmartNoodleHouse/systemd/)、[nginx/](file:///e:/SmartNoodleHouse/nginx/)
+- 当前生产部署模板：[systemd/](file:///e:/SmartNoodleHouse/systemd/) 与 [nginx/](file:///e:/SmartNoodleHouse/nginx/)；`deploy/` 仅含迁移提示文件。本项目当前生产部署不使用 Docker。
 - 部署说明：[docs/部署说明.md](file:///e:/SmartNoodleHouse/docs/部署说明.md)
 - Leader 锁机制（Redis Lua 原子 compare-and-delete/expire）确保多 worker 单调度
 - TTS 队列：`asyncio.Queue(maxsize=100)` 有界
