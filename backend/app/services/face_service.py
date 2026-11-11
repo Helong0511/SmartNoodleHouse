@@ -36,6 +36,7 @@ from app.models import (
     WelcomeLog,
 )
 from app.services.face_extractor import EMBEDDING_DIM
+from app.services.face_feature_gate import FACE_RECOGNITION_TEMPORARILY_DISABLED
 from app.services.secret_encryption import _fernet_from_material
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,8 @@ class FaceEmbeddingCache:
 
     async def warmup(self, db: AsyncSession) -> int:
         """启动按定容加载 Top-N 授权人脸；返回热集人数。"""
+        if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+            raise RuntimeError("人脸识别功能临时关闭；禁止预热人脸特征缓存")
         async with self._lock:
             self._last_sync = None
             await self._refresh(db)
@@ -163,6 +166,8 @@ class FaceEmbeddingCache:
     async def get_profiles(
         self, db: AsyncSession, *, copy: bool = True
     ) -> list[tuple[int, np.ndarray]]:
+        if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+            raise RuntimeError("人脸识别功能临时关闭；禁止读取人脸特征缓存")
         async with self._lock:
             await self._refresh(db)
             if copy:
@@ -178,6 +183,8 @@ class FaceEmbeddingCache:
 
     async def promote(self, db: AsyncSession, customer_id: int) -> bool:
         """将指定顾客授权人脸拉入热集（支付成功/冷命中）；超 cap 淘汰沉默者。"""
+        if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+            raise RuntimeError("人脸识别功能临时关闭；禁止加载人脸档案")
         cid = int(customer_id)
         async with self._lock:
             if cid in self._by_customer:
@@ -213,6 +220,8 @@ class FaceEmbeddingCache:
         *,
         camera_id: int | None = None,
     ) -> tuple[int | None, float]:
+        if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+            raise RuntimeError("人脸识别功能临时关闭；禁止执行人脸匹配")
         """热集比对；未达阈值且质量路径允许时做有界冷库二次匹配。
 
         冷库 DB 扫描不持全局锁，避免多摄像头识别互相堵死。
@@ -511,6 +520,8 @@ class FaceService:
 
     @staticmethod
     async def register_face(db: AsyncSession, customer_id: int, feature_vector: list[float]) -> FaceProfile:
+        if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+            raise RuntimeError("人脸识别功能临时关闭；禁止注册人脸档案")
         FaceService._assert_embedding_dim(feature_vector)
         # P0-17: 校验顾客为活跃会员
         await FaceService._assert_customer_member(db, customer_id)
@@ -575,6 +586,8 @@ class FaceService:
 
     @staticmethod
     async def reencrypt_stale_profiles(db: AsyncSession, *, limit: int = 50) -> int:
+        if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+            raise RuntimeError("人脸识别功能临时关闭；禁止读取或重加密人脸档案")
         """将旧密钥/旧 version 的授权人脸重加密到当前密钥（密钥轮换后批量迁移）。
 
         先捞 id，再逐条短锁重加密，避免一次锁住多行。
