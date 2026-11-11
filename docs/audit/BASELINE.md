@@ -1,4 +1,4 @@
-> **当前基线校正（2026-11-08）**：本仓库生产部署目标为 Ubuntu + Nginx + systemd + MySQL 8.x + Redis 7.x，项目明确不使用 Docker。后台是 Vue 3 + TypeScript + Vite；微信/支付宝是两个独立原生小程序工程。本文历史目录表和旧路径仅作审计记录；若与当前仓库目录、CI、systemd、Nginx、Alembic 或 README 冲突，以当前 main 实际文件为准。任何目录/服务/部署方式变化都需同步更新本基线。
+> **当前基线校正（2026-11-11）**：本仓库生产部署目标为 Ubuntu + Nginx + systemd + MySQL 8.x + Redis 7.x，项目明确不使用 Docker。后台是 Vue 3 + TypeScript + Vite；微信/支付宝是两个独立原生小程序工程。本文历史目录表和旧路径仅作审计记录；若与当前仓库目录、CI、systemd、Nginx、Alembic 或 README 冲突，以当前 main 实际文件为准。任何目录/服务/部署方式变化都需同步更新本基线。
 >
 > ---
 >
@@ -43,7 +43,7 @@
 ### 2.2 技术栈（基于 [backend/requirements.txt](file:///e:/SmartNoodleHouse/backend/requirements.txt) 与代码 import）
 - Python 3.11+ / FastAPI / Starlette
 - SQLAlchemy 2.x（async）+ aiomysql
-- Alembic（迁移，25 个版本文件）
+- Alembic（迁移，51 个版本文件；以 main 当前目录清单为准）
 - pydantic v2 + pydantic-settings
 - python-jose（JWT HS256，强制 aud/iss/typ/ver）
 - passlib[bcrypt]
@@ -214,7 +214,7 @@
 ## 6. 数据库迁移
 
 - Alembic 配置：[backend/alembic.ini](file:///e:/SmartNoodleHouse/backend/alembic.ini)
-- 迁移目录：[backend/alembic/versions/](file:///e:/SmartNoodleHouse/backend/alembic/versions/)（25 个版本文件）
+- 迁移目录：[backend/alembic/versions/](file:///e:/SmartNoodleHouse/backend/alembic/versions/)（51 个版本文件；以 main 当前目录清单为准）
 - 数据库设计文档：[docs/数据库设计.md](file:///e:/SmartNoodleHouse/docs/数据库设计.md)
 
 ---
