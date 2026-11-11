@@ -18,9 +18,13 @@ GENERATION_BASELINE = 1_000_000_000
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
-    # The canonical baseline owns stores; tolerate a partial legacy baseline.
+    # Stores is a required application table. A successful Alembic revision
+    # must not conceal an incomplete canonical baseline.
     if not inspector.has_table("stores"):
-        return
+        raise RuntimeError(
+            "Cannot apply 0050_menu_db_generation: required table "
+            "'stores' is missing. Restore the canonical baseline before retrying."
+        )
     columns = {item["name"] for item in inspector.get_columns("stores")}
     if "menu_generation" not in columns:
         op.add_column("stores", sa.Column(
