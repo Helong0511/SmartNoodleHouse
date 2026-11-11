@@ -195,6 +195,20 @@ def test_nginx_static_locations_keep_server_security_headers():
             assert f"add_header {header} " in block, f"{marker} missing {header}"
 
 
+def test_nginx_ocsp_trust_bundle_refresh_includes_chain_and_system_roots():
+    ssl = (ROOT / "nginx" / "snippets" / "ssl-params.conf").read_text(encoding="utf-8")
+    script = (ROOT / "nginx" / "refresh-ocsp-trust.sh").read_text(encoding="utf-8")
+    install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
+
+    assert "ssl_trusted_certificate /etc/nginx/ssl-trusted-chain.pem;" in ssl
+    assert 'RENEWED_LINEAGE' in script
+    assert '"$lineage/fullchain.pem"' in script
+    assert "/etc/ssl/certs/ca-certificates.crt" in script
+    assert "nginx -t" in script
+    assert "systemctl reload nginx" in script
+    assert "renewal-hooks/deploy" in install
+
+
 def test_nginx_ocsp_stapling_verification_has_trusted_ca_bundle():
     config = (ROOT / "nginx" / "snippets" / "ssl-params.conf").read_text(encoding="utf-8")
     assert "ssl_stapling_verify on;" in config
