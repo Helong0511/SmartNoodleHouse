@@ -43,6 +43,14 @@ def _schema_objects(conn):
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # 0036 creates this required reconciliation table. Silently returning here
+    # would let Alembic advance while leaving a required feature schema absent.
+    if not sa.inspect(conn).has_table(TABLE):
+        raise RuntimeError(
+            "Cannot apply 0048_reconcile_store_scope: required table "
+            "'payment_reconcile_batches' is missing. Restore/repair migration "
+            "0036 before retrying Alembic upgrade."
+        )
     columns, unique_constraints, indexes, unique_names = _schema_objects(conn)
 
     has_scope_column = "scope_store_id" in columns
@@ -84,6 +92,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
+    # Earlier revisions may have been interrupted before this optional table
+    # was created. MySQL commits DDL independently, so rollback must tolerate it.
+    if not sa.inspect(conn).has_table(TABLE):
+        return
     columns, unique_constraints, indexes, _ = _schema_objects(conn)
     if "scope_store_id" not in columns:
         return

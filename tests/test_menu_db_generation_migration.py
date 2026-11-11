@@ -54,3 +54,19 @@ def test_upgrade_is_idempotent_and_backfills_generation_for_existing_stores(monk
             assert tuple(row2) == (1_000_000_000, -1)
     finally:
         engine.dispose()
+
+
+
+def test_downgrade_is_safe_when_stores_table_is_absent(monkeypatch):
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            module = _load_migration()
+            monkeypatch.setattr(module, "op", Operations(MigrationContext.configure(conn)))
+            module.downgrade()
+            assert not sa.inspect(conn).has_table("stores")
+    finally:
+        engine.dispose()

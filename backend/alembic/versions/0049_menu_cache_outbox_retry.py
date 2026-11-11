@@ -21,7 +21,15 @@ MAX_ATTEMPTS = 2_147_483_647
 
 
 def upgrade() -> None:
-    op.get_bind().execute(
+    conn = op.get_bind()
+    # Outbox is required for durable side effects and cache invalidation.
+    # Fail rather than record this revision while the table is missing.
+    if not sa.inspect(conn).has_table("outbox_events"):
+        raise RuntimeError(
+            "Cannot apply 0049_menu_cache_outbox_retry: required table "
+            "'outbox_events' is missing. Restore the canonical baseline before retrying."
+        )
+    conn.execute(
         sa.text(
             """
             UPDATE outbox_events

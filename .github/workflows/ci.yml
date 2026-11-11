@@ -332,6 +332,48 @@ jobs:
           APP_DEBUG: "true"
           DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
         run: python scripts/验证数据库.py
+      - name: Verify MySQL recovery after partially applied 0035 and 0036
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+          APP_ENV: development
+          APP_DEBUG: "true"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+          MYSQL_PWD: root
+        run: |
+          set -euo pipefail
+          set -x
+          # Preserve the real, fully-created first 0035 table while rolling back
+          # its revision marker. Drop its dependent tables first, then rename it
+          # out of the way so the downgrade cannot remove the committed DDL.
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
+          DROP TABLE IF EXISTS shared_cart_items;
+          DROP TABLE IF EXISTS table_party_members;
+          RENAME TABLE table_parties TO table_parties_partial_recovery;
+          SQL
+          alembic downgrade 0034_points_exchange_expire
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci -e "RENAME TABLE table_parties_partial_recovery TO table_parties"
+          alembic upgrade head
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('table_parties','table_party_members','shared_cart_items')")" = "3"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='table_party_members' AND CONSTRAINT_TYPE='FOREIGN KEY'")" = "2"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='shared_cart_items' AND CONSTRAINT_TYPE='FOREIGN KEY'")" = "3"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='table_party_members' AND INDEX_NAME='uk_tpm_party_customer'")" = "1"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='shared_cart_items' AND INDEX_NAME='idx_sci_party'")" = "1"
+          # Reproduce 0036 interruption after payment_reconcile_batches committed.
+          # Preserve its real table while removing the child table and rolling back
+          # the revision marker; 0048 must tolerate the partial DDL state.
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
+          DROP TABLE payment_reconcile_diffs;
+          RENAME TABLE payment_reconcile_batches TO payment_reconcile_batches_partial_recovery;
+          SQL
+          alembic downgrade 0035_table_party_shared_cart
+          mysql -h 127.0.0.1 -uroot smart_noodle_ci -e "RENAME TABLE payment_reconcile_batches_partial_recovery TO payment_reconcile_batches"
+          alembic upgrade head
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_diffs'")" = "1"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_diffs' AND CONSTRAINT_TYPE='FOREIGN KEY' AND CONSTRAINT_NAME='fk_prd_batch'")" = "1"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_batches' AND INDEX_NAME='uk_prb_channel_bill_store'")" = "1"
+          test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_batches' AND INDEX_NAME='ix_payment_reconcile_batches_scope_store_id'")" = "1"
+          # Leave the disposable CI schema at the latest migration head.
       - name: Run MySQL-marked tests
         env:
           PYTHONPATH: backend
@@ -345,8 +387,8 @@ jobs:
           ALLOW_DELIVERY_MOCK: "true"
         run: |
           python -m pytest -q --tb=short -m mysql \
-            tests/测试_审计遗留加固.py tests/测试_数据库LeaderEpoch.py
-
+            tests/测试_审计遗留加固.py tests/测试_数据库LeaderEpoch.py \
+            tests/test_delivery_refund_fingerprint_migration.py
   frontend-build:
     runs-on: ubuntu-latest
     strategy:

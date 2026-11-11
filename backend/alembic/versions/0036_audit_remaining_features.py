@@ -47,6 +47,19 @@ def _column_exists(conn, table: str, column: str) -> bool:
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # products is a required canonical table: without it this revision cannot
+    # add cost_price. Fail with an actionable message instead of an opaque
+    # ALTER TABLE/OperationalError and do not let Alembic advance.
+    required_parent_tables = ("products", "users")
+    missing_parent_tables = [
+        table for table in required_parent_tables if not _table_exists(conn, table)
+    ]
+    if missing_parent_tables:
+        missing = ", ".join(missing_parent_tables)
+        raise RuntimeError(
+            "Cannot apply 0036_audit_remaining_features: required canonical "
+            f"parent table(s) missing: {missing}. Restore the canonical baseline before retrying."
+        )
     if not _column_exists(conn, "products", "cost_price"):
         if conn.dialect.name == "sqlite":
             conn.execute(text("ALTER TABLE products ADD COLUMN cost_price NUMERIC(10,2)"))
@@ -102,8 +115,8 @@ def upgrade() -> None:
                 )
             )
 
-    if not _table_exists(conn, "payment_reconcile_batches"):
-        if conn.dialect.name == "sqlite":
+    if conn.dialect.name == "sqlite":
+        if not _table_exists(conn, "payment_reconcile_batches"):
             conn.execute(
                 text(
                     """
@@ -125,6 +138,7 @@ def upgrade() -> None:
                     """
                 )
             )
+        if not _table_exists(conn, "payment_reconcile_diffs"):
             conn.execute(
                 text(
                     """
@@ -144,7 +158,8 @@ def upgrade() -> None:
                     """
                 )
             )
-        else:
+    else:
+        if not _table_exists(conn, "payment_reconcile_batches"):
             conn.execute(
                 text(
                     """
@@ -167,6 +182,7 @@ def upgrade() -> None:
                     """
                 )
             )
+        if not _table_exists(conn, "payment_reconcile_diffs"):
             conn.execute(
                 text(
                     """
