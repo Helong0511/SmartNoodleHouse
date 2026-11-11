@@ -66,3 +66,25 @@ def test_downgrade_removes_sync_version_when_present():
             assert columns == {"id", "event_kind"}
     finally:
         engine.dispose()
+
+
+def test_downgrade_is_safe_when_outbox_events_table_is_absent():
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            _run_downgrade(conn)
+            assert sa.inspect(conn).has_table("outbox_events") is False
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_is_safe_when_outbox_events_table_is_absent():
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        migration = _load_migration()
+        with engine.begin() as conn:
+            migration.op = Operations(MigrationContext.configure(conn))
+            migration.upgrade()
+            assert sa.inspect(conn).has_table("outbox_events") is False
+    finally:
+        engine.dispose()
