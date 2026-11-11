@@ -17,10 +17,13 @@ depends_on = None
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
-    # POS refund approvals are optional on legacy deployments. Do not mark
-    # partially absent feature tables as an inspection error during upgrade.
+    # POS refund fencing is required for safe concurrent refund execution.
+    # Do not advance Alembic while the canonical approval table is absent.
     if not inspector.has_table("pos_refund_requests"):
-        return
+        raise RuntimeError(
+            "Cannot apply 0051_pos_refund_fencing: required table "
+            "'pos_refund_requests' is missing. Restore the canonical baseline before retrying."
+        )
     columns = {item["name"] for item in inspector.get_columns("pos_refund_requests")}
     if "execution_epoch" not in columns:
         op.add_column(
