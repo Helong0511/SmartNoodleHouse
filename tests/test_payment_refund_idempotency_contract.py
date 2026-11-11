@@ -44,3 +44,14 @@ def test_refund_ui_persists_same_request_key_before_network_call() -> None:
     assert "readRefundAttempt(String(row.payment_no))" in source
     assert "sessionStorage.setItem" in source
     assert "sessionStorage.removeItem" in source
+
+
+def test_wechat_refund_query_requires_explicit_currency() -> None:
+    source = (ROOT / "backend/app/services/payment_service.py").read_text(encoding="utf-8")
+    start = source.index("def _validate_refund_query_result(")
+    end = source.index("async def sync_refund_status(", start)
+    validator = source[start:end]
+    assert 'currency_raw = amount_info.get("currency")' in validator
+    assert "if not currency_raw:" in validator
+    assert "缺少币种，拒绝确认退款成功" in validator
+    assert 'amount_info.get("currency") or "CNY"' not in validator
