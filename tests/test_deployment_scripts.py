@@ -165,6 +165,20 @@ def test_private_avatar_signed_queries_are_not_written_to_access_logs():
 
 
 
+def test_nginx_http_acme_challenge_is_exempt_from_https_redirect():
+    config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "nginx" / "acme-bootstrap.conf").read_text(encoding="utf-8")
+    install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
+
+    assert "location ^~ /.well-known/acme-challenge/ {" in config
+    assert "try_files $uri =404;" in config
+    assert "location / {" in config
+    assert "return 301 https://$host$request_uri;" in config
+    assert "location ^~ /.well-known/acme-challenge/ {" in bootstrap
+    assert "certbot certonly --webroot" in install
+    assert "renewal-hooks/deploy" in install
+
+
 def test_nginx_static_locations_keep_server_security_headers():
     config = (ROOT / "nginx" / "smart-noodle.conf").read_text(encoding="utf-8")
     required_headers = (
