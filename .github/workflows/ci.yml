@@ -350,9 +350,13 @@ jobs:
           DROP TABLE IF EXISTS table_party_members;
           RENAME TABLE table_parties TO table_parties_partial_recovery;
           SQL
-          alembic downgrade 0034_points_exchange_expire
+          # Rewind only the Alembic marker, not the later schema. Downgrading
+          # the entire chain would exercise unrelated historical downgrade paths
+          # and destroy the very objects needed by the recovery scenario.
+          alembic stamp 0034_points_exchange_expire
           mysql -h 127.0.0.1 -uroot smart_noodle_ci -e "RENAME TABLE table_parties_partial_recovery TO table_parties"
-          alembic upgrade head
+          alembic upgrade 0035_table_party_shared_cart
+          alembic stamp head
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('table_parties','table_party_members','shared_cart_items')")" = "3"
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='table_party_members' AND CONSTRAINT_TYPE='FOREIGN KEY'")" = "2"
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='shared_cart_items' AND CONSTRAINT_TYPE='FOREIGN KEY'")" = "3"
@@ -365,9 +369,10 @@ jobs:
           DROP TABLE payment_reconcile_diffs;
           RENAME TABLE payment_reconcile_batches TO payment_reconcile_batches_partial_recovery;
           SQL
-          alembic downgrade 0035_table_party_shared_cart
+          alembic stamp 0035_table_party_shared_cart
           mysql -h 127.0.0.1 -uroot smart_noodle_ci -e "RENAME TABLE payment_reconcile_batches_partial_recovery TO payment_reconcile_batches"
-          alembic upgrade head
+          alembic upgrade 0036_audit_remaining_features
+          alembic stamp head
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_diffs'")" = "1"
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_diffs' AND CONSTRAINT_TYPE='FOREIGN KEY' AND CONSTRAINT_NAME='fk_prd_batch'")" = "1"
           test "$(mysql -N -h 127.0.0.1 -uroot smart_noodle_ci -e "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payment_reconcile_batches' AND INDEX_NAME='uk_prb_channel_bill_store'")" = "1"
