@@ -36,3 +36,26 @@ def test_downgrade_is_safe_when_reconcile_batches_table_is_absent(monkeypatch):
             assert not sa.inspect(conn).has_table("payment_reconcile_batches")
     finally:
         engine.dispose()
+
+
+def test_upgrade_fails_clearly_when_required_reconcile_table_is_absent(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "migration_0048_reconcile_store_scope_missing_upgrade", MIGRATION_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            monkeypatch.setattr(
+                migration, "op", Operations(MigrationContext.configure(conn))
+            )
+            import pytest
+
+            with pytest.raises(RuntimeError, match="required table.*payment_reconcile_batches"):
+                migration.upgrade()
+            assert not sa.inspect(conn).has_table("payment_reconcile_batches")
+    finally:
+        engine.dispose()
