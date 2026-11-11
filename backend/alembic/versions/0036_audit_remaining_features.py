@@ -47,6 +47,14 @@ def _column_exists(conn, table: str, column: str) -> bool:
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # products is a required canonical table: without it this revision cannot
+    # add cost_price. Fail with an actionable message instead of an opaque
+    # ALTER TABLE/OperationalError and do not let Alembic advance.
+    if not _table_exists(conn, "products"):
+        raise RuntimeError(
+            "Cannot apply 0036_audit_remaining_features: required table "
+            "'products' is missing. Restore the canonical baseline before retrying."
+        )
     if not _column_exists(conn, "products", "cost_price"):
         if conn.dialect.name == "sqlite":
             conn.execute(text("ALTER TABLE products ADD COLUMN cost_price NUMERIC(10,2)"))
