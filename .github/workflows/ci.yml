@@ -360,8 +360,8 @@ jobs:
           # its revision marker. Drop its dependent tables first, then rename it
           # out of the way so the downgrade cannot remove the committed DDL.
           mysql -h 127.0.0.1 -uroot smart_noodle_ci <<'SQL'
-          DROP TABLE shared_cart_items;
-          DROP TABLE table_party_members;
+          DROP TABLE IF EXISTS shared_cart_items;
+          DROP TABLE IF EXISTS table_party_members;
           RENAME TABLE table_parties TO table_parties_partial_recovery;
           SQL
           alembic downgrade 0034_points_exchange_expire
