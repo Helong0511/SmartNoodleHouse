@@ -15,6 +15,7 @@ MIGRATIONS = {
     "0047": (ROOT / "backend/alembic/versions/0047_payment_refund_idempotency_key.py", "payment_refunds"),
     "0049": (ROOT / "backend/alembic/versions/0049_menu_cache_outbox_retry.py", "outbox_events"),
     "0050": (ROOT / "backend/alembic/versions/0050_menu_db_generation.py", "stores"),
+    "0051": (ROOT / "backend/alembic/versions/0051_pos_refund_execution_fencing.py", "pos_refund_requests"),
 }
 
 
