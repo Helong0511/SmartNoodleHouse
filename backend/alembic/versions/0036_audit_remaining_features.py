@@ -102,8 +102,8 @@ def upgrade() -> None:
                 )
             )
 
-    if not _table_exists(conn, "payment_reconcile_batches"):
-        if conn.dialect.name == "sqlite":
+    if conn.dialect.name == "sqlite":
+        if not _table_exists(conn, "payment_reconcile_batches"):
             conn.execute(
                 text(
                     """
@@ -125,6 +125,7 @@ def upgrade() -> None:
                     """
                 )
             )
+        if not _table_exists(conn, "payment_reconcile_diffs"):
             conn.execute(
                 text(
                     """
@@ -144,7 +145,8 @@ def upgrade() -> None:
                     """
                 )
             )
-        else:
+    else:
+        if not _table_exists(conn, "payment_reconcile_batches"):
             conn.execute(
                 text(
                     """
@@ -167,6 +169,7 @@ def upgrade() -> None:
                     """
                 )
             )
+        if not _table_exists(conn, "payment_reconcile_diffs"):
             conn.execute(
                 text(
                     """
