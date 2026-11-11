@@ -63,6 +63,10 @@ def _index_state(conn) -> tuple[bool, bool]:
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # The canonical baseline owns delivery_refunds; tolerate a partially
+    # applied legacy baseline without issuing ALTER against a missing table.
+    if not sa.inspect(conn).has_table("delivery_refunds"):
+        return
     if not _column_exists(conn):
         if conn.dialect.name == "sqlite":
             conn.execute(text(
