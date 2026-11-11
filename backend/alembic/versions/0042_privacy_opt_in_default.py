@@ -34,12 +34,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
-    # 降级只恢复列默认值，不自动把已关闭的顾客重新设为同意。
-    if conn.dialect.name != "sqlite":
-        conn.execute(
-            text(
-                "ALTER TABLE customers MODIFY COLUMN recommend_opt_in "
-                "INT NOT NULL DEFAULT 1 COMMENT '个性化推荐开关'"
-            )
-        )
+    # Consent is affirmative. Rolling application code back cannot create
+    # consent, and restoring DEFAULT 1 would silently opt in new customers.
+    # Keep the safe DEFAULT 0 established by upgrade.
+    return
