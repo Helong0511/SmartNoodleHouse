@@ -16,7 +16,10 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    columns = {column["name"] for column in sa.inspect(conn).get_columns("outbox_events")}
+    inspector = sa.inspect(conn)
+    if not inspector.has_table("outbox_events"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("outbox_events")}
     if "sync_version" not in columns:
         op.add_column(
             "outbox_events",
@@ -31,6 +34,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    columns = {column["name"] for column in sa.inspect(conn).get_columns("outbox_events")}
+    inspector = sa.inspect(conn)
+    # MySQL commits DDL independently. Earlier revisions can be partially
+    # applied, so the table itself may not exist when this downgrade runs.
+    if not inspector.has_table("outbox_events"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("outbox_events")}
     if "sync_version" in columns:
         op.drop_column("outbox_events", "sync_version")
