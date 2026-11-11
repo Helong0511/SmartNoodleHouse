@@ -22,8 +22,8 @@
 # 若使用其他路径，所有 REPLACE_DEPLOY_ROOT 须一致。
 
 # ── 2. 目录权限 ──
-sudo mkdir -p /var/www/smart-noodle/uploads /etc/smart-noodle/certs
-sudo chown -R www-data:www-data /var/www/smart-noodle/uploads
+sudo mkdir -p /var/www/smart-noodle/uploads /var/www/smart-noodle/logs /etc/smart-noodle/certs
+sudo chown -R www-data:www-data /var/www/smart-noodle/uploads /var/www/smart-noodle/logs
 sudo chmod 640 /var/www/smart-noodle/.env
 # 项目代码可读即可；venv 须 www-data 可执行
 sudo chown -R root:www-data /var/www/smart-noodle/backend/.venv
