@@ -33,6 +33,7 @@ def test_upgrade_recovers_missing_reconcile_diffs_table(monkeypatch):
     try:
         with engine.begin() as conn:
             conn.exec_driver_sql("CREATE TABLE products (id INTEGER PRIMARY KEY)")
+            conn.exec_driver_sql("CREATE TABLE users (id INTEGER PRIMARY KEY)")
             # Simulate interruption after the first table in the pair committed.
             conn.exec_driver_sql(
                 """
@@ -78,5 +79,27 @@ def test_upgrade_fails_clearly_when_required_products_table_is_missing(monkeypat
             with pytest.raises(RuntimeError, match="required table.*products"):
                 module.upgrade()
             assert not sa.inspect(conn).has_table("products")
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_preflights_users_before_any_ddl(monkeypatch):
+    import pytest
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE products (id INTEGER PRIMARY KEY)")
+            module = _load_migration()
+            monkeypatch.setattr(
+                module, "op", Operations(MigrationContext.configure(conn))
+            )
+            with pytest.raises(RuntimeError, match="required canonical.*users"):
+                module.upgrade()
+            columns = {
+                item["name"] for item in sa.inspect(conn).get_columns("products")
+            }
+            assert "cost_price" not in columns
+            assert not sa.inspect(conn).has_table("role_delegations")
     finally:
         engine.dispose()
