@@ -104,7 +104,16 @@ def _add_code_key(conn) -> None:
         base = (key or "HQ:").strip() or "HQ:"
         candidate = base[:96]
         if candidate in seen:
-            candidate = f"{base}:#{int(rid)}"[:96]
+            # Keep the complete row id inside the 96-character column limit.
+            # A natural HQ code may already equal the naive suffix (e.g.
+            # code="ALPHA:#3" before the second "ALPHA" row is processed).
+            suffix = f":#{int(rid)}"
+            candidate = f"{base[: 96 - len(suffix)]}{suffix}"
+            attempt = 1
+            while candidate in seen:
+                suffix = f":#{int(rid)}:{attempt}"
+                candidate = f"{base[: 96 - len(suffix)]}{suffix}"
+                attempt += 1
         if candidate != (key or ""):
             conn.execute(
                 text("UPDATE marketing_campaigns SET code_key = :k WHERE id = :i"),
