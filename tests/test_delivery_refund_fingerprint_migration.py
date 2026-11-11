@@ -107,3 +107,14 @@ def test_upgrade_keeps_exact_unique_index_unchanged():
             assert valid is True
     finally:
         engine.dispose()
+
+
+def test_upgrade_is_safe_when_delivery_refunds_table_is_absent():
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            module = _load_migration()
+            _run_upgrade(conn, module)
+            assert not sa.inspect(conn).has_table("delivery_refunds")
+    finally:
+        engine.dispose()
