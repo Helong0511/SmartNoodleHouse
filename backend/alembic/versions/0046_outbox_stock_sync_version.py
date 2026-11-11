@@ -30,4 +30,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("outbox_events", "sync_version")
+    conn = op.get_bind()
+    columns = {column["name"] for column in sa.inspect(conn).get_columns("outbox_events")}
+    if "sync_version" in columns:
+        op.drop_column("outbox_events", "sync_version")
