@@ -342,6 +342,7 @@ jobs:
           MYSQL_PWD: root
         run: |
           set -euo pipefail
+          set -x
           # Preserve the real, fully-created first 0035 table while rolling back
           # its revision marker. Drop its dependent tables first, then rename it
           # out of the way so the downgrade cannot remove the committed DDL.
