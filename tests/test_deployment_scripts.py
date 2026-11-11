@@ -280,3 +280,13 @@ def test_nginx_ocsp_stapling_verification_has_trusted_ca_bundle():
     assert "ssl_trusted_certificate /etc/nginx/ssl-trusted-chain.pem;" in config
     install = (ROOT / "nginx" / "安装说明.txt").read_text(encoding="utf-8")
     assert "ca-certificates" in install
+
+
+def test_systemd_log_directory_is_provisioned_without_broad_var_log_write_access():
+    service = (ROOT / "systemd" / "smart-noodle.service").read_text(encoding="utf-8")
+    install = (ROOT / "systemd" / "安装说明.txt").read_text(encoding="utf-8")
+
+    assert "ReadWritePaths=REPLACE_DEPLOY_ROOT/logs" in service
+    assert "ReadWritePaths=/var/log" not in service
+    assert "mkdir -p /var/www/smart-noodle/uploads /var/www/smart-noodle/logs" in install
+    assert "chown -R www-data:www-data /var/www/smart-noodle/uploads /var/www/smart-noodle/logs" in install
