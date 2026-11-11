@@ -202,7 +202,7 @@ def test_nginx_ocsp_trust_bundle_refresh_includes_chain_and_system_roots():
 
     assert "ssl_trusted_certificate /etc/nginx/ssl-trusted-chain.pem;" in ssl
     assert 'RENEWED_LINEAGE' in script
-    assert 'fullchain="${lineage}/fullchain.pem"' in script
+    assert 'chain="${lineage}/chain.pem"' in script
     assert "/etc/ssl/certs/ca-certificates.crt" in script
     assert "nginx -t" in script
     assert "systemctl reload nginx" in script
