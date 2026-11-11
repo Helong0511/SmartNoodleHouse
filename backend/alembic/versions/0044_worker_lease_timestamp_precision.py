@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import text
+from sqlalchemy.dialects import mysql
 
 revision = "0044_worker_lease_ts"
 down_revision = "0043_delivery_refund_fingerprint"
@@ -34,8 +35,8 @@ def upgrade() -> None:
             op.alter_column(
                 table,
                 "locked_at",
-                existing_type=sa.dialects.mysql.DATETIME(),
-                type_=sa.dialects.mysql.DATETIME(fsp=6),
+                existing_type=mysql.DATETIME(),
+                type_=mysql.DATETIME(fsp=6),
                 existing_nullable=True,
                 nullable=True,
             )
