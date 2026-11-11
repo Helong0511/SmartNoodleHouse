@@ -32,7 +32,10 @@ def scan_sensitive_logs() -> int:
     """扫描历史日志中的敏感查询参数；只打印位置，绝不回显凭据值。"""
     log_root = Path(__file__).resolve().parents[1] / "logs" / "backend"
     if not log_root.exists():
-        print("[PASS] 未发现 logs/backend 目录，跳过历史日志扫描。")
+        print(
+            "[SKIP] 未发现仓库内 logs/backend 目录；"
+            "这不代表生产主机、外部日志平台或历史归档已完成扫描。"
+        )
         return 0
 
     findings = 0
