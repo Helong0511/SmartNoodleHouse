@@ -176,6 +176,7 @@ def test_nginx_http_acme_challenge_is_exempt_from_https_redirect():
     assert "return 301 https://$host$request_uri;" in config
     assert "location ^~ /.well-known/acme-challenge/ {" in bootstrap
     assert "certbot certonly --webroot" in install
+    assert "REPLACE_DOMAIN/你的域名.com/g" in install
     assert "renewal-hooks/deploy" in install
 
 
