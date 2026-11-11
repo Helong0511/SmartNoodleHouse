@@ -18,7 +18,10 @@ def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
     if not inspector.has_table("outbox_events"):
-        return
+        raise RuntimeError(
+            "Cannot apply 0046_outbox_stock_sync_version: required table "
+            "'outbox_events' is missing. Restore the canonical baseline before retrying."
+        )
     columns = {column["name"] for column in inspector.get_columns("outbox_events")}
     if "sync_version" not in columns:
         op.add_column(
