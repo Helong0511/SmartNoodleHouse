@@ -86,12 +86,12 @@ def test_production_inference_entrypoints_fail_closed_before_model_use(
     )
     target = getattr(face_extractor, entrypoint)
     if entrypoint in {"extract_face_embedding_bgr", "extract_live_face_hit"}:
-        with pytest.raises(RuntimeError, match="未确认商业授权"):
+        with pytest.raises(RuntimeError, match="临时关闭"):
             target(np.zeros((32, 32, 3), dtype=np.uint8))
     else:
         target.cache_clear()
         try:
-            with pytest.raises(RuntimeError, match="未确认商业授权"):
+            with pytest.raises(RuntimeError, match="临时关闭"):
                 target()
         finally:
             target.cache_clear()
