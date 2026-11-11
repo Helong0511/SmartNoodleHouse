@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import text
 from sqlalchemy.dialects import mysql
 
 revision = "0044_worker_lease_ts"
@@ -14,59 +15,82 @@ down_revision = "0043_delivery_refund_fingerprint"
 branch_labels = None
 depends_on = None
 
+
 LEASE_TABLES = ("outbox_events", "webhook_inbox")
 
 
-def _existing_lease_tables(conn, *, require_complete: bool = False):
-    inspector = sa.inspect(conn)
-    existing = []
-    for table in LEASE_TABLES:
-        if not inspector.has_table(table):
-            if require_complete:
+def upgrade() -> None:
+    # MySQL DATETIME 默认精度为秒。心跳在同一秒内更新时，MySQL 默认
+    # affected-rows 语义可能返回 rowcount=0，worker 会误判租约丢失并取消任务。
+    # 微秒精度确保 locked_at 心跳值实际变化；SQLite 保留原生 DateTime 行为。
+    conn = op.get_bind()
+    if conn.dialect.name == "mysql":
+        inspector = sa.inspect(conn)
+        # Validate the complete table/column set before the first MySQL DDL;
+        # otherwise a missing second table could leave the first altered.
+        for table in LEASE_TABLES:
+            if not inspector.has_table(table):
                 raise RuntimeError(
                     f"Cannot apply 0044_worker_lease_timestamp_precision: "
                     f"required table '{table}' is missing. Restore the canonical baseline before retrying."
                 )
-            continue
-        columns = {item["name"] for item in inspector.get_columns(table)}
-        if "locked_at" not in columns:
-            if require_complete:
+            columns = {item["name"] for item in inspector.get_columns(table)}
+            if "locked_at" not in columns:
                 raise RuntimeError(
                     f"Cannot apply 0044_worker_lease_timestamp_precision: "
                     f"required column '{table}.locked_at' is missing."
                 )
-            continue
-        existing.append(table)
-    # Return only after validating every table, so callers cannot mutate the
-    # first table before discovering that a later required table is absent.
-    return existing
-
-
-def upgrade() -> None:
-    conn = op.get_bind()
-    if conn.dialect.name != "mysql":
-        return
-    for table in _existing_lease_tables(conn, require_complete=True):
-        op.alter_column(
-            table,
-            "locked_at",
-            existing_type=mysql.DATETIME(),
-            type_=mysql.DATETIME(fsp=6),
-            existing_nullable=True,
-            nullable=True,
-        )
+        for table in LEASE_TABLES:
+            op.alter_column(
+                table,
+                "locked_at",
+                existing_type=mysql.DATETIME(),
+                type_=mysql.DATETIME(fsp=6),
+                existing_nullable=True,
+                nullable=True,
+            )
 
 
 def downgrade() -> None:
     conn = op.get_bind()
     if conn.dialect.name != "mysql":
         return
-    for table in _existing_lease_tables(conn):
+
+    inspector = sa.inspect(conn)
+    existing_tables = []
+    fractional_tables = []
+    # Preflight every table before changing either one. DATETIME(0) conversion
+    # truncates microseconds, which can change lease ordering and fencing behavior.
+    for table in LEASE_TABLES:
+        if not inspector.has_table(table):
+            continue
+        columns = {item["name"] for item in inspector.get_columns(table)}
+        if "locked_at" not in columns:
+            continue
+        existing_tables.append(table)
+        has_fractional = conn.execute(
+            text(
+                f"SELECT 1 FROM `{table}` "
+                "WHERE locked_at IS NOT NULL AND MICROSECOND(locked_at) <> 0 LIMIT 1"
+            )
+        ).scalar()
+        if has_fractional:
+            fractional_tables.append(table)
+
+    if fractional_tables:
+        names = ", ".join(fractional_tables)
+        raise RuntimeError(
+            "Refusing to downgrade worker lease timestamps to second precision: "
+            f"microsecond values exist in {names}. Preserve DATETIME(6) to avoid "
+            "truncating lease timestamps and changing worker ownership timing."
+        )
+
+    for table in existing_tables:
         op.alter_column(
             table,
             "locked_at",
-            existing_type=mysql.DATETIME(fsp=6),
-            type_=mysql.DATETIME(),
+            existing_type=sa.dialects.mysql.DATETIME(fsp=6),
+            type_=sa.dialects.mysql.DATETIME(),
             existing_nullable=True,
             nullable=True,
         )
