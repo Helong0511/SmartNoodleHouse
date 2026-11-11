@@ -35,10 +35,13 @@ def _index_exists(conn) -> bool:
 
 def upgrade() -> None:
     conn = op.get_bind()
-    # The canonical baseline owns delivery_refunds; tolerate a partially
-    # applied legacy baseline without issuing ALTER against a missing table.
+    # This table is part of the canonical schema. Do not advance Alembic
+    # while the refund callback deduplication table is absent.
     if not inspect(conn).has_table("delivery_refunds"):
-        return
+        raise RuntimeError(
+            "Cannot apply 0043_delivery_refund_fingerprint: required table "
+            "'delivery_refunds' is missing. Restore the canonical baseline before retrying."
+        )
     if not _column_exists(conn):
         if conn.dialect.name == "sqlite":
             conn.execute(text("ALTER TABLE delivery_refunds ADD COLUMN event_fingerprint VARCHAR(64)"))
