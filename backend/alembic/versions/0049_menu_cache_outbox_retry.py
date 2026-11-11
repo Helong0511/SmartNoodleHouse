@@ -21,7 +21,12 @@ MAX_ATTEMPTS = 2_147_483_647
 
 
 def upgrade() -> None:
-    op.get_bind().execute(
+    conn = op.get_bind()
+    # The canonical baseline owns this table; tolerate installations where
+    # an earlier baseline was only partially applied.
+    if not sa.inspect(conn).has_table("outbox_events"):
+        return
+    conn.execute(
         sa.text(
             """
             UPDATE outbox_events
