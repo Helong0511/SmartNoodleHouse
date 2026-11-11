@@ -83,6 +83,46 @@ def _add_code_key(conn) -> None:
                 "ALTER TABLE marketing_campaigns ADD COLUMN `code_key` varchar(96) "
                 "NULL DEFAULT NULL COMMENT 'HQ:CODE 或 store_id:CODE（跨库唯一）' AFTER `code`",
             )
+    if _index_exists(conn, "marketing_campaigns", "uk_mc_code_key"):
+        # Once the unique index exists, never reset populated keys to their
+        # non-unique natural values: doing so would violate the index on retry.
+        rows = conn.execute(
+            text(
+                "SELECT id, store_id, code FROM marketing_campaigns "
+                "WHERE code_key IS NULL OR TRIM(code_key) = '' ORDER BY id"
+            )
+        ).all()
+        seen = {
+            str(item[0])
+            for item in conn.execute(
+                text(
+                    "SELECT code_key FROM marketing_campaigns "
+                    "WHERE code_key IS NOT NULL AND TRIM(code_key) <> ''"
+                )
+            ).all()
+        }
+        for rid, store_id, code in rows:
+            base = (
+                f"HQ:{str(code or '').strip().upper()}"
+                if store_id is None
+                else f"{int(store_id)}:{str(code or '').strip().upper()}"
+            )
+            candidate = base[:96]
+            if candidate in seen:
+                suffix = f":#{int(rid)}"
+                candidate = f"{base[: 96 - len(suffix)]}{suffix}"
+                attempt = 1
+                while candidate in seen:
+                    suffix = f":#{int(rid)}:{attempt}"
+                    candidate = f"{base[: 96 - len(suffix)]}{suffix}"
+                    attempt += 1
+            conn.execute(
+                text("UPDATE marketing_campaigns SET code_key = :k WHERE id = :i"),
+                {"k": candidate, "i": int(rid)},
+            )
+            seen.add(candidate)
+        return
+
     if conn.dialect.name == "sqlite":
         _exec(
             conn,
@@ -104,7 +144,16 @@ def _add_code_key(conn) -> None:
         base = (key or "HQ:").strip() or "HQ:"
         candidate = base[:96]
         if candidate in seen:
-            candidate = f"{base}:#{int(rid)}"[:96]
+            # Keep the complete row id inside the 96-character column limit.
+            # A natural HQ code may already equal the naive suffix (e.g.
+            # code="ALPHA:#3" before the second "ALPHA" row is processed).
+            suffix = f":#{int(rid)}"
+            candidate = f"{base[: 96 - len(suffix)]}{suffix}"
+            attempt = 1
+            while candidate in seen:
+                suffix = f":#{int(rid)}:{attempt}"
+                candidate = f"{base[: 96 - len(suffix)]}{suffix}"
+                attempt += 1
         if candidate != (key or ""):
             conn.execute(
                 text("UPDATE marketing_campaigns SET code_key = :k WHERE id = :i"),
