@@ -30,14 +30,14 @@
         └──── Leader 独占 ──── APScheduler / TTS worker / 摄像头采集
 ```
 
-- ASGI 入口：[backend/app/main.py](file:///e:/SmartNoodleHouse/backend/app/main.py) `create_app()`。
+- ASGI 入口：[backend/app/main.py](../../backend/app/main.py) `create_app()`。
 - 多 worker 通过 Redis Leader 锁保证单实例调度，避免重复任务/重复摄像头采集。
 
 ---
 
 ## 2. 进程与 Leader 选举
 
-### 2.1 PROCESS_ROLE（[main.py:97-122](file:///e:/SmartNoodleHouse/backend/app/main.py)）
+### 2.1 PROCESS_ROLE（[main.py:97-122](../../backend/app/main.py)）
 
 | 角色 | 行为 |
 |---|---|
@@ -45,7 +45,7 @@
 | `leader` | 必须抢到锁才跑调度；抢不到告警并重试（不静默降级为 worker 语义） |
 | `worker` | 永不跑调度，只服务 HTTP |
 
-### 2.2 Leader 锁（[leader_lock.py](file:///e:/SmartNoodleHouse/backend/app/core/leader_lock.py)）
+### 2.2 Leader 锁（[leader_lock.py](../../backend/app/core/leader_lock.py)）
 
 - 获取：`SET key wid NX PX ttl`。
 - 续期：Lua 脚本原子 compare-and-expire（仅 holder 可续）。
@@ -63,7 +63,7 @@
 
 ---
 
-## 3. 定时任务（[backend/tasks/scheduler.py](file:///e:/SmartNoodleHouse/backend/tasks/scheduler.py)）
+## 3. 定时任务（[backend/tasks/scheduler.py](../../backend/tasks/scheduler.py)）
 
 ### 3.1 调度器配置
 
@@ -103,13 +103,13 @@
 5. 启动 WS Redis subscriber。
 6. 启动调度器 / TTS / 摄像头（仅 Leader）。
 
-### 4.2 健康探针（[health.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/health.py)）
+### 4.2 健康探针（[health.py](../../backend/app/api/v1/health.py)）
 
 - `/api/health`：liveness，进程存活即 200。
 - `/api/ready`：readiness，探 DB + Redis，均可用才 200，供 nginx/负载均衡摘挂流量。
 - 测试：测试_健康检查就绪.py。
 
-### 4.3 systemd（[systemd/smart-noodle.service](file:///e:/SmartNoodleHouse/systemd/smart-noodle.service)）
+### 4.3 systemd（[systemd/smart-noodle.service](../../systemd/smart-noodle.service)）
 
 - `User/Group=www-data`，非 root。
 - 绑定 `127.0.0.1:8000`，仅 nginx 反代对外。
@@ -121,7 +121,7 @@
 
 ---
 
-## 5. Nginx（[nginx/smart-noodle.conf](file:///e:/SmartNoodleHouse/nginx/smart-noodle.conf)）
+## 5. Nginx（[nginx/smart-noodle.conf](../../nginx/smart-noodle.conf)）
 
 - HTTPS：TLS 参数抽离到 nginx/snippets/ssl-params.conf（TLS 1.2/1.3、强加密套件）。
 - 代理通用参数：snippets/proxy-common.conf（X-Forwarded-*、超时）。
@@ -137,11 +137,11 @@
 
 ### 6.1 配置优先级
 
-[config.py](file:///e:/SmartNoodleHouse/backend/app/core/config.py) pydantic-settings，env_file 候选：项目根 `.env` → `backend/.env` → 当前目录；环境变量最高优先。
+[config.py](../../backend/app/core/config.py) pydantic-settings，env_file 候选：项目根 `.env` → `backend/.env` → 当前目录；环境变量最高优先。
 
 ### 6.2 启动校验（生产强制）
 
-详见 [BASELINE.md §7.2](file:///e:/SmartNoodleHouse/docs/audit/BASELINE.md)，关键项：
+详见 [BASELINE.md §7.2](../../docs/audit/BASELINE.md)，关键项：
 
 - 强 JWT/FACE/SECRET 密钥（非默认、熵足够、长度≥32）。
 - 禁止所有 MOCK 开关、APP_DEBUG；CORS/H5 不得指向 localhost。
@@ -158,7 +158,7 @@
 - `WECHAT_API_V3_KEY` / `WECHAT_API_V2_KEY`：V2/V3 独立。
 - `WECHAT_PLATFORM_PUBLIC_KEY` / 证书路径。
 - `.env*` 全部 gitignore；example 仅占位符。
-- 轮换指南：[docs/安全说明.md](file:///e:/SmartNoodleHouse/docs/安全说明.md)。
+- 轮换指南：[docs/安全说明.md](../../docs/安全说明.md)。
 - **BLK-002**：git 历史曾出现真实密钥，上线前必须在平台控制台轮换。
 
 ---
@@ -170,14 +170,14 @@
 - Redis：每个 API Worker 独立使用 `BlockingConnectionPool`，默认每进程上限 50、池耗尽最多等待 0.75 秒；总连接上限约 `Uvicorn Worker 数 × REDIS_MAX_CONNECTIONS`，另需预留运维/监控/其他服务连接。WebSocket Pub/Sub 从对应 Worker 的连接池借用连接；不得按“全应用单连接”估算。
 - 当前 Redis 混合承载缓存、限流、一次性凭证、活体挑战和分布式锁：生产基线使用显式 `maxmemory` + `maxmemory-policy noeviction`，避免淘汰协调/安全键；达到上限时写入会返回 OOM，关键路径必须按各自策略 fail-closed 或安全降级。纯缓存如需 LRU，应拆分独立实例。
 - Redis 主机需设置 `vm.overcommit_memory=1`，关闭 Transparent Huge Pages，并监控 `INFO memory`、`INFO stats`、`INFO persistence`、磁盘空间及 AOF/RDB 状态。`redis.conf.example` 的 512mb 仅为小型单店示例，部署前必须按主机 RAM、MySQL/OS 占用和 fork/COW 峰值重新核算。
-- 摄像头/支付外部调用统一走 [http_client.py](file:///e:/SmartNoodleHouse/backend/app/core/http_client.py) 共享 httpx client，lifespan 关闭，防连接泄漏。
+- 摄像头/支付外部调用统一走 [http_client.py](../../backend/app/core/http_client.py) 共享 httpx client，lifespan 关闭，防连接泄漏。
 - TTS 队列有界（100）防内存膨胀（P1-402）。
 
 ---
 
 ## 8. 可靠性机制
 
-### 8.1 Transactional Outbox（[outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/services/outbox_worker.py)）
+### 8.1 Transactional Outbox（[outbox_worker.py](../../backend/app/services/outbox_worker.py)）
 
 - 支付副作用与业务同事务写 OutboxEvent。
 - claim：条件 UPDATE 原子认领并分配唯一 owner token；处理期间独立短事务续租；超 max_attempts → FAILED 人工介入。
@@ -200,7 +200,7 @@
 
 ### 8.4 WebSocket 可靠性
 
-- 跨 worker 经 Redis Pub/Sub 广播（[ws_pubsub.py](file:///e:/SmartNoodleHouse/backend/app/services/ws_pubsub.py)）。
+- 跨 worker 经 Redis Pub/Sub 广播（[ws_pubsub.py](../../backend/app/services/ws_pubsub.py)）。
 - KDS 断线重连可补拉，不仅依赖进程内存事件（P1-312）。
 - 连接数/订阅频率配额防 DoS（ws_conn_quota.py）。
 
@@ -210,7 +210,7 @@
 
 ### 9.1 日志
 
-- [logging_config.py](file:///e:/SmartNoodleHouse/backend/app/core/logging_config.py)：控制台 + 按端分目录文件（backend/frontend/wechat/alipay）。
+- [logging_config.py](../../backend/app/core/logging_config.py)：控制台 + 按端分目录文件（backend/frontend/wechat/alipay）。
 - request_id / trace_id 贯穿（RequestIDMiddleware）。
 - Webhook 请求头脱敏 Authorization/Cookie/token（P0-021）。
 - 前端日志上报 /client-logs；页面卸载用 sendBeacon，HMR dispose 清理，401/403/中断不重试，避免错误风暴（项目历史教训）。
@@ -218,7 +218,7 @@
 ### 9.2 指标
 
 - PerformanceMetricsMiddleware 记录耗时/状态。
-- `/api/performance` 查询性能指标（[performance.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/performance.py)）。
+- `/api/performance` 查询性能指标（[performance.py](../../backend/app/api/v1/performance.py)）。
 - metrics 端点已就绪，但 Prometheus 抓取/告警规则需运维接入（BLK-004）。
 
 ### 9.3 审计
