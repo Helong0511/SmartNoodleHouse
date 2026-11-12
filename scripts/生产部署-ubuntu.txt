@@ -111,7 +111,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 # ── 6. 小程序发布前 ──
 #   项目根 .env：
-#     密钥：python scripts/gen_secrets.py（JWT/FACE/SECRET/DISPLAY_SCREEN_TOKEN）
+#     密钥：python scripts/生成密钥.py（JWT/FACE/SECRET/DISPLAY_SCREEN_TOKEN）
 #     MINI_PROGRAM_ENV_VERSION=release
 #     H5_PUBLIC_BASE_URL=https://your-domain.com
 #     ALIPAY_AES_KEY=（支付宝手机号解密，必填）
