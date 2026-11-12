@@ -1,16 +1,16 @@
 """并发订单状态迁移后，调用方 ORM 对象必须同步到锁读到的权威状态。"""
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.models import Order
 from app.services.order_lifecycle import apply_order_status
 
 
 @pytest.mark.asyncio
 async def test_terminal_replay_refreshes_stale_order_status_without_stock_restore():
     # 模拟另一个事务已先把数据库订单置为 REFUNDED；当前调用仍持有 PAID 快照。
-    order = SimpleNamespace(
+    order = Order(
         id=41,
         status="PAID",
         payment_status="REFUNDED",
