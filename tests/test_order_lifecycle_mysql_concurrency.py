@@ -262,8 +262,8 @@ async def test_overlapping_order_stock_restoration_uses_sorted_product_locks(
             Order(
                 order_no=f"SO-{suffix[:30]}-{index}",
                 store_id=store.id,
-                status="PAID",
-                payment_status="PAID",
+                status="PENDING_PAYMENT",
+                payment_status="PENDING",
                 subtotal="10.00",
                 total_amount="10.00",
                 discount_amount="0.00",
