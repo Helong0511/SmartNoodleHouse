@@ -380,17 +380,14 @@ async def _handle_coupon_release(db: AsyncSession, row) -> None:
 
 
 async def enqueue_coupon_release(db: AsyncSession, order_id: int) -> None:
-    """入队订单券回滚补偿（与主事务同提交）。"""
-    try:
-        await enqueue_outbox(
-            db,
-            aggregate_type="order",
-            aggregate_id=int(order_id),
-            event_kind="coupon_release",
-            payload={"order_id": int(order_id)},
-        )
-    except Exception:
-        logger.exception("入队 coupon_release 失败 order_id=%s", order_id)
+    """入队订单券回滚补偿（与主事务同提交）；入队失败必须向上抛出以回滚订单终态。"""
+    await enqueue_outbox(
+        db,
+        aggregate_type="order",
+        aggregate_id=int(order_id),
+        event_kind="coupon_release",
+        payload={"order_id": int(order_id)},
+    )
 
 @register_outbox_handler("late_payment", "auto_refund")
 async def _handle_late_payment_auto_refund(db: AsyncSession, row) -> None:
