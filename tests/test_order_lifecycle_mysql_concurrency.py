@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from unittest.mock import AsyncMock
 
@@ -359,7 +360,7 @@ async def test_payment_callback_waiting_on_cancel_queues_one_durable_auto_refund
         ).scalars().all()
         assert len(outbox_rows) == 1
         assert outbox_rows[0].status == "PENDING"
-        assert f'"payment_id":{payment_id}' in (outbox_rows[0].payload or "")
+        assert json.loads(outbox_rows[0].payload or "{}").get("payment_id") == payment_id
         assert await verify.scalar(
             select(func.count()).select_from(OutboxEvent).where(
                 OutboxEvent.aggregate_type == "late_payment",
