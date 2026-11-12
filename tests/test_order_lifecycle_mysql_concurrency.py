@@ -6,11 +6,11 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import delete, event
+from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
-from app.models import Order, Store
+from app.models import Order, OutboxEvent, Store
 from app.services import order_lifecycle
 from app.services.coupon_service import CouponService
 from app.services.social_benefit_service import SocialBenefitService
@@ -212,3 +212,118 @@ async def test_replayed_terminal_callback_does_not_repeat_side_effects(db_sessio
     release_coupon.assert_awaited_once()
     reverse_social.assert_awaited_once()
     record_status.assert_awaited_once()
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_concurrent_outbox_enqueue_duplicate_preserves_both_outer_transactions(db_session):
+    """A duplicate-key SAVEPOINT race returns one row without poisoning either transaction."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    from app.services.outbox_worker import enqueue_outbox
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    aggregate_id = int(uuid.uuid4().hex[:12], 16)
+    aggregate_type = "mysql_outbox_race"
+    event_kind = "same_event"
+    second_insert_attempted = asyncio.Event()
+
+    async with maker() as session_a, maker() as session_b:
+        await session_a.connection()
+        connection_a = (await session_a.connection()).sync_connection
+
+        row_a, is_new_a = await enqueue_outbox(
+            session_a,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            event_kind=event_kind,
+            payload={"writer": "a"},
+        )
+        assert is_new_a is True
+        row_a_id = int(row_a.id)
+        session_a.add(
+            OutboxEvent(
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                event_kind="writer_a_probe",
+                payload='{"writer":"a"}',
+                status="PENDING",
+            )
+        )
+
+        def observe_duplicate_insert(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if conn is not connection_a and "INSERT INTO OUTBOX_EVENTS" in normalized:
+                second_insert_attempted.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_duplicate_insert)
+        try:
+            async def enqueue_from_second_transaction():
+                row, is_new = await enqueue_outbox(
+                    session_b,
+                    aggregate_type=aggregate_type,
+                    aggregate_id=aggregate_id,
+                    event_kind=event_kind,
+                    payload={"writer": "b"},
+                )
+                session_b.add(
+                    OutboxEvent(
+                        aggregate_type=aggregate_type,
+                        aggregate_id=aggregate_id,
+                        event_kind="writer_b_probe",
+                        payload='{"writer":"b"}',
+                        status="PENDING",
+                    )
+                )
+                await session_b.flush()
+                return int(row.id), is_new
+
+            task_b = asyncio.create_task(enqueue_from_second_transaction())
+            # The competing INSERT has reached MySQL while transaction A still
+            # owns the unique key. Commit A to release the duplicate-key wait.
+            await asyncio.wait_for(second_insert_attempted.wait(), timeout=10)
+            await session_a.commit()
+            row_b_id, is_new_b = await asyncio.wait_for(task_b, timeout=20)
+            await session_b.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_duplicate_insert)
+            if session_a.in_transaction():
+                await session_a.rollback()
+            if session_b.in_transaction():
+                await session_b.rollback()
+
+    async with maker() as verify:
+        same_key_rows = (
+            await verify.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.aggregate_type == aggregate_type,
+                    OutboxEvent.aggregate_id == aggregate_id,
+                    OutboxEvent.event_kind == event_kind,
+                )
+            )
+        ).scalars().all()
+        assert len(same_key_rows) == 1
+        assert same_key_rows[0].id == row_a_id == row_b_id
+        assert is_new_b is False
+
+        probe_kinds = (
+            await verify.execute(
+                select(OutboxEvent.event_kind).where(
+                    OutboxEvent.aggregate_type == aggregate_type,
+                    OutboxEvent.aggregate_id == aggregate_id,
+                    OutboxEvent.event_kind.in_(("writer_a_probe", "writer_b_probe")),
+                )
+            )
+        ).scalars().all()
+        assert set(probe_kinds) == {"writer_a_probe", "writer_b_probe"}
+
+        await verify.execute(
+            delete(OutboxEvent).where(
+                OutboxEvent.aggregate_type == aggregate_type,
+                OutboxEvent.aggregate_id == aggregate_id,
+            )
+        )
+        await verify.commit()
