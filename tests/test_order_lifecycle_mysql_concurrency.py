@@ -6,6 +6,7 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
@@ -24,13 +25,15 @@ async def test_concurrent_terminal_transition_uses_locked_current_state_and_runs
 
     The second session loads PAID before the first session commits REFUNDED.
     Its later SELECT ... FOR UPDATE must be a MySQL current read, not the stale
-    repeatable-read snapshot. The stale caller object must also be refreshed.
+    repeatable-read snapshot. A SQLAlchemy cursor barrier proves the competing
+    locking SELECT has reached the DB before the winner commits.
     """
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
 
+    engine = db_session.bind
     maker = async_sessionmaker(
-        db_session.bind,
+        engine,
         expire_on_commit=False,
         autoflush=False,
     )
@@ -66,8 +69,12 @@ async def test_concurrent_terminal_transition_uses_locked_current_state_and_runs
     monkeypatch.setattr(CouponService, "release_for_order", release_coupon)
     monkeypatch.setattr(SocialBenefitService, "reverse_for_order", reverse_social)
 
-    first_locked = asyncio.Event()
-    second_started = asyncio.Event()
+    second_lock_query = asyncio.Event()
+
+    def observe_competing_lock(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "FOR UPDATE" in normalized and "ORDERS.STATUS" in normalized:
+            second_lock_query.set()
 
     async with maker() as first, maker() as second:
         first_order = await first.get(Order, order_id)
@@ -82,31 +89,30 @@ async def test_concurrent_terminal_transition_uses_locked_current_state_and_runs
             source="PAYMENT",
             assert_kind="SYSTEM",
         )
-        first_locked.set()
 
-        async def competing_transition():
-            await first_locked.wait()
-            second_started.set()
-            try:
-                await order_lifecycle.apply_order_status(
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_competing_lock)
+        try:
+            competing = asyncio.create_task(
+                order_lifecycle.apply_order_status(
                     second,
                     stale_second_order,
                     "CANCELLED",
                     source="SYSTEM",
                     assert_kind="SYSTEM",
                 )
-            except AppException as exc:
-                return exc.code
-            return None
+            )
+            # This event fires inside the second connection immediately before
+            # MySQL executes SELECT ... FOR UPDATE; the first transaction still
+            # owns the row lock at this point.
+            await asyncio.wait_for(second_lock_query.wait(), timeout=10)
+            await first.commit()
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(competing, timeout=15)
+            assert exc.value.code == 40025
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_competing_lock)
+            await second.rollback()
 
-        competing = asyncio.create_task(competing_transition())
-        await second_started.wait()
-        # Commit the first transition only after the competing task has started.
-        await first.commit()
-        error_code = await asyncio.wait_for(competing, timeout=15)
-        await second.rollback()
-
-        assert error_code == 40025
         assert stale_second_order.status == "REFUNDED"
 
     async with maker() as verify:
