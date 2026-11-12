@@ -142,7 +142,8 @@ async def test_replayed_terminal_callback_does_not_repeat_side_effects(db_sessio
         pytest.skip("requires MySQL 8 / InnoDB")
 
     engine = db_session.bind
-    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    # Match production AsyncSessionLocal (autoflush=True). _finalize_tender updates Payment.status before paid_amount SELECT; disabling autoflush makes the aggregate query miss this transaction's own payment.
+    maker = async_sessionmaker(engine, expire_on_commit=False)
     suffix = uuid.uuid4().hex
     async with maker() as setup:
         store = Store(store_no=f"CR-{suffix[:20]}", name="Callback replay test")
