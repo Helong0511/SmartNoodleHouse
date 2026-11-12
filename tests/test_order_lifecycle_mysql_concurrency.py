@@ -10,7 +10,7 @@ from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
-from app.models import Order, OrderItem, OutboxEvent, Product, ProductCategory, Store, StoreProductStock
+from app.models import Order, OrderItem, OrderStatusHistory, OutboxEvent, Product, ProductCategory, Store, StoreProductStock
 from app.services import order_lifecycle, stock_service
 from app.services.coupon_service import CouponService
 from app.services.social_benefit_service import SocialBenefitService
@@ -369,9 +369,7 @@ async def test_overlapping_order_stock_restoration_uses_sorted_product_locks(
         )
         await verify.execute(delete(OrderItem).where(OrderItem.order_id.in_(order_ids)))
         await verify.execute(
-            delete(order_lifecycle.OrderStatusHistory).where(
-                order_lifecycle.OrderStatusHistory.order_id.in_(order_ids)
-            )
+            delete(OrderStatusHistory).where(OrderStatusHistory.order_id.in_(order_ids))
         )
         await verify.execute(delete(Order).where(Order.id.in_(order_ids)))
         await verify.execute(delete(StoreProductStock).where(StoreProductStock.id.in_(stock_ids)))
