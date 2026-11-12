@@ -388,7 +388,8 @@ jobs:
         run: |
           python -m pytest -q --tb=short -m mysql \
             tests/测试_审计遗留加固.py tests/测试_数据库LeaderEpoch.py \
-            tests/test_delivery_refund_fingerprint_migration.py
+            tests/test_delivery_refund_fingerprint_migration.py \
+            tests/test_order_lifecycle_mysql_concurrency.py
   frontend-build:
     runs-on: ubuntu-latest
     strategy:
