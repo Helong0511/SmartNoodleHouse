@@ -128,3 +128,87 @@ async def test_concurrent_terminal_transition_uses_locked_current_state_and_runs
     release_coupon.assert_awaited_once()
     reverse_social.assert_awaited_once()
     record_status.assert_awaited_once()
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_replayed_terminal_callback_does_not_repeat_side_effects(db_session, monkeypatch):
+    """A callback replay after commit must not repeat terminal side effects."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"CR-{suffix[:20]}", name="Callback replay test")
+        setup.add(store)
+        await setup.flush()
+        order = Order(
+            order_no=f"OR-{suffix[:30]}",
+            store_id=store.id,
+            status="PAID",
+            payment_status="PAID",
+            subtotal="10.00",
+            total_amount="10.00",
+            discount_amount="0.00",
+            coupon_discount="0.00",
+            voucher_discount="0.00",
+            packing_fee="0.00",
+            dining_type="TAKEOUT",
+        )
+        setup.add(order)
+        await setup.flush()
+        order_id = order.id
+        await setup.commit()
+
+    restore_stock = AsyncMock()
+    release_coupon = AsyncMock()
+    reverse_social = AsyncMock()
+    record_status = AsyncMock()
+    monkeypatch.setattr(order_lifecycle, "_restore_order_stock", restore_stock)
+    monkeypatch.setattr(order_lifecycle, "record_order_status", record_status)
+    monkeypatch.setattr(CouponService, "release_for_order", release_coupon)
+    monkeypatch.setattr(SocialBenefitService, "reverse_for_order", reverse_social)
+
+    async with maker() as first:
+        first_order = await first.get(Order, order_id)
+        assert first_order is not None
+        await order_lifecycle.apply_order_status(
+            first,
+            first_order,
+            "REFUNDED",
+            source="PAYMENT",
+            assert_kind="SYSTEM",
+        )
+        await first.commit()
+
+    # Simulate a provider callback replay in a new transaction after the first
+    # terminal transition is durably committed.
+    async with maker() as replay:
+        replay_order = await replay.get(Order, order_id)
+        assert replay_order is not None
+        assert replay_order.status == "REFUNDED"
+        await order_lifecycle.apply_order_status(
+            replay,
+            replay_order,
+            "REFUNDED",
+            source="PAYMENT",
+            assert_kind="SYSTEM",
+        )
+        await replay.commit()
+
+    async with maker() as verify:
+        persisted = await verify.get(Order, order_id)
+        assert persisted is not None
+        assert persisted.status == "REFUNDED"
+        store_id = persisted.store_id
+        await verify.execute(delete(Order).where(Order.id == order_id))
+        await verify.execute(delete(Store).where(Store.id == store_id))
+        await verify.commit()
+
+    restore_stock.assert_awaited_once()
+    release_coupon.assert_awaited_once()
+    reverse_social.assert_awaited_once()
+    record_status.assert_awaited_once()
