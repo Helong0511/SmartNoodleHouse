@@ -235,7 +235,8 @@ async def test_payment_callback_waiting_on_cancel_queues_one_durable_auto_refund
         pytest.skip("requires MySQL 8 / InnoDB")
 
     engine = db_session.bind
-    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    # Match production AsyncSessionLocal autoflush: flush Payment.status=PAID before the locked paid_amount query.
+    maker = async_sessionmaker(engine, expire_on_commit=False)
     suffix = uuid.uuid4().hex
     async with maker() as setup:
         store = Store(store_no=f"LR-{suffix[:20]}", name="Late payment race test")
