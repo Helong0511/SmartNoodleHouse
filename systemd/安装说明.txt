@@ -58,4 +58,4 @@ sudo systemctl reload nginx
 # .env 权限拒绝          → chmod 640 .env && chgrp www-data .env
 # 数据库连不上           → 检查 DATABASE_URL、mysql 是否 listen 127.0.0.1
 # 生产 mock 被拒绝       → .env 中 ALLOW_*_MOCK 须全部为 false
-# 密钥生成               → python scripts/gen_secrets.py
+# 密钥生成               → python scripts/生成密钥.py

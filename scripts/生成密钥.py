@@ -2,8 +2,8 @@
 """生成 FACE_ENCRYPTION_KEY / SECRET_ENCRYPTION_KEY / JWT_SECRET 高熵随机串。
 
 用法:
-  python scripts/gen_secrets.py
-  python scripts/gen_secrets.py --nbytes 48
+  python scripts/生成密钥.py
+  python scripts/生成密钥.py --nbytes 48
 """
 from __future__ import annotations
 
