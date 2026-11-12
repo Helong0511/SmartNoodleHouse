@@ -117,11 +117,16 @@ async def enqueue_outbox(
     except IntegrityError:
         existing = (
             await db.execute(
+                # Use a locking/current read: under InnoDB REPEATABLE READ the
+                # transaction may already have an older consistent-read snapshot
+                # (for example, while loading the order being cancelled). The unique
+                # check can see a concurrently committed row that a plain SELECT
+                # cannot, causing a false "not found" and leaking the IntegrityError.
                 select(OutboxEvent).where(
                     OutboxEvent.aggregate_type == aggregate_type,
                     OutboxEvent.aggregate_id == int(aggregate_id),
                     OutboxEvent.event_kind == event_kind,
-                )
+                ).with_for_update()
             )
         ).scalar_one_or_none()
         if existing:
