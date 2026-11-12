@@ -7,6 +7,7 @@ import pytest
 from app.services.paid_side_effects import (
     _handle_pref_update,
     _handle_taste_learning,
+    enqueue_coupon_release,
     enqueue_paid_side_effects,
 )
 
@@ -118,3 +119,25 @@ async def test_refund_taste_learning_failure_propagates_for_outbox_retry():
             await _handle_taste_learning_refund(db, row)
 
     learn.assert_awaited_once_with(db, order.id)
+
+
+
+@pytest.mark.asyncio
+async def test_coupon_release_outbox_enqueue_failure_propagates_for_order_rollback():
+    """优惠券释放失败后的补偿任务若无法持久化，必须阻止订单终态提交。"""
+    db = SimpleNamespace()
+    with patch(
+        "app.services.paid_side_effects.enqueue_outbox",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("outbox database unavailable"),
+    ) as enqueue:
+        with pytest.raises(RuntimeError, match="outbox database unavailable"):
+            await enqueue_coupon_release(db, 908)
+
+    enqueue.assert_awaited_once_with(
+        db,
+        aggregate_type="order",
+        aggregate_id=908,
+        event_kind="coupon_release",
+        payload={"order_id": 908},
+    )
