@@ -75,35 +75,35 @@
 
 ---
 
-## 3. 后端 API 路由（[backend/app/api/v1/__init__.py](../../backend/app/api/v1/__init__.py)）
+## 3. 后端 API 路由（[backend/app/api/v1/__init__.py](../../backend/app/api/__init__.py)）
 
 | 路由模块 | 文件 | 主要职责 |
 |---|---|---|
-| health | [health.py](../../backend/app/api/v1/health.py) | /api/health、/api/ready（DB+Redis 探针） |
-| auth | [auth.py](../../backend/app/api/v1/auth.py) | 员工登录、退出、刷新 |
-| users | [users.py](../../backend/app/api/v1/users.py) | 员工/角色/权限 |
-| products | [products.py](../../backend/app/api/v1/products.py) | 菜品/分类/规格/库存（公开 GET 限流） |
-| orders | [orders.py](../../backend/app/api/v1/orders.py) | 订单创建/查询/取消/状态机 |
-| payments | [payments.py](../../backend/app/api/v1/payments.py) | 微信/支付宝支付、回调、退款 |
-| wallet | [wallet.py](../../backend/app/api/v1/wallet.py) | 会员余额/积分 |
-| financial_ledger | [financial_ledger.py](../../backend/app/api/v1/financial_ledger.py) | 财务台账 |
-| print_jobs | [print_jobs.py](../../backend/app/api/v1/print_jobs.py) | 打印任务 |
-| pos | [pos.py](../../backend/app/api/v1/pos.py) | 收银点餐/班次/退款/抹零 |
-| customers | [customers.py](../../backend/app/api/v1/customers.py) | 顾客/会员/合并 |
-| member_levels | [member_levels.py](../../backend/app/api/v1/member_levels.py) | 会员等级 |
-| coupons | [coupons.py](../../backend/app/api/v1/coupons.py) | 优惠券模板/发放/核销 |
-| tables | [tables.py](../../backend/app/api/v1/tables.py) | 桌台/qr_token |
-| cameras | [cameras.py](../../backend/app/api/v1/cameras.py) | 摄像头/人脸/迎宾 |
-| welcome | [welcome.py](../../backend/app/api/v1/welcome.py) | 迎宾语音 |
-| dashboard | [dashboard.py](../../backend/app/api/v1/dashboard.py) | 仪表盘 |
-| miniprogram | [miniprogram.py](../../backend/app/api/v1/miniprogram.py) | 微信/支付宝小程序统一入口 |
-| delivery | [delivery.py](../../backend/app/api/v1/delivery.py) | 美团/饿了么外卖 |
-| settings | [settings.py](../../backend/app/api/v1/settings.py) | 业务参数/门店设置 |
-| client_logs | [client_logs.py](../../backend/app/api/v1/client_logs.py) | 前端日志上报 |
-| websocket | [websocket.py](../../backend/app/api/v1/websocket.py) | KDS/叫号屏实时推送 |
-| audit_logs | [audit_logs.py](../../backend/app/api/v1/audit_logs.py) | 操作审计日志 |
-| ab_experiments | [ab_experiments.py](../../backend/app/api/v1/ab_experiments.py) | A/B 实验 |
-| performance | [performance.py](../../backend/app/api/v1/performance.py) | 性能指标查询 |
+| health | [health.py](../../backend/app/api/health.py) | /api/health、/api/ready（DB+Redis 探针） |
+| auth | [auth.py](../../backend/app/api/auth.py) | 员工登录、退出、刷新 |
+| users | [users.py](../../backend/app/api/users.py) | 员工/角色/权限 |
+| products | [products.py](../../backend/app/api/products.py) | 菜品/分类/规格/库存（公开 GET 限流） |
+| orders | [orders.py](../../backend/app/api/orders.py) | 订单创建/查询/取消/状态机 |
+| payments | [payments.py](../../backend/app/api/payments.py) | 微信/支付宝支付、回调、退款 |
+| wallet | [wallet.py](../../backend/app/api/wallet.py) | 会员余额/积分 |
+| financial_ledger | [financial_ledger.py](../../backend/app/api/financial_ledger.py) | 财务台账 |
+| print_jobs | [print_jobs.py](../../backend/app/api/print_jobs.py) | 打印任务 |
+| pos | [pos.py](../../backend/app/api/pos.py) | 收银点餐/班次/退款/抹零 |
+| customers | [customers.py](../../backend/app/api/customers.py) | 顾客/会员/合并 |
+| member_levels | [member_levels.py](../../backend/app/api/member_levels.py) | 会员等级 |
+| coupons | [coupons.py](../../backend/app/api/coupons.py) | 优惠券模板/发放/核销 |
+| tables | [tables.py](../../backend/app/api/tables.py) | 桌台/qr_token |
+| cameras | [cameras.py](../../backend/app/api/cameras.py) | 摄像头/人脸/迎宾 |
+| welcome | [welcome.py](../../backend/app/api/welcome.py) | 迎宾语音 |
+| dashboard | [dashboard.py](../../backend/app/api/dashboard.py) | 仪表盘 |
+| miniprogram | [miniprogram.py](../../backend/app/api/miniprogram.py) | 微信/支付宝小程序统一入口 |
+| delivery | [delivery.py](../../backend/app/api/delivery.py) | 美团/饿了么外卖 |
+| settings | [settings.py](../../backend/app/api/settings.py) | 业务参数/门店设置 |
+| client_logs | [client_logs.py](../../backend/app/api/client_logs.py) | 前端日志上报 |
+| websocket | [websocket.py](../../backend/app/api/websocket.py) | KDS/叫号屏实时推送 |
+| audit_logs | [audit_logs.py](../../backend/app/api/audit_logs.py) | 操作审计日志 |
+| ab_experiments | [ab_experiments.py](../../backend/app/api/ab_experiments.py) | A/B 实验 |
+| performance | [performance.py](../../backend/app/api/performance.py) | 性能指标查询 |
 
 ### 3.1 认证依赖（[backend/app/api/deps.py](../../backend/app/api/deps.py)）
 - `CurrentUser` = 员工 JWT（typ=staff，强制 ver 校验 token_version 撤销机制）
@@ -277,7 +277,7 @@
 
 ### 9.1 微信小程序 [miniprogram-wechat/](../../miniprogram-wechat/)
 - 平台：微信小程序原生
-- 后端入口：[miniprogram.py](../../backend/app/api/v1/miniprogram.py)
+- 后端入口：[miniprogram.py](../../backend/app/api/miniprogram.py)
 
 ### 9.2 支付宝小程序 [miniprogram-alipay/](../../miniprogram-alipay/)
 - 平台：支付宝小程序原生
