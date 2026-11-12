@@ -35,12 +35,12 @@
 ## 2. 后端技术栈与入口
 
 ### 2.1 启动入口
-- ASGI 入口：[backend/app/main.py](file:///e:/SmartNoodleHouse/backend/app/main.py) `create_app()` → `app`
-- 启动校验：[backend/app/core/startup_checks.py](file:///e:/SmartNoodleHouse/backend/app/core/startup_checks.py) `validate_settings()`
-- 路径修正：[backend/app/bootstrap_path.py](file:///e:/SmartNoodleHouse/backend/app/bootstrap_path.py)
+- ASGI 入口：[backend/app/main.py](../../backend/app/main.py) `create_app()` → `app`
+- 启动校验：[backend/app/core/startup_checks.py](../../backend/app/core/startup_checks.py) `validate_settings()`
+- 路径修正：[backend/app/bootstrap_path.py](../../backend/app/bootstrap_path.py)
 - 部署命令（参考 `deploy/`、`systemd/`、`sc.bat`）
 
-### 2.2 技术栈（基于 [backend/requirements.txt](file:///e:/SmartNoodleHouse/backend/requirements.txt) 与代码 import）
+### 2.2 技术栈（基于 [backend/requirements.txt](../../backend/requirements.txt) 与代码 import）
 - Python 3.11+ / FastAPI / Starlette
 - SQLAlchemy 2.x（async）+ aiomysql
 - Alembic（迁移，51 个版本文件；以 main 当前目录清单为准）
@@ -75,37 +75,37 @@
 
 ---
 
-## 3. 后端 API 路由（[backend/app/api/v1/__init__.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/__init__.py)）
+## 3. 后端 API 路由（[backend/app/api/v1/__init__.py](../../backend/app/api/v1/__init__.py)）
 
 | 路由模块 | 文件 | 主要职责 |
 |---|---|---|
-| health | [health.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/health.py) | /api/health、/api/ready（DB+Redis 探针） |
-| auth | [auth.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/auth.py) | 员工登录、退出、刷新 |
-| users | [users.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/users.py) | 员工/角色/权限 |
-| products | [products.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/products.py) | 菜品/分类/规格/库存（公开 GET 限流） |
-| orders | [orders.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/orders.py) | 订单创建/查询/取消/状态机 |
-| payments | [payments.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/payments.py) | 微信/支付宝支付、回调、退款 |
-| wallet | [wallet.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/wallet.py) | 会员余额/积分 |
-| financial_ledger | [financial_ledger.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/financial_ledger.py) | 财务台账 |
-| print_jobs | [print_jobs.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/print_jobs.py) | 打印任务 |
-| pos | [pos.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/pos.py) | 收银点餐/班次/退款/抹零 |
-| customers | [customers.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/customers.py) | 顾客/会员/合并 |
-| member_levels | [member_levels.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/member_levels.py) | 会员等级 |
-| coupons | [coupons.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/coupons.py) | 优惠券模板/发放/核销 |
-| tables | [tables.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/tables.py) | 桌台/qr_token |
-| cameras | [cameras.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/cameras.py) | 摄像头/人脸/迎宾 |
-| welcome | [welcome.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/welcome.py) | 迎宾语音 |
-| dashboard | [dashboard.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/dashboard.py) | 仪表盘 |
-| miniprogram | [miniprogram.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/miniprogram.py) | 微信/支付宝小程序统一入口 |
-| delivery | [delivery.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/delivery.py) | 美团/饿了么外卖 |
-| settings | [settings.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/settings.py) | 业务参数/门店设置 |
-| client_logs | [client_logs.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/client_logs.py) | 前端日志上报 |
-| websocket | [websocket.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/websocket.py) | KDS/叫号屏实时推送 |
-| audit_logs | [audit_logs.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/audit_logs.py) | 操作审计日志 |
-| ab_experiments | [ab_experiments.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/ab_experiments.py) | A/B 实验 |
-| performance | [performance.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/performance.py) | 性能指标查询 |
+| health | [health.py](../../backend/app/api/v1/health.py) | /api/health、/api/ready（DB+Redis 探针） |
+| auth | [auth.py](../../backend/app/api/v1/auth.py) | 员工登录、退出、刷新 |
+| users | [users.py](../../backend/app/api/v1/users.py) | 员工/角色/权限 |
+| products | [products.py](../../backend/app/api/v1/products.py) | 菜品/分类/规格/库存（公开 GET 限流） |
+| orders | [orders.py](../../backend/app/api/v1/orders.py) | 订单创建/查询/取消/状态机 |
+| payments | [payments.py](../../backend/app/api/v1/payments.py) | 微信/支付宝支付、回调、退款 |
+| wallet | [wallet.py](../../backend/app/api/v1/wallet.py) | 会员余额/积分 |
+| financial_ledger | [financial_ledger.py](../../backend/app/api/v1/financial_ledger.py) | 财务台账 |
+| print_jobs | [print_jobs.py](../../backend/app/api/v1/print_jobs.py) | 打印任务 |
+| pos | [pos.py](../../backend/app/api/v1/pos.py) | 收银点餐/班次/退款/抹零 |
+| customers | [customers.py](../../backend/app/api/v1/customers.py) | 顾客/会员/合并 |
+| member_levels | [member_levels.py](../../backend/app/api/v1/member_levels.py) | 会员等级 |
+| coupons | [coupons.py](../../backend/app/api/v1/coupons.py) | 优惠券模板/发放/核销 |
+| tables | [tables.py](../../backend/app/api/v1/tables.py) | 桌台/qr_token |
+| cameras | [cameras.py](../../backend/app/api/v1/cameras.py) | 摄像头/人脸/迎宾 |
+| welcome | [welcome.py](../../backend/app/api/v1/welcome.py) | 迎宾语音 |
+| dashboard | [dashboard.py](../../backend/app/api/v1/dashboard.py) | 仪表盘 |
+| miniprogram | [miniprogram.py](../../backend/app/api/v1/miniprogram.py) | 微信/支付宝小程序统一入口 |
+| delivery | [delivery.py](../../backend/app/api/v1/delivery.py) | 美团/饿了么外卖 |
+| settings | [settings.py](../../backend/app/api/v1/settings.py) | 业务参数/门店设置 |
+| client_logs | [client_logs.py](../../backend/app/api/v1/client_logs.py) | 前端日志上报 |
+| websocket | [websocket.py](../../backend/app/api/v1/websocket.py) | KDS/叫号屏实时推送 |
+| audit_logs | [audit_logs.py](../../backend/app/api/v1/audit_logs.py) | 操作审计日志 |
+| ab_experiments | [ab_experiments.py](../../backend/app/api/v1/ab_experiments.py) | A/B 实验 |
+| performance | [performance.py](../../backend/app/api/v1/performance.py) | 性能指标查询 |
 
-### 3.1 认证依赖（[backend/app/api/deps.py](file:///e:/SmartNoodleHouse/backend/app/api/deps.py)）
+### 3.1 认证依赖（[backend/app/api/deps.py](../../backend/app/api/deps.py)）
 - `CurrentUser` = 员工 JWT（typ=staff，强制 ver 校验 token_version 撤销机制）
 - `OptionalStaffUser` = 可选员工身份（公开餐品列表用）
 - `CurrentCustomer` = 顾客 JWT（typ=customer，独立 TTL，强制 ver 校验）
@@ -113,85 +113,85 @@
 - `StaffOrCustomer` = 三端共用接口（拒绝 stream 短票据混用）
 - `require_permission(code)` / `require_kitchen()` / `require_pos()` 装饰器
 
-### 3.2 门店隔离（[backend/app/services/store_scope.py](file:///e:/SmartNoodleHouse/backend/app/services/store_scope.py)）
+### 3.2 门店隔离（[backend/app/services/store_scope.py](../../backend/app/services/store_scope.py)）
 - `require_bound_store(user, store_id)` → `effective_store`（非超管强制覆盖）
 - `assert_store_access(user, store_id)` → 单条记录归属校验
 - `assert_order_store_access(user, order)` → 订单归属校验
 - 顾客端：`assert_customer_owns_order(order, customer_id)`
-- 检查清单：[docs/门店隔离检查清单.md](file:///e:/SmartNoodleHouse/docs/门店隔离检查清单.md)
+- 检查清单：[docs/门店隔离检查清单.md](../../docs/门店隔离检查清单.md)
 
 ---
 
-## 4. 后端服务层（[backend/app/services/](file:///e:/SmartNoodleHouse/backend/app/services/)）
+## 4. 后端服务层（[backend/app/services/](../../backend/app/services/)）
 
 按业务域分组：
 
 ### 4.1 订单与支付
-- [order_service.py](file:///e:/SmartNoodleHouse/backend/app/services/order_service.py) — 订单 CRUD
-- [order_state_machine.py](file:///e:/SmartNoodleHouse/backend/app/services/order_state_machine.py) — 状态转换
-- [order_lifecycle.py](file:///e:/SmartNoodleHouse/backend/app/services/order_lifecycle.py) — 生命周期/超时
-- [order_access.py](file:///e:/SmartNoodleHouse/backend/app/services/order_access.py) — 订单归属
-- [payment_service.py](file:///e:/SmartNoodleHouse/backend/app/services/payment_service.py) — 支付/退款主流程（115KB，最大单文件）
-- [payment_verify.py](file:///e:/SmartNoodleHouse/backend/app/services/payment_verify.py) — 验签
-- [payment_barcode.py](file:///e:/SmartNoodleHouse/backend/app/services/payment_barcode.py) / [barcode_pay_service.py](file:///e:/SmartNoodleHouse/backend/app/services/barcode_pay_service.py) — 付款码支付
-- [wechat_pay_client.py](file:///e:/SmartNoodleHouse/backend/app/services/wechat_pay_client.py) / [wechat_pay_v2_client.py](file:///e:/SmartNoodleHouse/backend/app/services/wechat_pay_v2_client.py) / [wechat_mini_client.py](file:///e:/SmartNoodleHouse/backend/app/services/wechat_mini_client.py)
-- [alipay_client.py](file:///e:/SmartNoodleHouse/backend/app/services/alipay_client.py) / [alipay_mini_client.py](file:///e:/SmartNoodleHouse/backend/app/services/alipay_mini_client.py)
-- [paid_side_effects.py](file:///e:/SmartNoodleHouse/backend/app/services/paid_side_effects.py) — 支付成功副作用（券/积分/厨房/打印）
-- [financial_ledger_service.py](file:///e:/SmartNoodleHouse/backend/app/services/financial_ledger_service.py) — 财务台账
+- [order_service.py](../../backend/app/services/order_service.py) — 订单 CRUD
+- [order_state_machine.py](../../backend/app/services/order_state_machine.py) — 状态转换
+- [order_lifecycle.py](../../backend/app/services/order_lifecycle.py) — 生命周期/超时
+- [order_access.py](../../backend/app/services/order_access.py) — 订单归属
+- [payment_service.py](../../backend/app/services/payment_service.py) — 支付/退款主流程（115KB，最大单文件）
+- [payment_verify.py](../../backend/app/services/payment_verify.py) — 验签
+- [payment_barcode.py](../../backend/app/services/payment_barcode.py) / [barcode_pay_service.py](../../backend/app/services/barcode_pay_service.py) — 付款码支付
+- [wechat_pay_client.py](../../backend/app/services/wechat_pay_client.py) / [wechat_pay_v2_client.py](../../backend/app/services/wechat_pay_v2_client.py) / [wechat_mini_client.py](../../backend/app/services/wechat_mini_client.py)
+- [alipay_client.py](../../backend/app/services/alipay_client.py) / [alipay_mini_client.py](../../backend/app/services/alipay_mini_client.py)
+- [paid_side_effects.py](../../backend/app/services/paid_side_effects.py) — 支付成功副作用（券/积分/厨房/打印）
+- [financial_ledger_service.py](../../backend/app/services/financial_ledger_service.py) — 财务台账
 
 ### 4.2 顾客与会员
-- [customer_service.py](file:///e:/SmartNoodleHouse/backend/app/services/customer_service.py) — 顾客/订单创建（78KB）
-- [customer_merge_service.py](file:///e:/SmartNoodleHouse/backend/app/services/customer_merge_service.py) — 手机号合并
-- [balance_service.py](file:///e:/SmartNoodleHouse/backend/app/services/balance_service.py) — 余额
-- [miniprogram_auth.py](file:///e:/SmartNoodleHouse/backend/app/services/miniprogram_auth.py) — 小程序登录
-- [dining_session_service.py](file:///e:/SmartNoodleHouse/backend/app/services/dining_session_service.py) — 桌台会话
+- [customer_service.py](../../backend/app/services/customer_service.py) — 顾客/订单创建（78KB）
+- [customer_merge_service.py](../../backend/app/services/customer_merge_service.py) — 手机号合并
+- [balance_service.py](../../backend/app/services/balance_service.py) — 余额
+- [miniprogram_auth.py](../../backend/app/services/miniprogram_auth.py) — 小程序登录
+- [dining_session_service.py](../../backend/app/services/dining_session_service.py) — 桌台会话
 
 ### 4.3 优惠券与积分
-- [coupon_service.py](file:///e:/SmartNoodleHouse/backend/app/services/coupon_service.py) — 券模板/发放/核销
-- [pos_refund_service.py](file:///e:/SmartNoodleHouse/backend/app/services/pos_refund_service.py) — POS 退款
-- [pos_shift_service.py](file:///e:/SmartNoodleHouse/backend/app/services/pos_shift_service.py) — 班次
+- [coupon_service.py](../../backend/app/services/coupon_service.py) — 券模板/发放/核销
+- [pos_refund_service.py](../../backend/app/services/pos_refund_service.py) — POS 退款
+- [pos_shift_service.py](../../backend/app/services/pos_shift_service.py) — 班次
 
 ### 4.4 菜单与规格
-- [menu_service.py](file:///e:/SmartNoodleHouse/backend/app/services/menu_service.py) / [menu_copy_service.py](file:///e:/SmartNoodleHouse/backend/app/services/menu_copy_service.py)
-- [option_code.py](file:///e:/SmartNoodleHouse/backend/app/services/option_code.py) — 规格编码
-- [category_require.py](file:///e:/SmartNoodleHouse/backend/app/services/category_require.py) / [category_schedule.py](file:///e:/SmartNoodleHouse/backend/app/services/category_schedule.py) / [category_schedule_auto.py](file:///e:/SmartNoodleHouse/backend/app/services/category_schedule_auto.py)
-- [stock_service.py](file:///e:/SmartNoodleHouse/backend/app/services/stock_service.py) — 库存
+- [menu_service.py](../../backend/app/services/menu_service.py) / [menu_copy_service.py](../../backend/app/services/menu_copy_service.py)
+- [option_code.py](../../backend/app/services/option_code.py) — 规格编码
+- [category_require.py](../../backend/app/services/category_require.py) / [category_schedule.py](../../backend/app/services/category_schedule.py) / [category_schedule_auto.py](../../backend/app/services/category_schedule_auto.py)
+- [stock_service.py](../../backend/app/services/stock_service.py) — 库存
 
 ### 4.5 外卖平台
-- [delivery_service.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_service.py) — 主服务（39KB）
-- [delivery_providers.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_providers.py) — 美团/饿了么适配（35KB）
-- [delivery_sign.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_sign.py) — 验签
-- [delivery_context.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_context.py) / [delivery_events.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_events.py) / [delivery_sync_handlers.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_sync_handlers.py) / [delivery_tasks.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_tasks.py)
-- [platform_token_service.py](file:///e:/SmartNoodleHouse/backend/app/services/platform_token_service.py) — 平台 Token 加密存储
+- [delivery_service.py](../../backend/app/services/delivery_service.py) — 主服务（39KB）
+- [delivery_providers.py](../../backend/app/services/delivery_providers.py) — 美团/饿了么适配（35KB）
+- [delivery_sign.py](../../backend/app/services/delivery_sign.py) — 验签
+- [delivery_context.py](../../backend/app/services/delivery_context.py) / [delivery_events.py](../../backend/app/services/delivery_events.py) / [delivery_sync_handlers.py](../../backend/app/services/delivery_sync_handlers.py) / [delivery_tasks.py](../../backend/app/services/delivery_tasks.py)
+- [platform_token_service.py](../../backend/app/services/platform_token_service.py) — 平台 Token 加密存储
 
 ### 4.6 厨房与打印
-- [kitchen_claim.py](file:///e:/SmartNoodleHouse/backend/app/services/kitchen_claim.py) / [kitchen_auto_service.py](file:///e:/SmartNoodleHouse/backend/app/services/kitchen_auto_service.py)
-- [print_service.py](file:///e:/SmartNoodleHouse/backend/app/services/print_service.py) — 打印主服务（39KB）
-- [print_tasks.py](file:///e:/SmartNoodleHouse/backend/app/services/print_tasks.py) / [escpos_client.py](file:///e:/SmartNoodleHouse/backend/app/services/escpos_client.py) / [xpyun_client.py](file:///e:/SmartNoodleHouse/backend/app/services/xpyun_client.py)
+- [kitchen_claim.py](../../backend/app/services/kitchen_claim.py) / [kitchen_auto_service.py](../../backend/app/services/kitchen_auto_service.py)
+- [print_service.py](../../backend/app/services/print_service.py) — 打印主服务（39KB）
+- [print_tasks.py](../../backend/app/services/print_tasks.py) / [escpos_client.py](../../backend/app/services/escpos_client.py) / [xpyun_client.py](../../backend/app/services/xpyun_client.py)
 
 ### 4.7 人脸与摄像头
-- [face_service.py](file:///e:/SmartNoodleHouse/backend/app/services/face_service.py) — 识别/迎宾（25KB）
-- [face_extractor.py](file:///e:/SmartNoodleHouse/backend/app/services/face_extractor.py) / [face_liveness.py](file:///e:/SmartNoodleHouse/backend/app/services/face_liveness.py) / [face_liveness_service.py](file:///e:/SmartNoodleHouse/backend/app/services/face_liveness_service.py)
-- [camera_credentials.py](file:///e:/SmartNoodleHouse/backend/app/services/camera_credentials.py) — 摄像头凭证
-- [privacy_service.py](file:///e:/SmartNoodleHouse/backend/app/services/privacy_service.py) / [pii_cleanup_service.py](file:///e:/SmartNoodleHouse/backend/app/services/pii_cleanup_service.py)
+- [face_service.py](../../backend/app/services/face_service.py) — 识别/迎宾（25KB）
+- [face_extractor.py](../../backend/app/services/face_extractor.py) / [face_liveness.py](../../backend/app/services/face_liveness.py) / [face_liveness_service.py](../../backend/app/services/face_liveness_service.py)
+- [camera_credentials.py](../../backend/app/services/camera_credentials.py) — 摄像头凭证
+- [privacy_service.py](../../backend/app/services/privacy_service.py) / [pii_cleanup_service.py](../../backend/app/services/pii_cleanup_service.py)
 
 ### 4.8 后台任务与可靠性
-- [outbox_worker.py](file:///e:/SmartNoodleHouse/backend/app/services/outbox_worker.py) — Outbox 事件处理（13KB）
-- [webhook_inbox.py](file:///e:/SmartNoodleHouse/backend/app/services/webhook_inbox.py) / [webhook_replay.py](file:///e:/SmartNoodleHouse/backend/app/services/webhook_replay.py)
-- [night_batch_service.py](file:///e:/SmartNoodleHouse/backend/app/services/night_batch_service.py) — 夜间批处理
-- [scheduler_admin.py](file:///e:/SmartNoodleHouse/backend/app/services/scheduler_admin.py) — 调度管理
-- [secret_encryption.py](file:///e:/SmartNoodleHouse/backend/app/services/secret_encryption.py) — Fernet 密钥派生
+- [outbox_worker.py](../../backend/app/services/outbox_worker.py) — Outbox 事件处理（13KB）
+- [webhook_inbox.py](../../backend/app/services/webhook_inbox.py) / [webhook_replay.py](../../backend/app/services/webhook_replay.py)
+- [night_batch_service.py](../../backend/app/services/night_batch_service.py) — 夜间批处理
+- [scheduler_admin.py](../../backend/app/services/scheduler_admin.py) — 调度管理
+- [secret_encryption.py](../../backend/app/services/secret_encryption.py) — Fernet 密钥派生
 
 ### 4.9 其他
-- [recommendation_service.py](file:///e:/SmartNoodleHouse/backend/app/services/recommendation_service.py) / [taste_profile_service.py](file:///e:/SmartNoodleHouse/backend/app/services/taste_profile_service.py) / [taste_learning_service.py](file:///e:/SmartNoodleHouse/backend/app/services/taste_learning_service.py) / [reco_cache.py](file:///e:/SmartNoodleHouse/backend/app/services/reco_cache.py) / [behavior_event_service.py](file:///e:/SmartNoodleHouse/backend/app/services/behavior_event_service.py)
-- [revenue_stats.py](file:///e:/SmartNoodleHouse/backend/app/services/revenue_stats.py) / [feedback_service.py](file:///e:/SmartNoodleHouse/backend/app/services/feedback_service.py) / [qr_links.py](file:///e:/SmartNoodleHouse/backend/app/services/qr_links.py) / [table_resolve.py](file:///e:/SmartNoodleHouse/backend/app/services/table_resolve.py) / [store_hours_service.py](file:///e:/SmartNoodleHouse/backend/app/services/store_hours_service.py) / [system_settings_service.py](file:///e:/SmartNoodleHouse/backend/app/services/system_settings_service.py) / [weather_client.py](file:///e:/SmartNoodleHouse/backend/app/services/weather_client.py) / [websocket_manager.py](file:///e:/SmartNoodleHouse/backend/app/services/websocket_manager.py) / [ws_pubsub.py](file:///e:/SmartNoodleHouse/backend/app/services/ws_pubsub.py) / [ws_conn_quota.py](file:///e:/SmartNoodleHouse/backend/app/services/ws_conn_quota.py) / [object_storage.py](file:///e:/SmartNoodleHouse/backend/app/services/object_storage.py) / [file_log_service.py](file:///e:/SmartNoodleHouse/backend/app/services/file_log_service.py) / [customer_display.py](file:///e:/SmartNoodleHouse/backend/app/services/customer_display.py) / [status_history.py](file:///e:/SmartNoodleHouse/backend/app/services/status_history.py) / [ab_service.py](file:///e:/SmartNoodleHouse/backend/app/services/ab_service.py) / [audit_service.py](file:///e:/SmartNoodleHouse/backend/app/services/audit_service.py) / [barcode_pay_service.py](file:///e:/SmartNoodleHouse/backend/app/services/barcode_pay_service.py) / [preference_scene.py](file:///e:/SmartNoodleHouse/backend/app/services/preference_scene.py) / [product_sync_service.py](file:///e:/SmartNoodleHouse/backend/app/services/product_sync_service.py)
+- [recommendation_service.py](../../backend/app/services/recommendation_service.py) / [taste_profile_service.py](../../backend/app/services/taste_profile_service.py) / [taste_learning_service.py](../../backend/app/services/taste_learning_service.py) / [reco_cache.py](../../backend/app/services/reco_cache.py) / [behavior_event_service.py](../../backend/app/services/behavior_event_service.py)
+- [revenue_stats.py](../../backend/app/services/revenue_stats.py) / [feedback_service.py](../../backend/app/services/feedback_service.py) / [qr_links.py](../../backend/app/services/qr_links.py) / [table_resolve.py](../../backend/app/services/table_resolve.py) / [store_hours_service.py](../../backend/app/services/store_hours_service.py) / [system_settings_service.py](../../backend/app/services/system_settings_service.py) / [weather_client.py](../../backend/app/services/weather_client.py) / [websocket_manager.py](../../backend/app/services/websocket_manager.py) / [ws_pubsub.py](../../backend/app/services/ws_pubsub.py) / [ws_conn_quota.py](../../backend/app/services/ws_conn_quota.py) / [object_storage.py](../../backend/app/services/object_storage.py) / [file_log_service.py](../../backend/app/services/file_log_service.py) / [customer_display.py](../../backend/app/services/customer_display.py) / [status_history.py](../../backend/app/services/status_history.py) / [ab_service.py](../../backend/app/services/ab_service.py) / [audit_service.py](../../backend/app/services/audit_service.py) / [barcode_pay_service.py](../../backend/app/services/barcode_pay_service.py) / [preference_scene.py](../../backend/app/services/preference_scene.py) / [product_sync_service.py](../../backend/app/services/product_sync_service.py)
 
-### 4.10 领域服务（[backend/app/domains/](file:///e:/SmartNoodleHouse/backend/app/domains/)）
+### 4.10 领域服务（[backend/app/domains/](../../backend/app/domains/)）
 按 DDD 分包：`auth/`、`messaging/`、`order/`、`product/`、`user/`
 
 ---
 
-## 5. 核心模型（[backend/app/models/__init__.py](file:///e:/SmartNoodleHouse/backend/app/models/__init__.py)）
+## 5. 核心模型（[backend/app/models/__init__.py](../../backend/app/models/__init__.py)）
 
 聚合根（72KB 单文件，统一导出）：
 
@@ -213,19 +213,19 @@
 
 ## 6. 数据库迁移
 
-- Alembic 配置：[backend/alembic.ini](file:///e:/SmartNoodleHouse/backend/alembic.ini)
-- 迁移目录：[backend/alembic/versions/](file:///e:/SmartNoodleHouse/backend/alembic/versions/)（51 个版本文件；以 main 当前目录清单为准）
-- 数据库设计文档：[docs/数据库设计.md](file:///e:/SmartNoodleHouse/docs/数据库设计.md)
+- Alembic 配置：[backend/alembic.ini](../../backend/alembic.ini)
+- 迁移目录：[backend/alembic/versions/](../../backend/alembic/versions/)（51 个版本文件；以 main 当前目录清单为准）
+- 数据库设计文档：[docs/数据库设计.md](../../docs/数据库设计.md)
 
 ---
 
 ## 7. 配置与秘密管理基线
 
 ### 7.1 配置入口
-- [backend/app/core/config.py](file:///e:/SmartNoodleHouse/backend/app/core/config.py) `Settings(BaseSettings)`
+- [backend/app/core/config.py](../../backend/app/core/config.py) `Settings(BaseSettings)`
 - env_file 候选：项目根 `.env` → `backend/.env` → 当前目录 `.env`
 
-### 7.2 启动校验覆盖项（[startup_checks.py](file:///e:/SmartNoodleHouse/backend/app/core/startup_checks.py)）
+### 7.2 启动校验覆盖项（[startup_checks.py](../../backend/app/core/startup_checks.py)）
 
 | 类别 | 校验项 | 生产拒绝启动 | 开发警告 |
 |---|---|---|---|
@@ -260,38 +260,38 @@
 - `WECHAT_PLATFORM_PUBLIC_KEY` / `WECHAT_PLATFORM_CERT_PATH` — 平台证书
 - `.env` / `.env.development` / `.env.production` 已 `.gitignore`
 - `.env.example` 等仅含 `replace-with-*` / `USER:PASSWORD` 占位符
-- 安全说明：[docs/安全说明.md](file:///e:/SmartNoodleHouse/docs/安全说明.md)
+- 安全说明：[docs/安全说明.md](../../docs/安全说明.md)
 
 ---
 
 ## 8. 前端 Vue 后台基线
 
-- 入口：[frontend/src/main.ts](file:///e:/SmartNoodleHouse/frontend/src/main.ts) → [App.vue](file:///e:/SmartNoodleHouse/frontend/src/App.vue)
+- 入口：[frontend/src/main.ts](../../frontend/src/main.ts) → [App.vue](../../frontend/src/App.vue)
 - 目录：`api/`（封装）、`components/`、`layouts/`、`router/`、`stores/`、`styles/`、`utils/`、`views/`
-- 构建：[frontend/vite.config.ts](file:///e:/SmartNoodleHouse/frontend/vite.config.ts) + [tsconfig.json](file:///e:/SmartNoodleHouse/frontend/tsconfig.json)
-- 依赖锁定：[frontend/package-lock.json](file:///e:/SmartNoodleHouse/frontend/package-lock.json)
+- 构建：[frontend/vite.config.ts](../../frontend/vite.config.ts) + [tsconfig.json](../../frontend/tsconfig.json)
+- 依赖锁定：[frontend/package-lock.json](../../frontend/package-lock.json)
 
 ---
 
 ## 9. 小程序基线
 
-### 9.1 微信小程序 [miniprogram-wechat/](file:///e:/SmartNoodleHouse/miniprogram-wechat/)
+### 9.1 微信小程序 [miniprogram-wechat/](../../miniprogram-wechat/)
 - 平台：微信小程序原生
-- 后端入口：[miniprogram.py](file:///e:/SmartNoodleHouse/backend/app/api/v1/miniprogram.py)
+- 后端入口：[miniprogram.py](../../backend/app/api/v1/miniprogram.py)
 
-### 9.2 支付宝小程序 [miniprogram-alipay/](file:///e:/SmartNoodleHouse/miniprogram-alipay/)
+### 9.2 支付宝小程序 [miniprogram-alipay/](../../miniprogram-alipay/)
 - 平台：支付宝小程序原生
 - 平台差异由后端 `miniprogram.py` 按 `channel` 分流
 
 ### 9.3 上架检查清单
-- [docs/小程序上架检查清单.md](file:///e:/SmartNoodleHouse/docs/小程序上架检查清单.md)
+- [docs/小程序上架检查清单.md](../../docs/小程序上架检查清单.md)
 
 ---
 
 ## 10. 部署基线
 
-- 当前生产部署模板：[systemd/](file:///e:/SmartNoodleHouse/systemd/) 与 [nginx/](file:///e:/SmartNoodleHouse/nginx/)；`deploy/` 仅含迁移提示文件。本项目当前生产部署不使用 Docker。
-- 部署说明：[docs/部署说明.md](file:///e:/SmartNoodleHouse/docs/部署说明.md)
+- 当前生产部署模板：[systemd/](../../systemd/) 与 [nginx/](../../nginx/)；`deploy/` 仅含迁移提示文件。本项目当前生产部署不使用 Docker。
+- 部署说明：[docs/部署说明.md](../../docs/部署说明.md)
 - Leader 锁机制（Redis Lua 原子 compare-and-delete/expire）确保多 worker 单调度
 - TTS 队列：`asyncio.Queue(maxsize=100)` 有界
 - 摄像头操作仅 Leader worker
@@ -301,9 +301,9 @@
 ## 11. 测试基线
 
 ### 11.1 测试目录
-- 所有测试在 [tests/](file:///e:/SmartNoodleHouse/tests/)（项目硬约束，禁止散落）
-- 配置：[pytest.ini](file:///e:/SmartNoodleHouse/pytest.ini) + [tests/conftest.py](file:///e:/SmartNoodleHouse/tests/conftest.py)
-- 沙箱脚手架：[tests/测试_沙箱脚手架.py](file:///e:/SmartNoodleHouse/tests/测试_沙箱脚手架.py)
+- 所有测试在 [tests/](../../tests/)（项目硬约束，禁止散落）
+- 配置：[pytest.ini](../../pytest.ini) + [tests/conftest.py](../../tests/conftest.py)
+- 沙箱脚手架：[tests/测试_沙箱脚手架.py](../../tests/测试_沙箱脚手架.py)
 
 ### 11.2 已覆盖测试（按主题归类，130+ 文件）
 - **P0 安全**：测试_安全P0/P1/加固第二轮/P0资金JWT隔离/摄像头SSRF与活体/客户端IP与退款防护
@@ -329,19 +329,19 @@
 
 ## 12. 已有审计文档（避免重复劳动）
 
-- [docs/数据隔离修复.md](file:///e:/SmartNoodleHouse/docs/数据隔离修复.md) — 多门店隔离加固方案
-- [docs/门店隔离检查清单.md](file:///e:/SmartNoodleHouse/docs/门店隔离检查清单.md) — API 隔离门禁
-- [docs/安全说明.md](file:///e:/SmartNoodleHouse/docs/安全说明.md) — 密钥轮换清单
-- [docs/支付对接.md](file:///e:/SmartNoodleHouse/docs/支付对接.md)
-- [docs/退款流程.md](file:///e:/SmartNoodleHouse/docs/退款流程.md)
-- [docs/厨房KDS与取餐叫号.md](file:///e:/SmartNoodleHouse/docs/厨房KDS与取餐叫号.md)
-- [docs/人脸识别.md](file:///e:/SmartNoodleHouse/docs/人脸识别.md)
-- [docs/多门店管理.md](file:///e:/SmartNoodleHouse/docs/多门店管理.md)
-- [docs/外卖对接.md](file:///e:/SmartNoodleHouse/docs/外卖对接.md)
-- [docs/数据库设计.md](file:///e:/SmartNoodleHouse/docs/数据库设计.md)
-- [docs/部署说明.md](file:///e:/SmartNoodleHouse/docs/部署说明.md)
-- [docs/架构设计.md](file:///e:/SmartNoodleHouse/docs/架构设计.md)
-- [docs/故障排查.md](file:///e:/SmartNoodleHouse/docs/故障排查.md)
+- [docs/数据隔离修复.md](../../docs/数据隔离修复.md) — 多门店隔离加固方案
+- [docs/门店隔离检查清单.md](../../docs/门店隔离检查清单.md) — API 隔离门禁
+- [docs/安全说明.md](../../docs/安全说明.md) — 密钥轮换清单
+- [docs/支付对接.md](../../docs/支付对接.md)
+- [docs/退款流程.md](../../docs/退款流程.md)
+- [docs/厨房KDS与取餐叫号.md](../../docs/厨房KDS与取餐叫号.md)
+- [docs/人脸识别.md](../../docs/人脸识别.md)
+- [docs/多门店管理.md](../../docs/多门店管理.md)
+- [docs/外卖对接.md](../../docs/外卖对接.md)
+- [docs/数据库设计.md](../../docs/数据库设计.md)
+- [docs/部署说明.md](../../docs/部署说明.md)
+- [docs/架构设计.md](../../docs/架构设计.md)
+- [docs/故障排查.md](../../docs/故障排查.md)
 
 ---
 
