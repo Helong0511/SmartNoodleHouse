@@ -63,7 +63,7 @@
 
 ---
 
-## 3. 定时任务（[backend/tasks/scheduler.py](../../backend/tasks/scheduler.py)）
+## 3. 定时任务（[backend/tasks/scheduler.py](../../backend/app/tasks/scheduler.py)）
 
 ### 3.1 调度器配置
 
@@ -103,7 +103,7 @@
 5. 启动 WS Redis subscriber。
 6. 启动调度器 / TTS / 摄像头（仅 Leader）。
 
-### 4.2 健康探针（[health.py](../../backend/app/api/v1/health.py)）
+### 4.2 健康探针（[health.py](../../backend/app/api/health.py)）
 
 - `/api/health`：liveness，进程存活即 200。
 - `/api/ready`：readiness，探 DB + Redis，均可用才 200，供 nginx/负载均衡摘挂流量。
@@ -218,7 +218,7 @@
 ### 9.2 指标
 
 - PerformanceMetricsMiddleware 记录耗时/状态。
-- `/api/performance` 查询性能指标（[performance.py](../../backend/app/api/v1/performance.py)）。
+- `/api/performance` 查询性能指标（[performance.py](../../backend/app/api/performance.py)）。
 - metrics 端点已就绪，但 Prometheus 抓取/告警规则需运维接入（BLK-004）。
 
 ### 9.3 审计
