@@ -6,7 +6,7 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import delete, event
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
@@ -109,16 +109,19 @@ async def test_concurrent_terminal_transition_uses_locked_current_state_and_runs
             with pytest.raises(AppException) as exc:
                 await asyncio.wait_for(competing, timeout=15)
             assert exc.value.code == 40025
+            # Verify the ORM object was synchronized before rollback expires it.
+            assert stale_second_order.status == "REFUNDED"
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", observe_competing_lock)
             await second.rollback()
-
-        assert stale_second_order.status == "REFUNDED"
 
     async with maker() as verify:
         persisted = await verify.get(Order, order_id)
         assert persisted is not None
         assert persisted.status == "REFUNDED"
+        await verify.execute(delete(Order).where(Order.id == order_id))
+        await verify.execute(delete(Store).where(Store.id == persisted.store_id))
+        await verify.commit()
 
     # Only the winning PAID -> REFUNDED transition may execute terminal side effects.
     restore_stock.assert_awaited_once()
