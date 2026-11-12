@@ -298,9 +298,11 @@
 
 ## 10. 部署与基础设施
 
-- systemd 单元使用非 root 用户运行 gunicorn/uvicorn。
-- nginx 配置 TLS、限流、上传大小、WebSocket 升级。
-- Docker 镜像不含 `.env`；密钥通过环境变量注入。
+> **当前部署事实校正（2026-11-12）**：以下历史快照中的部署描述已按当前 `main` 复核。生产目标是原生 Ubuntu + Nginx + systemd + MySQL + Redis，不使用 Docker；systemd 以 `www-data` 非 root 用户启动 Uvicorn 原生多进程管理器（`--workers 2`），不使用 Gunicorn worker 插件。请以 `docs/audit/DEPLOYMENT_AND_OPERATIONS.md`、`systemd/smart-noodle.service` 和 `nginx/smart-noodle.conf` 为当前部署依据。
+
+- systemd 单元以非 root `www-data` 用户运行 Uvicorn 原生多进程管理器；配置 `NoNewPrivileges=true`，写目录限制为部署目录内的 `uploads` 与 `logs`。
+- nginx 配置 TLS、限流、上传大小、WebSocket 升级及安全响应头。
+- 当前生产部署不使用 Docker；密钥由受控生产环境配置注入，不得写入镜像、仓库或文档。
 - Leader 锁 Redis Lua 脚本原子 compare-and-delete / compare-and-expire，避免多 worker 同时调度。
 - TTS 队列 `asyncio.Queue(maxsize=100)` 有界，防内存爆。
 
