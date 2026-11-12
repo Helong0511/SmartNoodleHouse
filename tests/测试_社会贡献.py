@@ -676,3 +676,62 @@ async def test_建单公益与券互斥(db_session, sb):
         )
     ).scalar_one()
     assert red is not None
+
+
+@pytest.mark.asyncio
+async def test_公益台账冲减失败时取消事务必须回滚(db_session, sb, monkeypatch):
+    """公益台账未冲减成功时，不得提交 CANCELLED 并永久占用顾客每日限次。"""
+    from app.services.customer_service import OrderCreateService
+    from app.services.order_lifecycle import apply_order_status
+
+    sb["lv"].discount_rate = Decimal("0.95")
+    sb["rule"].discount_rate = Decimal("0.80")
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.commit()
+
+    order = await OrderCreateService.create_order(
+        db_session,
+        store_id=sb["store1"].id,
+        table_token=None,
+        customer_id=sb["c1"].id,
+        channel="H5",
+        dining_type="TAKEAWAY",
+        need_pack=True,
+        items=[{"product_id": sb["prod"].id, "quantity": 1, "option_ids": []}],
+        use_social_benefit=True,
+        idempotency_key="sb-cancel-reverse-failure-1",
+    )
+    await db_session.commit()
+    red = (
+        await db_session.execute(
+            select(SocialBenefitRedemption).where(SocialBenefitRedemption.order_id == order.id)
+        )
+    ).scalar_one()
+
+    async def fail_reverse(_db, _order_id):
+        raise RuntimeError("simulated social-benefit ledger write failure")
+
+    monkeypatch.setattr(
+        SocialBenefitService, "reverse_for_order", staticmethod(fail_reverse)
+    )
+    with pytest.raises(RuntimeError, match="simulated social-benefit ledger write failure"):
+        await apply_order_status(
+            db_session,
+            order,
+            "CANCELLED",
+            source="SYSTEM",
+            payment_status="CANCELLED",
+            restore_inventory=False,
+        )
+
+    await db_session.rollback()
+    await db_session.refresh(order)
+    await db_session.refresh(red)
+    assert order.status == "PENDING_PAYMENT"
+    assert red.status == SocialBenefitService.REDEEM_PENDING

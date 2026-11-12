@@ -144,11 +144,14 @@ async def apply_order_status(
                 try:
                     await SocialBenefitService.reverse_for_order(db, int(order.id))
                 except Exception:
+                    # 公益权益占用属于订单取消/退款事务的一部分。不能只记日志后继续
+                    # 提交终态，否则顾客可能仍被占用每日限次；向上抛出让整个事务回滚。
                     logger.exception(
-                        "冲减公益台账失败 order_id=%s target=%s",
+                        "冲减公益台账失败，阻止订单状态提交 order_id=%s target=%s",
                         order.id,
                         target,
                     )
+                    raise
     elif target == "READY" and old != "READY":
         # Outbox 是 READY 转换的持久化组成部分；入队失败必须回滚本次状态变更，
         # 不能吞掉数据库错误后提交 READY 却缺失通知任务。
