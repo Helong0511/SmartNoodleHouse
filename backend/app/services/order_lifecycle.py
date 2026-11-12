@@ -5,6 +5,7 @@ import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.exceptions import AppException
 from app.core.response import now_local
@@ -76,6 +77,10 @@ async def apply_order_status(
     ).scalar_one_or_none()
     if current is not None:
         old = (current or "").strip().upper()
+        # 当前读可能发现另一个事务已先完成状态迁移。同步 ORM 的已提交值，
+        # 避免本次调用在 old == target 早退时把过期的 order.status 返回给上层；
+        # set_committed_value 不会把这次刷新误记为新的待写 UPDATE。
+        set_committed_value(order, "status", old)
     else:
         # 尚未落库的新单（极端路径）退回使用对象值
         old = (order.status or "").strip().upper()
