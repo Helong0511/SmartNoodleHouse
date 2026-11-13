@@ -42,7 +42,7 @@ sudo journalctl -u smart-noodle -f
 # ── 5. 更新发布（拉代码后）──
 cd /var/www/smart-noodle
 git pull
-source backend/.venv/bin/activate && pip install -r backend/requirements.txt
+source backend/.venv/bin/activate && pip install -r backend/requirements.lock
 cd frontend && npm ci && npm run build
 sudo systemctl restart smart-noodle
 sudo systemctl reload nginx
