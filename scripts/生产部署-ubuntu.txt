@@ -114,7 +114,7 @@ sudo nginx -t && sudo systemctl reload nginx
 #     密钥：python scripts/生成密钥.py（JWT/FACE/SECRET/DISPLAY_SCREEN_TOKEN）
 #     MINI_PROGRAM_ENV_VERSION=release
 #     H5_PUBLIC_BASE_URL=https://your-domain.com
-#     ALIPAY_AES_KEY=（支付宝手机号解密，必填）
+#     ALIPAY_AES_KEY=（仅启用支付宝手机号绑定时必填；ENABLE_ALIPAY_PHONE_BIND=false 时留空）
 #     ENABLE_WX_PRIVACY_APIS=true
 #     ENABLE_ALIPAY_PRIVACY_APIS=true
 #     PROCESS_ROLE=auto
