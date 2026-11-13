@@ -266,6 +266,12 @@
 - `scripts/验证数据库.py`：检查关键表、字段、索引和 Alembic 版本。
 - `scripts/备份恢复演练.py`：先备份，再通过独立 `DRILL_DATABASE_URL` 恢复并验证演练库。
 
+备份账号权限边界（与 `scripts/备份数据库.py` 当前参数一致）：
+- `--single-transaction` 对 InnoDB 一致性备份通常不要求 `LOCK TABLES`；`--no-tablespaces` 避免为 tablespace 元数据额外要求全局 `PROCESS`；`--set-gtid-purged=OFF` 不请求 GTID 复制元数据。
+- 表数据需要目标 schema 的 `SELECT`；视图需要 `SHOW VIEW`；触发器需要对应表的 `TRIGGER`。
+- 当前脚本保留 `--events`，因此还需要目标 schema 级 `EVENT` 权限（例如 `GRANT EVENT ON \\`数据库名\\`.* TO '备份账号'@'来源主机';`）。不要授予 `EVENT ON *.*` 或 `ALL PRIVILEGES`。只有在确认目标 schema 不包含任何需要恢复的 Event Scheduler 事件，并明确接受不备份这些事件后，才可移除 `--events`；代码/迁移未定义事件不能证明生产库没有 DBA 手工创建的事件。
+- 上述是按当前 mysqldump 选项列出的对象读取权限边界；若未来增加选项（例如 `--flush-logs`、`--master-data`、`--routines`），必须重新核对其额外权限，不能沿用此清单。
+
 注意：
 - `--restore-drill` 必须配置独立演练库凭证；不得指向生产库。脚本的 host/port/database 比较只能阻止明显误配置，不能证明两个 DNS 地址背后不是同一数据库实例。生产操作前还必须从数据库侧确认目标实例身份、账号权限和网络隔离。
 - 恢复脚本具有覆盖目标库的破坏性，生产恢复必须经过审批并确认目标。
