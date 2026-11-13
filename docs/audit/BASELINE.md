@@ -20,7 +20,7 @@
 | `camera/` | 人脸识别摄像头模块 | 独立 Python 包，被后端 import |
 | `deploy/` | 迁移提示 | 仅保留指向 `nginx/` 与 `systemd/` 的迁移说明，不是 Docker 或可直接部署模板 |
 | `nginx/` | 反向代理配置 | 限流、WebSocket、上传大小 |
-| `systemd/` | 进程管理 | gunicorn/uvicorn 服务单元 |
+| `systemd/` | 进程管理 | Uvicorn 原生多进程服务单元（spawn；不经 Gunicorn） |
 | `sql/` | SQL 脚本 | 初始化、索引、对账 |
 | `tests/` | 测试目录 | 所有测试均在此目录，禁止散落 |
 | `scripts/` | 运维脚本 | 初始化、迁移、密钥生成 |
@@ -52,7 +52,7 @@
 - cryptography / Fernet（人脸向量加密）
 - httpx（外部 HTTP 调用）
 - Pillow（图片处理 + decompression bomb 防护）
-- uvicorn / gunicorn
+- Uvicorn（原生多进程管理器；当前生产 systemd 单元不使用 Gunicorn）
 
 ### 2.3 中间件链（按注册顺序，外层 → 内层）
 1. `JsonGZipMiddleware` / `PerformanceMetricsMiddleware`（性能计时 + GZip）
