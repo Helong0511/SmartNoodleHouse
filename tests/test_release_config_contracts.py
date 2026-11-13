@@ -28,3 +28,21 @@ def test_production_webhook_allowlist_policy_matches_operator_guide() -> None:
     assert "不得猜测或复制未经官方确认的 IP" in docs
     assert "签名/证书验签" in docs
     assert "数据库幂等" in docs
+
+
+
+def test_production_template_uses_existing_secret_generator_and_disables_recognition_worker() -> None:
+    template = ROOT / ".env.production.example"
+    content = template.read_text(encoding="utf-8")
+    assert "python scripts/生成密钥.py" in content
+    assert (ROOT / "scripts/生成密钥.py").is_file()
+    assert "scripts/gen_secrets.py" not in content
+    assert _dotenv_value(template, "ENABLE_RECOGNITION_WORKER") == "0"
+
+
+def test_systemd_install_guide_uses_pinned_backend_lockfile() -> None:
+    guide = (ROOT / "systemd/安装说明.txt").read_text(encoding="utf-8")
+    assert "pip install -r backend/requirements.lock" in guide
+    executable_lines = [line.strip() for line in guide.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    assert not any("pip install -r backend/requirements.txt" in line for line in executable_lines)
+    assert (ROOT / "backend/requirements.lock").is_file()
