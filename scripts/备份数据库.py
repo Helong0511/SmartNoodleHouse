@@ -65,16 +65,39 @@ def prune(keep_days: int) -> int:
     cutoff = datetime.now() - timedelta(days=keep_days)
     removed = 0
     for f in BACKUP_DIR.glob("smart_noodle_house_*.sql.gz"):
-        try:
-            # smart_noodle_house_YYYYMMDD_HHMMSS.sql.gz
-            stamp = f.name.replace("smart_noodle_house_", "").replace(".sql.gz", "")
-            ts = datetime.strptime(stamp, "%Y%m%d_%H%M%S")
-            if ts < cutoff:
-                f.unlink()
-                removed += 1
-        except ValueError:
-            continue
+        stamp = f.name.removeprefix("smart_noodle_house_").removesuffix(".sql.gz")
+        parsed = None
+        # 新文件名包含微秒；同时兼容旧版无微秒的备份文件名。
+        for fmt in ("%Y%m%d_%H%M%S_%f", "%Y%m%d_%H%M%S"):
+            try:
+                parsed = datetime.strptime(stamp, fmt)
+                break
+            except ValueError:
+                continue
+        if parsed is not None and parsed < cutoff:
+            f.unlink()
+            removed += 1
     return removed
+
+
+def _build_mysqldump_command(dump: str, cfg: dict) -> list[str]:
+    """导出应用业务数据，不要求全局权限或 GTID 复制元数据权限。"""
+    return [
+        dump,
+        "-h",
+        cfg["host"],
+        "-P",
+        cfg["port"],
+        "-u",
+        cfg["user"],
+        "--single-transaction",
+        "--triggers",
+        "--events",
+        "--default-character-set=utf8mb4",
+        "--no-tablespaces",
+        "--set-gtid-purged=OFF",
+        cfg["database"],
+    ]
 
 
 def _run_mysqldump_to_gzip(cmd: list[str], out_path: Path, env: dict[str, str]) -> tuple[int, str]:
@@ -149,22 +172,9 @@ def main() -> int:
     # 避免密码出现在进程参数列表：使用 MYSQL_PWD（仅本子进程）
     env["MYSQL_PWD"] = cfg["password"]
 
-    cmd = [
-        dump,
-        "-h",
-        cfg["host"],
-        "-P",
-        cfg["port"],
-        "-u",
-        cfg["user"],
-        "--single-transaction",
-        "--routines",
-        "--triggers",
-        "--events",
-        "--default-character-set=utf8mb4",
-        "--set-gtid-purged=OFF",
-        cfg["database"],
-    ]
+    # 当前应用 schema 不依赖存储过程/函数；不请求 --routines 的全局 SELECT 权限。
+    # --no-tablespaces 避免 MySQL 8 默认要求 PROCESS；GTID 元数据不用于独立恢复演练。
+    cmd = _build_mysqldump_command(dump, cfg)
     print("备份中…", cfg["database"], "->", out_path.name)
     try:
         return_code, error = _run_mysqldump_to_gzip(cmd, temp_path, env)
