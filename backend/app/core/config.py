@@ -204,7 +204,7 @@ class Settings(BaseSettings):
     # - auto：各进程争抢 Redis 锁，适合单机 gunicorn -w N
     process_role: str = "auto"
     # 是否在 leader 进程启动人脸识别 worker（须走 settings 读 .env，勿用 os.getenv）
-    enable_recognition_worker: bool = True
+    enable_recognition_worker: bool = False
 
     # 结构化 JSON 日志；文件落盘在仓库根 logs/{backend,frontend,wechat,alipay}
     json_logs: bool = False
