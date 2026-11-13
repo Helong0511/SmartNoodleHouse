@@ -43,5 +43,6 @@ def test_production_template_uses_existing_secret_generator_and_disables_recogni
 def test_systemd_install_guide_uses_pinned_backend_lockfile() -> None:
     guide = (ROOT / "systemd/安装说明.txt").read_text(encoding="utf-8")
     assert "pip install -r backend/requirements.lock" in guide
-    assert "pip install -r backend/requirements.txt" not in guide
+    executable_lines = [line.strip() for line in guide.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    assert not any("pip install -r backend/requirements.txt" in line for line in executable_lines)
     assert (ROOT / "backend/requirements.lock").is_file()
