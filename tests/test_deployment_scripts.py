@@ -57,6 +57,45 @@ BACKUP_MODULE = importlib.util.module_from_spec(BACKUP_SPEC)
 BACKUP_SPEC.loader.exec_module(BACKUP_MODULE)
 
 
+def test_mysqldump_command_uses_least_privilege_options():
+    command = BACKUP_MODULE._build_mysqldump_command(
+        "mysqldump",
+        {
+            "host": "127.0.0.1",
+            "port": "3306",
+            "user": "snh",
+            "password": "unused",
+            "database": "smart_noodle_house",
+        },
+    )
+
+    assert "--single-transaction" in command
+    assert "--triggers" in command
+    assert "--events" in command
+    assert "--no-tablespaces" in command
+    assert "--set-gtid-purged=OFF" in command
+    assert "--routines" not in command
+    assert command[-1] == "smart_noodle_house"
+
+
+def test_backup_prune_handles_microsecond_and_legacy_filenames(tmp_path, monkeypatch):
+    BACKUP_MODULE.BACKUP_DIR = tmp_path
+    old_microseconds = tmp_path / "smart_noodle_house_20000101_010203_123456.sql.gz"
+    old_legacy = tmp_path / "smart_noodle_house_20000101_010203.sql.gz"
+    malformed = tmp_path / "smart_noodle_house_invalid.sql.gz"
+    recent = tmp_path / "smart_noodle_house_20990101_010203_123456.sql.gz"
+    for path in (old_microseconds, old_legacy, malformed, recent):
+        path.write_bytes(b"backup")
+
+    removed = BACKUP_MODULE.prune(keep_days=14)
+
+    assert removed == 2
+    assert not old_microseconds.exists()
+    assert not old_legacy.exists()
+    assert malformed.exists()
+    assert recent.exists()
+
+
 def test_backup_gzip_verification_rejects_empty_and_truncated_files(tmp_path):
     empty = tmp_path / "empty.sql.gz"
     with gzip.open(empty, "wb"):
