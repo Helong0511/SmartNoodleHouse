@@ -12,7 +12,7 @@
 # ── 前提 ──
 # 1. 已 clone 代码到 /var/www/smart-noodle（或你的路径）
 # 2. 已 cp .env.production.example .env 并填写密钥
-# 3. 已创建 venv 并 pip install -r backend/requirements.txt
+# 3. 已创建 venv 并 pip install -r backend/requirements.lock
 # 4. MySQL / Redis 已启动
 
 # ── 1. 替换部署路径 ──
