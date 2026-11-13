@@ -58,8 +58,8 @@
 
 - APScheduler（定时任务）。
 - TTS worker（`asyncio.Queue(maxsize=100)` 有界）。
-- 摄像头采集/识别（`CameraManager.set_leader_check`，P0-017）。
-- 避免多 worker 重复叫号、重复人脸采集、重复定时任务。
+- 摄像头采集（如门店硬件需要；`CameraManager.set_leader_check`，P0-017）；人脸识别全局 hard-stop，不加载识别模型、不做人脸身份匹配。
+- 避免多 worker 重复叫号、重复摄像头采集和重复定时任务；摄像头采集不代表人脸识别已启用。
 
 ---
 
@@ -101,7 +101,7 @@
 3. system_settings 种子 + 预热进程缓存 + 默认 A/B 实验（失败仅 warning，可后台补）。
 4. Leader 选举。
 5. 启动 WS Redis subscriber。
-6. 启动调度器 / TTS / 摄像头（仅 Leader）。
+6. 启动调度器 / TTS / 摄像头采集（仅 Leader，且仅在门店硬件配置需要时）；人脸识别保持全局 hard-stop，不加载 InsightFace、不做人脸身份匹配或读取人脸档案。
 
 ### 4.2 健康探针（[health.py](../../backend/app/api/health.py)）
 
@@ -237,7 +237,7 @@
 - 集成测试：CI 启动临时 MinIO 并运行 `tests/test_s3_object_storage_minio.py`；本地可先启动 MinIO，再设置 `S3_TEST_ENDPOINT`、`S3_TEST_ACCESS_KEY`、`S3_TEST_SECRET_KEY` 并执行 `PYTHONPATH=backend python -m pytest -q tests/test_s3_object_storage_minio.py`。
   - CI 镜像固定为 `dappros/minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2`（对应 MinIO `RELEASE.2025-09-07T16-13-09Z` 的重新发布副本），仅用于一次性集成测试；生产环境应使用经组织审核、固定 digest 并纳入镜像供应链管理的 S3 服务镜像，不直接复用该 CI 镜像。
 - 图片：门店 Logo 上传转 WebP、拒绝外链/ GIF/过小（测试_门店Logo.py）；餐品图 URL 白名单。
-- 人脸：仅摄像头实拍，base64 大小+像素双限，decompression bomb 防护。
+- 人脸识别：全局 hard-stop；生产环境不得运行 InsightFace、人脸身份匹配或读取人脸档案。图像输入的大小/像素限制与 decompression-bomb 防护不构成启用识别的许可，也不得被解释为识别功能已开放。
 
 ---
 

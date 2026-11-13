@@ -53,3 +53,11 @@ def test_production_guide_makes_alipay_phone_aes_key_conditional() -> None:
     assert _dotenv_value(template, "ENABLE_ALIPAY_PHONE_BIND") == "false"
     assert "仅启用支付宝手机号绑定时必填" in guide
     assert "ALIPAY_AES_KEY=（支付宝手机号解密，必填）" not in guide
+
+
+def test_deployment_audit_keeps_camera_capture_separate_from_face_recognition() -> None:
+    docs = (ROOT / "docs/audit/DEPLOYMENT_AND_OPERATIONS.md").read_text(encoding="utf-8")
+    assert "人脸识别全局 hard-stop" in docs
+    assert "不加载 InsightFace" in docs
+    assert "摄像头采集不代表人脸识别已启用" in docs
+    assert "不得运行 InsightFace、人脸身份匹配或读取人脸档案" in docs
