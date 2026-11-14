@@ -72,7 +72,7 @@ pydantic==2.14.3
 pydantic-core==2.50.4
 pydantic-settings==2.16.2
 PyJWT[crypto]==2.15.1
-pymysql==1.2.3
+pymysql==1.2.4
 pyparsing==3.3.3
 pypinyin==0.55.0
 python-dateutil==2.9.0.post0
