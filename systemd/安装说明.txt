@@ -24,6 +24,8 @@
 # ── 2. 目录权限 ──
 sudo mkdir -p /var/www/smart-noodle/uploads /var/www/smart-noodle/logs /etc/smart-noodle/certs
 sudo chown -R www-data:www-data /var/www/smart-noodle/uploads /var/www/smart-noodle/logs
+# .env 由 root 管理、www-data 组只读；服务进程需读取配置，但不得修改密钥文件
+sudo chown root:www-data /var/www/smart-noodle/.env
 sudo chmod 640 /var/www/smart-noodle/.env
 # 项目代码可读即可；venv 须 www-data 可执行
 sudo chown -R root:www-data /var/www/smart-noodle/backend/.venv
