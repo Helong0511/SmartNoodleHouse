@@ -20,8 +20,8 @@ argon2-cffi-bindings==26.1.0
 attrs==26.1.0
 audioop-lts==0.2.2; python_version >= "3.13"
 bcrypt==4.3.0
-boto3==1.43.126
-botocore==1.43.126
+boto3==1.44.0
+botocore==1.44.0
 certifi==2026.10.23
 cffi==2.1.1
 charset-normalizer==3.5.2
