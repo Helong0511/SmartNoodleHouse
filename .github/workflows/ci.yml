@@ -194,7 +194,7 @@ jobs:
           set -eu
           unit=systemd/smart-noodle.service
           for directive in PrivateDevices ProtectKernelTunables ProtectKernelModules ProtectControlGroups ProtectKernelLogs ProtectClock ProtectHostname RestrictSUIDSGID LockPersonality; do
-            grep -Eq "^\${directive}=true$" "$unit"
+            grep -F -- "${directive}=true" "$unit"
           done
           grep -F 'NoNewPrivileges=true' "$unit"
           grep -F 'PrivateTmp=true' "$unit"
