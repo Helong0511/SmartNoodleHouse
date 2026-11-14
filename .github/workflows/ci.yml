@@ -189,6 +189,25 @@ jobs:
                   raise RuntimeError(f"Uvicorn worker manager shutdown failed: {log_path.read_text(encoding='utf-8')}")
           print("Uvicorn native two-worker startup, HTTP response and shutdown: OK")
           PY
+      - name: Verify systemd service sandbox directives and unit syntax
+        run: |
+          set -eu
+          unit=systemd/smart-noodle.service
+          for directive in PrivateDevices ProtectKernelTunables ProtectKernelModules ProtectControlGroups ProtectKernelLogs ProtectClock ProtectHostname RestrictSUIDSGID LockPersonality; do
+            grep -Eq "^\${directive}=true$" "$unit"
+          done
+          grep -F 'NoNewPrivileges=true' "$unit"
+          grep -F 'PrivateTmp=true' "$unit"
+          systemd-analyze --version
+          tmp_root="$(mktemp -d)"
+          trap 'rm -rf "$tmp_root"' EXIT
+          deploy_root="$tmp_root/smart-noodle"
+          mkdir -p "$deploy_root/backend/.venv/bin" "$deploy_root/uploads" "$deploy_root/logs"
+          touch "$deploy_root/README.md" "$deploy_root/.env"
+          printf '#!/bin/sh\nexit 0\n' > "$deploy_root/backend/.venv/bin/uvicorn"
+          chmod +x "$deploy_root/backend/.venv/bin/uvicorn"
+          sed "s|REPLACE_DEPLOY_ROOT|$deploy_root|g" "$unit" > "$tmp_root/smart-noodle.service"
+          systemd-analyze verify --man=no "$tmp_root/smart-noodle.service"
       - name: Store isolation guard check
         run: |
           python "scripts/检查门店隔离.py"
