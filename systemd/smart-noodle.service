@@ -52,8 +52,18 @@ RestartSec=5
 ReadWritePaths=REPLACE_DEPLOY_ROOT/uploads
 ReadWritePaths=REPLACE_DEPLOY_ROOT/logs
 
+# 内核与设备隔离：不改变应用数据目录的读写边界。
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
