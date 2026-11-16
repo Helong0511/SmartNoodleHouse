@@ -23,7 +23,7 @@ test('retries a failed lazy chunk only once, then shows the manual recovery prom
   const alreadyLoadedScripts = await page.evaluate(() => new Set(
     performance.getEntriesByType('resource')
       .map((entry) => entry.name)
-      .filter((url) => /\\.js(?:\\?|$)/.test(url)),
+      .filter((url) => /\.js(?:\?|$)/.test(url)),
   ))
 
   await page.route('**/*.js', async (route) => {
