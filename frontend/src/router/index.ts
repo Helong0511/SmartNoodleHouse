@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getStaffToken } from '@/utils/staffAuth'
+import { isChunkLoadError } from '@/utils/chunkLoadRecovery'
 
 const CASHIER_ALLOWED = new Set(['/pos-terminal', '/pos/my-stats', '/login'])
 
@@ -173,9 +174,7 @@ router.afterEach((to) => {
 })
 
 router.onError((error) => {
-  const message = String(error?.message || error)
-  const isChunkFailure = /failed to fetch dynamically imported module|loading chunk [\\w-]+ failed|error loading dynamically imported module/i.test(message)
-  if (!isChunkFailure || typeof window === 'undefined') return
+  if (!isChunkLoadError(error) || typeof window === 'undefined') return
 
   const retryKey = 'snh_chunk_reload_attempted'
   if (window.sessionStorage.getItem(retryKey) !== '1') {
