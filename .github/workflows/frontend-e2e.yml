@@ -39,10 +39,8 @@ jobs:
           test "$(npm --version)" = "11.19.1"
       - name: Install locked application dependencies
         run: npm ci
-      - name: Install pinned Playwright test runner without changing the application lockfile
-        run: |
-          npm install --no-save --package-lock=false --ignore-scripts @playwright/test@1.65.1
-          npx playwright --version | grep -F "Version 1.65.1"
+      - name: Verify locked Playwright test runner
+        run: npx playwright --version | grep -F "Version 1.65.1"
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Build frontend
