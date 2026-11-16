@@ -18,7 +18,13 @@ const showChunkLoadError = () => {
 }
 const reloadPage = () => window.location.reload()
 
-onMounted(() => window.addEventListener('snh:chunk-load-error', showChunkLoadError))
+onMounted(() => {
+  window.addEventListener('snh:chunk-load-error', showChunkLoadError)
+  if (window.sessionStorage.getItem('snh_chunk_load_failed_after_retry') === '1') {
+    window.sessionStorage.removeItem('snh_chunk_load_failed_after_retry')
+    showChunkLoadError()
+  }
+})
 onUnmounted(() => window.removeEventListener('snh:chunk-load-error', showChunkLoadError))
 </script>
 
