@@ -114,3 +114,78 @@ test('kitchen role can access KDS but is redirected away from POS', async ({ pag
   await page.goto('/pos-terminal')
   await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
 })
+
+test('successful staff login persists session and restores it after reload', async ({ page }) => {
+  let meRequests = 0
+  await page.route('**/api/auth/login', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 0,
+        data: {
+          access_token: 'e2e-success-placeholder-token',
+          user: { id: 733, role: 'STAFF', permissions: ['order:read'] },
+        },
+      }),
+    })
+  })
+  await page.route('**/api/auth/me', async route => {
+    meRequests += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 0,
+        data: { id: 733, role: 'STAFF', permissions: ['order:read'] },
+      }),
+    })
+  })
+
+  await page.goto('/login')
+  await page.getByPlaceholder('请输入用户名').fill('e2e-staff')
+  await page.getByPlaceholder('请输入密码').fill('e2e-placeholder-password')
+  await page.getByRole('button', { name: '登 录' }).click()
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard', { timeout: 5000 })
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('snh_staff_token')))
+    .toBe('e2e-success-placeholder-token')
+
+  await page.reload()
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
+  await expect.poll(() => meRequests).toBeGreaterThanOrEqual(2)
+  const storage = await page.evaluate(() => ({
+    sessionToken: sessionStorage.getItem('snh_staff_token'),
+    localToken: localStorage.getItem('snh_staff_token'),
+  }))
+  expect(storage).toEqual({
+    sessionToken: 'e2e-success-placeholder-token',
+    localToken: null,
+  })
+})
+
+test('staff without system management permission cannot open role permissions directly', async ({ page }) => {
+  await page.route('**/api/**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: [] }),
+    })
+  })
+  await page.route('**/api/auth/me', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 0,
+        data: { id: 734, role: 'STAFF', permissions: ['order:read'] },
+      }),
+    })
+  })
+  await page.addInitScript(() => {
+    sessionStorage.setItem('snh_staff_token', 'e2e-limited-staff-placeholder-token')
+  })
+
+  await page.goto('/role-permissions')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
+  await expect(page.getByRole('heading', { name: '数据概览' })).toBeVisible()
+})
