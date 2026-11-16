@@ -52,6 +52,12 @@ def test_systemd_install_guide_uses_pinned_backend_lockfile() -> None:
     assert not any("pip install -r backend/requirements.txt" in line for line in executable_lines)
     assert (ROOT / "backend/requirements.lock").is_file()
 
+def test_systemd_env_file_is_root_owned_and_readable_by_service_group() -> None:
+    guide = (ROOT / "systemd/安装说明.txt").read_text(encoding="utf-8")
+    assert "sudo chown root:www-data /var/www/smart-noodle/.env" in guide
+    assert "sudo chmod 640 /var/www/smart-noodle/.env" in guide
+
+
 def test_production_guide_makes_alipay_phone_aes_key_conditional() -> None:
     template = ROOT / ".env.production.example"
     guide = (ROOT / "scripts/生产部署-ubuntu.txt").read_text(encoding="utf-8")
