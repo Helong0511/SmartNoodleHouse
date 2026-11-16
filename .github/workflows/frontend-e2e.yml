@@ -41,8 +41,8 @@ jobs:
         run: npm ci
       - name: Install pinned Playwright test runner without changing the application lockfile
         run: |
-          npm install --no-save --package-lock=false --ignore-scripts @playwright/test@1.56.1
-          test "$(node -p "require('@playwright/test/package.json').version")" = "1.56.1"
+          npm install --no-save --package-lock=false --ignore-scripts @playwright/test@1.65.1
+          npx playwright --version | grep -F "Version 1.65.1"
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Build frontend
