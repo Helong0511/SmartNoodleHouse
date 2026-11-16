@@ -1,4 +1,4 @@
-""""Temporary face-recognition shutdown is a hard gate, not a UI preference."""
+"""Temporary face-recognition shutdown is a hard gate, not a UI preference."""
 import asyncio
 
 import pytest
