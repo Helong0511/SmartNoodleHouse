@@ -7,14 +7,11 @@ test('unknown URL renders a useful not-found page with safe navigation links', a
   await expect(page.getByRole('link', { name: '前往顾客点餐' })).toHaveAttribute('href', '/scan')
 })
 
-test('chunk-load failure recovery does not enter an automatic reload loop', async ({ page }) => {
+test('shows a manual recovery prompt after the one-time chunk retry has failed', async ({ page }) => {
   await page.addInitScript(() => {
-    sessionStorage.setItem('snh_chunk_reload_attempted', '1')
+    sessionStorage.setItem('snh_chunk_load_failed_after_retry', '1')
   })
   await page.goto('/login')
-  await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('snh:chunk-load-error'))
-  })
   await expect(page.getByRole('alert')).toContainText('页面资源加载失败')
   await expect(page.getByRole('button', { name: '刷新页面' })).toBeVisible()
 })
