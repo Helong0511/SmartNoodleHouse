@@ -7,6 +7,14 @@ test('unknown URL renders a useful not-found page with safe navigation links', a
   await expect(page.getByRole('link', { name: '前往顾客点餐' })).toHaveAttribute('href', '/scan')
 })
 
+
+test('404 dashboard link still enforces the staff login guard', async ({ page }) => {
+  await page.goto('/this-route-does-not-exist')
+  await expect(page.getByRole('heading', { name: '页面不存在' })).toBeVisible()
+  await page.getByRole('link', { name: '返回管理首页' }).click()
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/login')
+})
+
 test('retries a failed lazy chunk only once, then shows the manual recovery prompt', async ({ page }) => {
   let documentNavigations = 0
   let failedChunkRequests = 0
