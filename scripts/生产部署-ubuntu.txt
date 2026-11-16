@@ -99,17 +99,39 @@ npm run build
 #   sudo cp systemd/smart-noodle.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now smart-noodle
 
-# ── 5. Nginx（参考 nginx/smart-noodle.conf、nginx/安装说明.txt）──
-#   sed -i 's|REPLACE_DOMAIN|your-domain.com|g' nginx/smart-noodle.conf
-#   sed -i 's|REPLACE_WEB_ROOT|/var/www/smart-noodle/frontend/dist|g' nginx/smart-noodle.conf
-#   sed -i 's|REPLACE_UPLOADS_DIR|/var/www/smart-noodle/uploads|g' nginx/smart-noodle.conf
-#   sudo cp nginx/snippets/*.conf /etc/nginx/snippets/
-#   sudo cp nginx/smart-noodle.conf /etc/nginx/sites-available/
-#   sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/
-#   sudo certbot --nginx -d your-domain.com
+# ── 5. Nginx + TLS（必须按 nginx/安装说明.txt 完整流程；不可只运行 certbot --nginx）──
+# 主站配置引用 /etc/nginx/ssl-trusted-chain.pem；必须先安装该文件及续期 deploy hook，
+# 否则 nginx -t 可能因缺少 ssl_trusted_certificate 文件而失败。
+# 5.1 安装 Nginx / Certbot，并复制公共 snippets
+sudo apt install -y nginx certbot python3-certbot-nginx ca-certificates
+sudo mkdir -p /var/www/letsencrypt/.well-known/acme-challenge
+sudo cp nginx/snippets/ssl-params.conf /etc/nginx/snippets/ssl-params.conf
+sudo cp nginx/snippets/proxy-common.conf /etc/nginx/snippets/proxy-common.conf
+# 5.2 先启用仅 HTTP 的 ACME 引导站点（域名 DNS 已指向本机，80/tcp 可从公网访问）
+sudo sed 's/REPLACE_DOMAIN/your-domain.com/g' nginx/acme-bootstrap.conf | sudo tee /etc/nginx/sites-available/smart-noodle.conf >/dev/null
+sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/smart-noodle.conf
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl enable --now nginx
+# 5.3 通过 webroot 首次签发证书
+sudo certbot certonly --webroot -w /var/www/letsencrypt -d your-domain.com
+# 5.4 替换主站配置占位符并启用证书路径
+sed -i 's|REPLACE_DOMAIN|your-domain.com|g' nginx/smart-noodle.conf
+sed -i 's|REPLACE_WEB_ROOT|/var/www/smart-noodle/frontend/dist|g' nginx/smart-noodle.conf
+sed -i 's|REPLACE_UPLOADS_DIR|/var/www/smart-noodle/uploads|g' nginx/smart-noodle.conf
+# 编辑 nginx/smart-noodle.conf，取消注释 ssl_certificate 与 ssl_certificate_key 两行。
+sudo cp nginx/smart-noodle.conf /etc/nginx/sites-available/smart-noodle.conf
+# 5.5 安装 OCSP 信任链文件和 Certbot deploy hook（首次签发后立即生成完整链）
+sudo install -m 0644 /etc/ssl/certs/ca-certificates.crt /etc/nginx/ssl-trusted-chain.pem
+sudo install -m 0755 nginx/refresh-ocsp-trust.sh /usr/local/sbin/smart-noodle-refresh-ocsp-trust
+sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+sudo ln -sf /usr/local/sbin/smart-noodle-refresh-ocsp-trust /etc/letsencrypt/renewal-hooks/deploy/smart-noodle-refresh-ocsp-trust
+sudo RENEWED_LINEAGE="/etc/letsencrypt/live/your-domain.com" /usr/local/sbin/smart-noodle-refresh-ocsp-trust
+# 该 hook 会合并当前证书 chain.pem 与系统 CA bundle，执行 nginx -t 并 reload Nginx。
+# 5.6 验证证书自动续期和站点配置
+sudo certbot renew --dry-run
 sudo nginx -t && sudo systemctl reload nginx
-
-# ── 6. 小程序发布前 ──
+curl -sI https://your-domain.com/
+# 注意：不要跳过信任链文件、deploy hook 和 dry-run；细节以 nginx/安装说明.txt 为准。# ── 6. 小程序发布前 ──
 #   项目根 .env：
 #     密钥：python scripts/生成密钥.py（JWT/FACE/SECRET/DISPLAY_SCREEN_TOKEN）
 #     MINI_PROGRAM_ENV_VERSION=release
