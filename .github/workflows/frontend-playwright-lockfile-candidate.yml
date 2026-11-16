@@ -1,0 +1,90 @@
+name: Frontend Playwright Lockfile Candidate
+
+on:
+  pull_request:
+    paths:
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/e2e/**"
+      - "frontend/playwright.config.mjs"
+      - ".github/workflows/frontend-playwright-lockfile-candidate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-playwright-lockfile-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: generate-and-validate-lockfile-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm lockfile writer
+        run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
+      - name: Add pinned Playwright dependency to candidate manifest
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.devDependencies ??= {};
+          pkg.devDependencies['@playwright/test'] = '1.65.1';
+          fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+      - name: Generate candidate lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify reproducible dependency installation
+        run: npm ci
+      - name: Verify dependency tree and security audit
+        run: |
+          npm ls --all
+          npm audit --audit-level=high
+      - name: Run frontend unit tests and build
+        run: |
+          npm test
+          npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/snh-vite-preview.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          npx playwright test
+      - name: Upload candidate manifest and lockfile
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-playwright-lockfile-candidate
+          path: |
+            frontend/package.json
+            frontend/package-lock.json
+            frontend/test-results/
+            frontend/playwright-report/
+            /tmp/snh-vite-preview.log
+          if-no-files-found: error
+          retention-days: 7
