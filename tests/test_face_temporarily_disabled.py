@@ -1,4 +1,4 @@
-"""Temporary face-recognition shutdown is a hard gate, not a UI preference."""
+""""Temporary face-recognition shutdown is a hard gate, not a UI preference."""
 import asyncio
 
 import pytest
@@ -90,3 +90,49 @@ def test_face_service_layer_blocks_direct_profile_reads_and_writes():
         asyncio.run(FaceService.register_face(None, 123, [0.0] * 512))
     with pytest.raises(RuntimeError, match=blocked):
         asyncio.run(FaceService.reencrypt_stale_profiles(None))
+
+
+
+def test_face_consent_can_be_revoked_while_recognition_is_globally_disabled(monkeypatch):
+    """The shutdown gate must not block withdrawal or leave the encrypted vector intact."""
+    from types import SimpleNamespace
+
+    from app.services import audit_service, face_service
+    from app.services.face_service import FaceService
+
+    profile = SimpleNamespace(
+        id=73,
+        consent_status="AUTHORIZED",
+        revoked_at=None,
+        feature_data=b"encrypted-face-vector",
+    )
+
+    class _Scalars:
+        def all(self):
+            return [profile]
+
+    class _Result:
+        def scalars(self):
+            return _Scalars()
+
+    class _DB:
+        async def execute(self, _statement):
+            return _Result()
+
+    audit_calls = []
+    invalidations = []
+
+    async def _log_revoke(_db, **kwargs):
+        audit_calls.append(kwargs)
+
+    monkeypatch.setattr(audit_service.AuditService, "log_face_revoke", staticmethod(_log_revoke))
+    monkeypatch.setattr(face_service.face_embedding_cache, "invalidate", lambda: invalidations.append(True))
+
+    count = asyncio.run(FaceService.revoke_face(_DB(), 19))
+
+    assert count == 1
+    assert profile.consent_status == "REVOKED"
+    assert profile.revoked_at is not None
+    assert profile.feature_data == b""
+    assert invalidations == [True]
+    assert audit_calls == [{"customer_id": 19, "profile_ids": [73], "request": None, "operator_id": None}]
