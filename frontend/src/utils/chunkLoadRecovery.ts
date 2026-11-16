@@ -1,6 +1,6 @@
 const CHUNK_LOAD_ERROR_PATTERNS = [
   /failed to fetch dynamically imported module/i,
-  /loading chunk [\\w-]+ failed/i,
+  /loading chunk [\w-]+ failed/i,
   /error loading dynamically imported module/i,
 ]
 
