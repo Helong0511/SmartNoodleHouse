@@ -10,6 +10,26 @@ from app.models import OperationLog, Order
 
 logger = logging.getLogger(__name__)
 
+
+async def _reencrypt_face_profiles_tick() -> int:
+    """Skip key rotation while face recognition is globally disabled."""
+    from app.services.face_feature_gate import FACE_RECOGNITION_TEMPORARILY_DISABLED
+
+    if FACE_RECOGNITION_TEMPORARILY_DISABLED:
+        logger.info("跳过人脸向量密钥轮换：人脸识别全局关闭")
+        return 0
+
+    from app.services.face_service import FaceService
+    from app.services.scheduler_admin import exclusive_scheduler_job
+
+    async with exclusive_scheduler_job("reencrypt_face_profiles", ttl=600):
+        async with AsyncSessionLocal() as db:
+            count = await FaceService.reencrypt_stale_profiles(db, limit=50)
+            if count:
+                await db.commit()
+                logger.info("Face profiles re-encrypted: %s", count)
+            return count
+
 from app.services.platform_token_service import PlatformTokenService
 from app.services.webhook_inbox import process_pending_inbox, reclaim_stale_inbox
 from app.services.print_service import PrintService
@@ -799,16 +819,8 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def reencrypt_face_profiles():
-        """密钥轮换后：把旧 version 人脸向量重加密到当前密钥。"""
-        from app.services.face_service import FaceService
-        from app.services.scheduler_admin import exclusive_scheduler_job
-
-        async with exclusive_scheduler_job("reencrypt_face_profiles", ttl=600):
-            async with AsyncSessionLocal() as db:
-                n = await FaceService.reencrypt_stale_profiles(db, limit=50)
-                if n:
-                    await db.commit()
-                    logger.info("Face profiles re-encrypted: %s", n)
+        """密钥轮换后重加密；全局关闭人脸识别时安静跳过。"""
+        await _reencrypt_face_profiles_tick()
 
     @scheduler.scheduled_job(
         "cron",
