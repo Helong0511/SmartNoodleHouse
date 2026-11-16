@@ -90,3 +90,19 @@ def test_face_service_layer_blocks_direct_profile_reads_and_writes():
         asyncio.run(FaceService.register_face(None, 123, [0.0] * 512))
     with pytest.raises(RuntimeError, match=blocked):
         asyncio.run(FaceService.reencrypt_stale_profiles(None))
+
+
+
+def test_face_reencrypt_scheduler_skips_without_opening_database(monkeypatch):
+    from app.services import face_feature_gate
+    from app.tasks import scheduler
+
+    monkeypatch.setattr(
+        face_feature_gate, "FACE_RECOGNITION_TEMPORARILY_DISABLED", True
+    )
+
+    def unexpected_database_access():
+        raise AssertionError("database must not be opened while face recognition is disabled")
+
+    monkeypatch.setattr(scheduler, "AsyncSessionLocal", unexpected_database_access)
+    assert asyncio.run(scheduler._reencrypt_face_profiles_tick()) == 0
