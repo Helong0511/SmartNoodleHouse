@@ -22,11 +22,18 @@ for (const path of ['/scan', '/order']) {
 }
 
 test('cashier session is kept in sessionStorage and is confined to POS', async ({ page }) => {
+  await page.route('**/api/**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: [] }),
+    })
+  })
   await page.route('**/api/auth/me', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ id: 731, role: 'CASHIER', permissions: [] }),
+      body: JSON.stringify({ code: 0, data: { id: 731, role: 'CASHIER', permissions: [] } }),
     })
   })
   await page.addInitScript(() => {
