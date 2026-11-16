@@ -177,7 +177,7 @@
 ### 2026-11-10 合并与对象存储/模型授权增量复核
 
 - PR #115 已于 2026-11-10 合并到 main，合并提交 `cc3cb05dec1a8c7fbc2b337b82c80fa3b34b9aad`；对应 head `d3493ce501b398ecb26910ab24b3efd50a2f255d` 的 CI 12/12 jobs success。该批修复覆盖配置 fail-closed、日志脱敏、小程序发布环境校验、数据库初始化保护、支付/财务一致性等；不代表外部平台/生产环境验收完成。
-- Issue #110 复核更正：当前 `backend/app/services/object_storage.py` 已实现 boto3 S3/MinIO adapter（put/get/delete），带有异步线程隔离、连接/读取超时、连接池与重试设置；依赖静态扫描也已能找到真实 boto3 import。仍未闭环：boto3 被默认 requirements/lock 无条件安装；缺少真实 MinIO/S3-compatible 集成测试；私有对象签名 URL 能力未实现；AWS 默认 endpoint 与 MinIO endpoint 配置需要分别验证。
+- Issue #110 对象存储状态复核（2026-11-16）：此前“缺少真实 MinIO 集成测试、私有对象签名 URL 未实现”的记录已过时。当前 `tests/test_s3_object_storage_minio.py` 通过 CI 启动固定 digest 的临时 MinIO，真实验证 bucket 创建、对象 put/get/delete、私有对象不进入公开媒体路由及缺失对象处理；`tests/test_s3_public_media_delivery.py` 覆盖公开媒体引用校验、私有媒体 URL 形态和公开对象引用生命周期。`backend/app/services/private_media.py` 已实现最长 300 秒、绑定 customer_id 与对象 key 的 HMAC 短时头像 URL，读取端应继续核对顾客归属和签名。PR #116 已合并，应用 lifespan 启动时会初始化对象存储并对配置/SDK 初始化错误 fail-fast。当前仍未完成的事项：boto3 仍被默认 requirements/lock 安装（尚未拆成可选依赖）；CI 的 MinIO 测试不等于真实 AWS/生产 MinIO endpoint、IAM/ACL、TLS、网络连通性和 CDN 缓存策略验收；尚无生产对象存储故障/恢复演练。生产启用 S3 前须在隔离环境验证最小权限、私有桶、公开媒体访问边界、超时/重试和备份恢复。
 - 对象存储启动时惰性初始化问题已在 PR #116 修复：应用 lifespan 启动时调用 `get_storage()`，SDK/配置/backend 错误会导致启动退出，不再拖到首次上传才暴露。PR #116 的最新 SHA 与 CI 状态须以 Actions 为准；尚未合并前不得标记为 main 已修复。
 - Issue #109 复核：`face_extractor.py` 当前使用 `FaceAnalysis(name="buffalo_l")`，512D embedding；依赖约束仍为 `insightface>=0.7.3,<0.8`。官方 Model Zoo 明确所有预训练模型仅限非商业研究用途，代码 MIT 许可不覆盖模型权利。不得通过升级 InsightFace 2.1 规避模型授权；门店商业识别须先取得 buffalo_l 商业授权，或更换具有明确商业许可的模型并完成实际 CPU 推理/精度/并发/内存验收。生产启用人脸功能仍是发布阻塞项，默认关闭，不能用于登录/支付/高风险认证。
 - 官方资料：
