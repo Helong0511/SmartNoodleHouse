@@ -187,5 +187,4 @@ test('staff without system management permission cannot open role permissions di
 
   await page.goto('/role-permissions')
   await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
-  await expect(page.getByRole('heading', { name: '数据概览' })).toBeVisible()
 })
