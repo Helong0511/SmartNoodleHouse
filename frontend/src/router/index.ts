@@ -184,6 +184,7 @@ router.onError((error) => {
   }
 
   window.sessionStorage.removeItem(retryKey)
+  window.sessionStorage.setItem('snh_chunk_load_failed_after_retry', '1')
   window.dispatchEvent(new CustomEvent('snh:chunk-load-error'))
 })
 
