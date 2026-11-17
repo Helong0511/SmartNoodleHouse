@@ -28,11 +28,14 @@ test('retries a failed lazy chunk only once, then shows the manual recovery prom
   // requests are failed, so a document reload can boot the app and retry the
   // target route's lazy chunk.
   await page.goto('/login')
-  const alreadyLoadedScripts = await page.evaluate(() => new Set(
+  const alreadyLoadedScriptUrls = await page.evaluate(() =>
     performance.getEntriesByType('resource')
       .map((entry) => entry.name)
       .filter((url) => /\.js(?:\?|$)/.test(url)),
-  ))
+  )
+  // Playwright serializes values returned from page.evaluate; a browser Set
+  // crosses the boundary as a plain object. Rebuild the Set in the Node test.
+  const alreadyLoadedScripts = new Set(alreadyLoadedScriptUrls)
 
   await page.route('**/*.js', async (route) => {
     if (alreadyLoadedScripts.has(route.request().url())) {
