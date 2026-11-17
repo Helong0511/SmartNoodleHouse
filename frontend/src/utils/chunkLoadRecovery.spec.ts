@@ -6,6 +6,7 @@ describe('isChunkLoadError', () => {
     expect(isChunkLoadError(new TypeError('Failed to fetch dynamically imported module'))).toBe(true)
     expect(isChunkLoadError(new Error('Loading chunk 42 failed'))).toBe(true)
     expect(isChunkLoadError(new Error('error loading dynamically imported module'))).toBe(true)
+    expect(isChunkLoadError(new TypeError('Importing a module script failed.'))).toBe(true)
   })
 
   it('does not classify unrelated navigation errors as chunk failures', () => {

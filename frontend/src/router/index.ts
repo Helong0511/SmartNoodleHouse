@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getStaffToken } from '@/utils/staffAuth'
-import { isChunkLoadError } from '@/utils/chunkLoadRecovery'
+import { isChunkLoadError, readSessionFlag, writeSessionFlag, removeSessionFlag } from '@/utils/chunkLoadRecovery'
 
 const CASHIER_ALLOWED = new Set(['/pos-terminal', '/pos/my-stats', '/login'])
 
@@ -169,7 +169,7 @@ syncTechTheme(typeof window !== 'undefined' ? window.location.pathname : '/')
 router.afterEach((to) => {
   syncTechTheme(to.path)
   if (typeof window !== 'undefined') {
-    window.sessionStorage.removeItem('snh_chunk_reload_attempted')
+    removeSessionFlag('snh_chunk_reload_attempted')
   }
 })
 
@@ -177,14 +177,19 @@ router.onError((error) => {
   if (!isChunkLoadError(error) || typeof window === 'undefined') return
 
   const retryKey = 'snh_chunk_reload_attempted'
-  if (window.sessionStorage.getItem(retryKey) !== '1') {
-    window.sessionStorage.setItem(retryKey, '1')
+  if (readSessionFlag(retryKey) !== '1') {
+    // If session storage is blocked, show recovery immediately instead of
+    // risking an unbounded reload loop that cannot be tracked across reloads.
+    if (!writeSessionFlag(retryKey, '1')) {
+      window.dispatchEvent(new CustomEvent('snh:chunk-load-error'))
+      return
+    }
     window.location.reload()
     return
   }
 
-  window.sessionStorage.removeItem(retryKey)
-  window.sessionStorage.setItem('snh_chunk_load_failed_after_retry', '1')
+  removeSessionFlag(retryKey)
+  writeSessionFlag('snh_chunk_load_failed_after_retry', '1')
   window.dispatchEvent(new CustomEvent('snh:chunk-load-error'))
 })
 
