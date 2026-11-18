@@ -24,7 +24,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Override picomatch with compatibility package
         run: |
-          npm pkg set 'overrides.picomatch=file:./tools/picomatch-compat'
           npm install --legacy-peer-deps --install-links --ignore-scripts --no-audit --no-fund
       - name: Verify dependency tree
         run: |
