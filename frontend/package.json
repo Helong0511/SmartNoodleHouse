@@ -31,5 +31,8 @@
     "vue-tsc": "^3.3.14",
     "@playwright/test": "1.65.1"
   },
-  "packageManager": "npm@11.19.1"
+  "packageManager": "npm@11.19.1",
+  "overrides": {
+    "picomatch": "file:./tools/picomatch-compat"
+  }
 }
