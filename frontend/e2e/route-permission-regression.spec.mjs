@@ -31,7 +31,7 @@ test('store admin exception grants store-info without an explicit matching permi
 
 test('anyPermission accepts either permission and denies users with neither', async ({ page }) => {
   await startStaffSession(page, {
-    id: 811, role: 'STAFF', permissions: ['payment:read'],
+    id: 811, role: 'STAFF', permissions: ['order:read'],
   })
 
   await page.goto('/orders')
@@ -43,7 +43,7 @@ test('anyPermission accepts either permission and denies users with neither', as
 
 test('super-admin-only route rejects a regular staff member even with system:manage', async ({ page }) => {
   await startStaffSession(page, {
-    id: 812, role: 'STAFF', permissions: ['system:manage'],
+    id: 812, role: 'STAFF', permissions: ['system:manage', 'order:read'],
   })
 
   await page.goto('/outbox-dead-letters')
