@@ -36,6 +36,17 @@ jobs:
           import assert from 'node:assert/strict'
           import picomatch from 'picomatch'
 
+          const failures = []
+          const check = (name, fn) => {
+            try {
+              fn()
+              console.log(`PASS: ${name}`)
+            } catch (error) {
+              failures.push(`${name}: ${error.message}`)
+              console.error(`FAIL: ${name}: ${error.message}`)
+            }
+          }
+
           // Vite's import.meta.glob uses ignore + noextglob + dot/nocase.
           const globMatcher = picomatch(['**/*.ts'], {
             noextglob: true,
@@ -43,18 +54,22 @@ jobs:
             nocase: true,
             ignore: ['**/node_modules/**'],
           })
-          assert.equal(globMatcher('src/App.ts'), true, 'positive glob should match')
-          assert.equal(globMatcher('src/.hidden/App.TS'), true, 'dot/nocase options should be honored')
-          assert.equal(globMatcher('node_modules/pkg/index.ts'), false, 'ignore patterns must be honored')
+          check('positive glob matching', () => assert.equal(globMatcher('src/App.ts'), true))
+          check('dot and nocase options', () => assert.equal(globMatcher('src/.hidden/App.TS'), true))
+          check('ignore patterns', () => assert.equal(globMatcher('node_modules/pkg/index.ts'), false))
 
-          // Vite uses noextglob to force extglob syntax to remain literal.
           const noExtglob = picomatch('+(foo|bar)', { noextglob: true })
-          assert.equal(noExtglob('foo'), false, 'noextglob must disable extglob expansion')
+          check('noextglob option', () => assert.equal(noExtglob('foo'), false))
 
-          // Vitest repeatedly uses isMatch(input, patterns, { dot: true }).
-          assert.equal(picomatch.isMatch('src/.internal/test.ts', ['**/*.ts'], { dot: true }), true)
-          assert.equal(picomatch.isMatch('src/file.js', ['**/*.ts'], { dot: true }), false)
+          check('Vitest isMatch positive', () =>
+            assert.equal(picomatch.isMatch('src/.internal/test.ts', ['**/*.ts'], { dot: true }), true))
+          check('Vitest isMatch negative', () =>
+            assert.equal(picomatch.isMatch('src/file.js', ['**/*.ts'], { dot: true }), false))
 
+          if (failures.length) {
+            console.error(`Compatibility failures (${failures.length}):\\n${failures.join('\\n')}`)
+            process.exit(1)
+          }
           console.log('Vite/Vitest matcher contract OK')
           NODE
       - name: Security audit
