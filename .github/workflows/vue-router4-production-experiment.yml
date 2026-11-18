@@ -53,6 +53,18 @@ jobs:
         working-directory: ${{ runner.temp }}/vue-router4-candidate
         run: npm ci
 
+      - name: Explain every picomatch dependency path
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: |
+          set +e
+          npm explain picomatch
+          explain_status=$?
+          npm ls picomatch --all
+          tree_status=$?
+          echo "npm explain exit: $explain_status"
+          echo "npm ls exit: $tree_status"
+          exit 0
+
       - name: Verify production dependency graph
         working-directory: ${{ runner.temp }}/vue-router4-candidate
         run: |
