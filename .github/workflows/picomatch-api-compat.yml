@@ -25,8 +25,8 @@ jobs:
       - name: Override picomatch with compatibility package
         run: |
           npm pkg set 'overrides.picomatch=file:./tools/picomatch-compat'
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --package-lock-only --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+          npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund
       - name: Verify dependency tree
         run: |
           npm ls picomatch minimatch --all
