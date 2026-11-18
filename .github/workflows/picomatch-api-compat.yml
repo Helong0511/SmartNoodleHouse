@@ -52,7 +52,7 @@ jobs:
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:4173/ >/dev/null
-          npx playwright test --project=chromium
+          npx playwright test
       - name: Upload browser failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
