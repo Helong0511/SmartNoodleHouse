@@ -1,0 +1,43 @@
+name: picomatch API compatibility experiment
+
+on:
+  push:
+    branches:
+      - experiment/picomatch-api-compat
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Override picomatch with compatibility package
+        run: |
+          npm pkg set 'overrides.picomatch=file:./tools/picomatch-compat'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify dependency tree
+        run: |
+          npm ls picomatch minimatch --all
+          node -e "const p=require.resolve('picomatch/package.json'); console.log(p)"
+      - name: Security audit
+        run: npm audit --audit-level=high
+      - name: Unit tests
+        run: npm test -- --run
+      - name: Production build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright
+        run: npm run test:e2e -- --project=chromium
