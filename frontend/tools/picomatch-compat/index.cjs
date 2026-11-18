@@ -1,5 +1,3 @@
-const { createRequire } = require('module');
-const require = createRequire(__filename);
 const mm = require('minimatch');
 
 const normalize = (options = {}) => ({
