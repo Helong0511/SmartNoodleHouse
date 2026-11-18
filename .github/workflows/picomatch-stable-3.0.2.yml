@@ -1,0 +1,50 @@
+name: picomatch stable 3.0.2 experiment
+
+on:
+  push:
+    branches:
+      - experiment/picomatch-stable-3.0.2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply stable picomatch override
+        run: |
+          npm pkg set 'overrides.picomatch=3.0.2'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify resolved picomatch
+        run: |
+          npm ls picomatch --all
+          node -e "const p=require('./node_modules/picomatch/package.json'); console.log('picomatch', p.version); if (p.version !== '3.0.2') process.exit(1)"
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+      - name: Unit tests
+        run: npm test -- --run
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright
+        run: npm run test:e2e -- --project=chromium
