@@ -49,6 +49,12 @@ jobs:
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           echo "Candidate package manifest and lockfile generated outside the checkout."
 
+      - name: Override Vitest for isolated candidate
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: |
+          npm pkg set 'devDependencies.vitest=5.1.1'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/vue-router4-candidate
         run: npm ci
