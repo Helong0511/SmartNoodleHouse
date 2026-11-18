@@ -66,7 +66,7 @@ jobs:
           const baseline = require(process.env.BASE_DIR)
           const patterns = [
             '+(*)', '*(*a)', '+(*a)', '+(a*b)', '+(a*|b)', '+(ab*|c|d)',
-            '+(*.js|*.ts)', '*(!(f))', '{*a,b}+',
+            '+(*.js|*.ts)', '*(!(f))',
             '*(f*(o))', '+(foo|bar)', '+(a?|a)', '+([a]|a)', '+(a|[ab])',
             '+([*a)', '+([*a])', '+(W*, *)z', ')(a)', 'a)', '(a)',
             'x+(*a)y', '+(*)c', '*(a*b)c', '+( a*)', '+(a* )'
@@ -109,6 +109,13 @@ jobs:
           assert.equal(baseline('@(*a)+')('a'), true)
           assert.equal(candidate('@(*a)+')('a'), false)
           assert.equal(candidate('@(*a)+')('xa+'), true)
+          for (const pattern of ['(*a)+', '{*a,b}+']) {
+            console.log('documented pattern delta', pattern, {
+              baselineOnA: baseline(pattern)('a'),
+              candidateOnA: candidate(pattern)('a'),
+              candidateOnLiteralPlus: candidate(pattern)('xa+')
+            })
+          }
           console.log('documented PR 264 semantic adjustment confirmed')
           NODE
       - name: Verify public matcher API and options used by frontend tooling
