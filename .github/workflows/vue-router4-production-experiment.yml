@@ -1,0 +1,130 @@
+name: Vue Router 4 production dependency experiment
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vue-router4-production-experiment.yml"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/src/router/**"
+      - "frontend/src/**"
+      - "frontend/e2e/**"
+      - "frontend/playwright.config.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vue-router4-production-experiment-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-vue-router4-candidate:
+    name: Test Vue Router 4.6.5 in an isolated copy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.19.1
+          npm --version
+
+      - name: Create isolated candidate workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vue-router4-candidate"
+          cp -a frontend/. "$RUNNER_TEMP/vue-router4-candidate/"
+          cd "$RUNNER_TEMP/vue-router4-candidate"
+          npm pkg set 'dependencies.vue-router=4.6.5'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          echo "Candidate package manifest and lockfile generated outside the checkout."
+
+      - name: Install candidate dependencies
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: npm ci
+
+      - name: Explain every picomatch dependency path
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: |
+          set +e
+          npm explain picomatch
+          explain_status=$?
+          npm ls picomatch --all
+          tree_status=$?
+          echo "npm explain exit: $explain_status"
+          echo "npm ls exit: $tree_status"
+          exit 0
+
+      - name: Verify production dependency graph
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: |
+          set -euo pipefail
+          npm ls vue-router picomatch --omit=dev --all
+          npm audit --omit=dev --audit-level=high
+
+      - name: Run frontend unit tests and production build
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: |
+          set -euo pipefail
+          npm test
+          npm run build
+
+      - name: Install Chromium for browser tests
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: npx playwright install --with-deps chromium
+
+      - name: Run existing Playwright browser suite against candidate build
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/vue-router4-preview.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          npx playwright test
+
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vue-router4-playwright-diagnostics
+          path: |
+            ${{ runner.temp }}/vue-router4-candidate/test-results/
+            ${{ runner.temp }}/vue-router4-candidate/playwright-report/
+            ${{ runner.temp }}/vue-router4-preview.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Report full dependency audit (informational)
+        if: always()
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: |
+          npm audit --audit-level=high || {
+            echo "::warning::The full dependency graph still has high-severity findings; inspect whether they are confined to development tooling."
+          }
+
+      - name: Upload isolated candidate lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vue-router4-candidate-lockfile
+          path: ${{ runner.temp }}/vue-router4-candidate/package-lock.json
+          if-no-files-found: warn
+          retention-days: 7
