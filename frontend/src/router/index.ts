@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getStaffToken } from '@/utils/staffAuth'
+import { isChunkLoadError, readSessionFlag, writeSessionFlag, removeSessionFlag } from '@/utils/chunkLoadRecovery'
 
 const CASHIER_ALLOWED = new Set(['/pos-terminal', '/pos/my-stats', '/login'])
 
@@ -77,6 +78,7 @@ const router = createRouter({
     { path: '/kds', component: () => import('@/views/Kitchen.vue'), meta: { title: '厨房 KDS', kitchen: true, standalone: true } },
     { path: '/pos-terminal', component: () => import('@/views/PosOrder.vue'), meta: { title: '收银点餐', pos: true, standalone: true } },
     { path: '/pos/my-stats', component: () => import('@/views/PosMyStats.vue'), meta: { title: '我的收银', cashierOnly: true, standalone: true } },
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFound.vue') },
   ]
 })
 
@@ -91,7 +93,7 @@ async function ensureUser() {
 router.beforeEach(async (to, _from, next) => {
   // 公开页精确匹配，避免前缀误伤后台路由（如 /order 前缀命中 /orders、/member 命中 /member-levels）
   const publicPaths = new Set(['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member', '/display'])
-  const isPublic = publicPaths.has(to.path)
+  const isPublic = publicPaths.has(to.path) || to.name === 'not-found'
   if (to.path === '/login' && getStaffToken()) {
     const { useAuthStore } = await import('@/stores/auth')
     useAuthStore().logout()
@@ -166,6 +168,29 @@ function syncTechTheme(path: string) {
 syncTechTheme(typeof window !== 'undefined' ? window.location.pathname : '/')
 router.afterEach((to) => {
   syncTechTheme(to.path)
+  if (typeof window !== 'undefined') {
+    removeSessionFlag('snh_chunk_reload_attempted')
+  }
+})
+
+router.onError((error) => {
+  if (!isChunkLoadError(error) || typeof window === 'undefined') return
+
+  const retryKey = 'snh_chunk_reload_attempted'
+  if (readSessionFlag(retryKey) !== '1') {
+    // If session storage is blocked, show recovery immediately instead of
+    // risking an unbounded reload loop that cannot be tracked across reloads.
+    if (!writeSessionFlag(retryKey, '1')) {
+      window.dispatchEvent(new CustomEvent('snh:chunk-load-error'))
+      return
+    }
+    window.location.reload()
+    return
+  }
+
+  removeSessionFlag(retryKey)
+  writeSessionFlag('snh_chunk_load_failed_after_retry', '1')
+  window.dispatchEvent(new CustomEvent('snh:chunk-load-error'))
 })
 
 export default router
