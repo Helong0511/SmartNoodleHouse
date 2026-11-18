@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   isolated-vue-router4-candidate:
-    name: Test Vue Router 4.5.1 in an isolated copy
+    name: Test Vue Router 4.6.5 in an isolated copy
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -45,7 +45,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/vue-router4-candidate"
           cp -a frontend/. "$RUNNER_TEMP/vue-router4-candidate/"
           cd "$RUNNER_TEMP/vue-router4-candidate"
-          npm pkg set 'dependencies.vue-router=4.5.1'
+          npm pkg set 'dependencies.vue-router=4.6.5'
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           echo "Candidate package manifest and lockfile generated outside the checkout."
 
