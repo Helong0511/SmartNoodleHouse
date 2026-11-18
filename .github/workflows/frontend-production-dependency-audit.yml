@@ -51,6 +51,8 @@ jobs:
           npm ls picomatch --omit=dev --all | tee /tmp/picomatch-production-tree.txt
 
       - name: Audit production dependencies
+        id: production_audit
+        continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
 
       - name: Search generated production assets for picomatch
@@ -63,9 +65,16 @@ jobs:
           fi
 
       - name: Upload production build for inspection
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-production-audit-dist
           path: frontend/dist/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Enforce production audit result
+        if: steps.production_audit.outcome == 'failure'
+        run: |
+          echo "::error::Production dependency audit reported high-severity vulnerabilities."
+          exit 1
