@@ -104,17 +104,13 @@ test('kitchen route allows kitchen role and denies staff without order:update', 
   await page.goto('/kitchen')
   await expect(page).toHaveURL(url => new URL(url).pathname === '/kitchen')
 
-  await page.evaluate(() => sessionStorage.setItem('snh_staff_token', 'e2e-second-staff-token'))
-  await page.route('**/api/auth/me', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ code: 0, data: { id: 818, role: 'STAFF', permissions: ['order:read'] } }),
-    })
+  const deniedPage = await page.context().newPage()
+  await startStaffSession(deniedPage, {
+    id: 818, role: 'STAFF', permissions: ['order:read'],
   })
-  await page.goto('/login')
-  await page.goto('/kitchen')
-  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
+  await deniedPage.goto('/kitchen')
+  await expect(deniedPage).toHaveURL(url => new URL(url).pathname === '/dashboard')
+  await deniedPage.close()
 })
 
 test('POS route allows order:update and denies staff without it', async ({ page }) => {
@@ -124,20 +120,13 @@ test('POS route allows order:update and denies staff without it', async ({ page 
   await page.goto('/pos')
   await expect(page).toHaveURL(url => new URL(url).pathname === '/pos')
 
-  await page.evaluate(() => {
-    sessionStorage.setItem('snh_staff_token', 'e2e-pos-denied-token')
-    sessionStorage.removeItem('snh_staff_session_meta')
+  const deniedPage = await page.context().newPage()
+  await startStaffSession(deniedPage, {
+    id: 820, role: 'STAFF', permissions: ['order:read'],
   })
-  await page.route('**/api/auth/me', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ code: 0, data: { id: 820, role: 'STAFF', permissions: ['order:read'] } }),
-    })
-  })
-  await page.goto('/login')
-  await page.goto('/pos')
-  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
+  await deniedPage.goto('/pos')
+  await expect(deniedPage).toHaveURL(url => new URL(url).pathname === '/dashboard')
+  await deniedPage.close()
 })
 
 test('legacy nested redirects preserve the intended destination and query', async ({ page }) => {
