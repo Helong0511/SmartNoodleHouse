@@ -98,10 +98,12 @@ jobs:
           NODE
       - name: Document intentional glob-plus semantic adjustment in PR 264
         run: |
-          node <<'NODE'
+          mkdir -p "$RUNNER_TEMP/picomatch-base-semantic"
+          npm install --prefix "$RUNNER_TEMP/picomatch-base-semantic" --no-save --package-lock=false --ignore-scripts picomatch@4.0.7
+          BASE_DIR="$RUNNER_TEMP/picomatch-base-semantic/node_modules/picomatch" node <<'NODE'
           const assert = require('node:assert/strict')
           const candidate = require('picomatch')
-          const baseline = require(process.env.BASE_DIR || 'picomatch')
+          const baseline = require(process.env.BASE_DIR)
           // PR 264 intentionally treats the trailing plus as literal for this
           // glob form; this is a known behavior change, not part of parity corpus.
           assert.equal(baseline('@(*a)+')('a'), true)
