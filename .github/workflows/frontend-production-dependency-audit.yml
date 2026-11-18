@@ -1,0 +1,74 @@
+name: Frontend Production Dependency Audit
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-production-dependency-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-production-dependency-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production-dependency-audit:
+    name: Build and inspect production dependency graph
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build production assets
+        run: npm run build
+
+      - name: Inspect picomatch in production dependency graph
+        shell: bash
+        run: |
+          set -o pipefail
+          npm ls picomatch --omit=dev --all | tee /tmp/picomatch-production-tree.txt
+
+      - name: Audit production dependencies
+        id: production_audit
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Search generated production assets for picomatch
+        shell: bash
+        run: |
+          if grep -R -n -E 'picomatch|picomatch/lib|picomatch/index' dist/assets; then
+            echo "::warning::picomatch-related strings were found in generated assets; inspect whether executable code is included."
+          else
+            echo "No picomatch-related strings found in generated production assets."
+          fi
+
+      - name: Upload production build for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-production-audit-dist
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce production audit result
+        if: steps.production_audit.outcome == 'failure'
+        run: |
+          echo "::error::Production dependency audit reported high-severity vulnerabilities."
+          exit 1
