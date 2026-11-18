@@ -1,0 +1,17 @@
+{
+  "name": "picomatch",
+  "version": "4.0.7-compat.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs",
+      "default": "./index.js"
+    }
+  },
+  "dependencies": {
+    "minimatch": "^11.0.9"
+  }
+}
