@@ -1,6 +1,12 @@
 name: Frontend Production Dependency Audit
 
 on:
+  push:
+    branches:
+      - "chore/frontend-production-dependency-audit"
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-production-dependency-audit.yml"
   pull_request:
     paths:
       - "frontend/**"
