@@ -1,0 +1,184 @@
+name: picomatch upstream PR 264 experiment
+
+on:
+  push:
+    branches:
+      - experiment/picomatch-upstream-264
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.19.1
+          test "$(npm --version)" = "11.19.1"
+      - name: Install committed dependencies
+        run: npm ci
+      - name: Install pinned upstream PR 264 commit for this experiment only
+        run: |
+          npm install --no-save --package-lock=false --ignore-scripts \
+            github:jibsta210/picomatch#8144a1a22a8fa1766951411f220cc8c6228cb041
+          npm ls picomatch --all
+      - name: Verify Vite and Vitest resolve the candidate
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict')
+          const path = require('node:path')
+          const { createRequire } = require('node:module')
+          const root = require.resolve('picomatch')
+          const meta = require('./node_modules/picomatch/package.json')
+          assert.equal(meta.name, 'picomatch')
+          assert.equal(meta.version, '4.0.7')
+          for (const name of ['vite', 'vitest']) {
+            const entry = require.resolve(name)
+            const resolved = createRequire(entry).resolve('picomatch')
+            console.log(name, '->', resolved)
+            assert.equal(path.resolve(resolved), path.resolve(root))
+          }
+          const pm = require('picomatch')
+          for (const key of ['test', 'isMatch', 'makeRe', 'scan', 'parse', 'compileRe', 'matchBase']) {
+            assert.equal(typeof pm[key], 'function', 'missing picomatch.' + key)
+          }
+          console.log('candidate resolution and API checks passed')
+          NODE
+      - name: Compare candidate against released 4.0.7 on bounded compatibility corpus
+        run: |
+          mkdir -p "$RUNNER_TEMP/picomatch-base"
+          npm install --prefix "$RUNNER_TEMP/picomatch-base" --no-save --package-lock=false --ignore-scripts picomatch@4.0.7
+          BASE_DIR="$RUNNER_TEMP/picomatch-base/node_modules/picomatch" node <<'NODE'
+          const assert = require('node:assert/strict')
+          const candidate = require('picomatch')
+          const baseline = require(process.env.BASE_DIR)
+          const patterns = [
+            '+(*)', '*(*a)', '+(*a)', '+(a*b)', '+(a*|b)', '+(ab*|c|d)',
+            '+(*.js|*.ts)', '*(!(f))', '@(*a)+', '(*a)+', '{*a,b}+',
+            '*(f*(o))', '+(foo|bar)', '+(a?|a)', '+([a]|a)', '+(a|[ab])',
+            '+([*a)', '+([*a])', '+(W*, *)z', ')(a)', 'a)', '(a)',
+            'x+(*a)y', '+(*)c', '*(a*b)c', '+( a*)', '+(a* )'
+          ]
+          const options = [
+            {}, { dot: true }, { windows: true }, { bash: true },
+            { nocase: true }, { flags: 'i' }
+          ]
+          const alphabet = ['a', 'b', 'A', 'c', '/', '\\\\', '.', '!', '\\n']
+          let inputs = ['']
+          let level = ['']
+          for (let length = 1; length <= 3; length++) {
+            level = level.flatMap(prefix => alphabet.map(char => prefix + char))
+            inputs.push(...level)
+          }
+          inputs.push('W, ', 'W, W, ', 'xaaaay', 'cccabcccc', 'abab', 'aaa', 'xa+', 'xa')
+          let comparisons = 0
+          for (const pattern of patterns) {
+            for (const opts of options) {
+              const before = baseline(pattern, opts)
+              const after = candidate(pattern, opts)
+              for (const input of inputs) {
+                assert.equal(after(input), before(input), JSON.stringify({ pattern, options: opts, input }))
+                comparisons++
+              }
+            }
+          }
+          console.log('finite differential comparisons:', comparisons)
+          NODE
+      - name: Verify public matcher API and options used by frontend tooling
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict')
+          const pm = require('picomatch')
+          const matcher = pm(['**/*.ts'], {
+            noextglob: true, dot: true, nocase: true,
+            ignore: ['**/node_modules/**']
+          })
+          assert.equal(matcher('src/App.ts'), true)
+          assert.equal(matcher('src/.hidden/App.TS'), true)
+          assert.equal(matcher('node_modules/pkg/index.ts'), false)
+          assert.equal(pm('+(foo|bar)', { noextglob: true })('foo'), false)
+          assert.equal(pm.isMatch('src/.internal/test.ts', ['**/*.ts'], { dot: true }), true)
+          console.log('matcher option checks passed')
+          NODE
+      - name: Bound adversarial patterns in isolated child processes
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict')
+          const { spawnSync } = require('node:child_process')
+          const attacks = [
+            ['+(*)', 'a'.repeat(60000) + '!'],
+            ['+(*a)', 'a'.repeat(60000) + '!'],
+            ['*(*a)', 'a'.repeat(60000) + '!'],
+            ['+(a*b)', 'a'.repeat(60000) + '!'],
+            ['+(a*|b)', 'a'.repeat(60000) + '!'],
+            ['+(*.js|*.ts)', 'a'.repeat(60000) + '!'],
+            ['*(!(f))', 'a'.repeat(60000) + '!'],
+            ['@(*a)+', 'a'.repeat(60000) + '!'],
+            ['(*a)+', 'a'.repeat(60000) + '!'],
+            ['{*a,b}+', 'a'.repeat(60000) + '!'],
+            ['+([*a)', '[a'.repeat(10000) + '!'],
+            ['+([*a])', '[a]'.repeat(10000) + '!'],
+            ['+(W*, *)z', 'W, '.repeat(10000) + '!'],
+            [')(' + 'a'.repeat(30000), 'a'.repeat(30000) + '!']
+          ]
+          const options = [{}, { windows: true }, { bash: true }, { capture: true }, { nobracket: true }, { maxExtglobRecursion: false }]
+          for (const [pattern, input] of attacks) {
+            for (const opts of options) {
+              const script = `
+                const pm = require('picomatch')
+                const [pattern, input, options] = JSON.parse(process.argv[1])
+                pm(pattern, options)(input)
+                pm.makeRe(pattern, options).test(input)
+                pm.compileRe(pm.parse(pattern, options), options).test(input)
+              `
+              const child = spawnSync(process.execPath, ['--max-old-space-size=128', '-e', script, JSON.stringify([pattern, input, opts])], {
+                encoding: 'utf8', timeout: 2500, killSignal: 'SIGKILL', maxBuffer: 8192
+              })
+              assert.equal(child.error, undefined, JSON.stringify({ pattern, options: opts, error: child.error?.code }))
+              assert.equal(child.status, 0, JSON.stringify({ pattern, options: opts, stderr: child.stderr }))
+            }
+          }
+          console.log('bounded adversarial cases:', attacks.length * options.length)
+          NODE
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/picomatch-preview.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          npx playwright test
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: picomatch-upstream-264-diagnostics
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+            ${{ runner.temp }}/picomatch-preview.log
+          if-no-files-found: ignore
+          retention-days: 3
