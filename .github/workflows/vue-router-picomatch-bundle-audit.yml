@@ -1,0 +1,73 @@
+name: Vue Router picomatch production bundle audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/vue-router-picomatch-bundle-audit
+    paths:
+      - "frontend/**"
+      - ".github/workflows/vue-router-picomatch-bundle-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  production-bundle-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install committed dependencies
+        run: npm ci
+      - name: Build and inspect the actual Rollup module graph
+        run: |
+          node --input-type=module <<'NODE'
+          import { build } from 'vite'
+
+          let inspected = false
+          await build({
+            configFile: 'vite.config.ts',
+            plugins: [{
+              name: 'audit-picomatch-production-bundle',
+              apply: 'build',
+              generateBundle() {
+                const ids = [...this.getModuleIds()]
+                const matches = ids.filter(id =>
+                  /(?:^|[/\\])picomatch(?:[/\\]|$)/i.test(id) ||
+                  /vue-router[/\\]dist[/\\]unplugin/i.test(id)
+                )
+                inspected = true
+                console.log('Production Rollup module count:', ids.length)
+                console.log('picomatch/unplugin modules:', matches.length)
+                for (const id of matches) console.log('MATCH:', id)
+                if (matches.length) {
+                  throw new Error('picomatch or vue-router unplugin code entered the production bundle graph')
+                }
+              }
+            }]
+          })
+          if (!inspected) throw new Error('Bundle graph inspection hook did not execute')
+          console.log('PASS: no picomatch or vue-router unplugin modules in the production bundle graph')
+          NODE
+      - name: Verify the committed dependency tree still records the advisory version
+        run: |
+          node --input-type=module <<'NODE'
+          import { createRequire } from 'node:module'
+          const require = createRequire(import.meta.url)
+          const pkg = require('vue-router/package.json')
+          const picomatch = require('picomatch/package.json')
+          console.log('vue-router:', pkg.version)
+          console.log('picomatch:', picomatch.version)
+          if (pkg.version !== '5.5.0' || picomatch.version !== '4.0.7') {
+            throw new Error('Dependency versions differ from the audited main lockfile; review this workflow before interpreting results')
+          }
+          console.log('PASS: dependency installation matches the committed main lockfile versions')
+          NODE
