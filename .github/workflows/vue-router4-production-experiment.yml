@@ -8,6 +8,8 @@ on:
       - "frontend/package-lock.json"
       - "frontend/src/router/**"
       - "frontend/src/**"
+      - "frontend/e2e/**"
+      - "frontend/playwright.config.mjs"
   workflow_dispatch:
 
 permissions:
@@ -64,6 +66,39 @@ jobs:
           set -euo pipefail
           npm test
           npm run build
+
+      - name: Install Chromium for browser tests
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        run: npx playwright install --with-deps chromium
+
+      - name: Run existing Playwright browser suite against candidate build
+        working-directory: ${{ runner.temp }}/vue-router4-candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run preview -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/vue-router4-preview.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          npx playwright test
+
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vue-router4-playwright-diagnostics
+          path: |
+            ${{ runner.temp }}/vue-router4-candidate/test-results/
+            ${{ runner.temp }}/vue-router4-candidate/playwright-report/
+            ${{ runner.temp }}/vue-router4-preview.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Report full dependency audit (informational)
         if: always()
