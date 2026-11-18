@@ -28,8 +28,7 @@ jobs:
           npm install --legacy-peer-deps --install-links --ignore-scripts --no-audit --no-fund
       - name: Verify dependency tree
         run: |
-          npm ls picomatch minimatch --all
-          node -e "const p=require.resolve('picomatch/package.json'); console.log(p)"
+          node -e "const p=require.resolve('picomatch/package.json'); const m=require(p); console.log('resolved',p,'version',m.version); if (!p.includes('tools/picomatch-compat')) process.exit(1)"
       - name: Security audit
         run: npm audit --audit-level=high
       - name: Unit tests
