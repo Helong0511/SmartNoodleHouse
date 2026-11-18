@@ -91,3 +91,66 @@ test('cashier may open personal stats but not the general POS route', async ({ p
   await page.goto('/pos')
   await expect(page).toHaveURL(url => new URL(url).pathname === '/pos-terminal')
 })
+
+test('unauthenticated staff are redirected to login for protected routes', async ({ page }) => {
+  await page.goto('/orders')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/login')
+})
+
+test('kitchen route allows kitchen role and denies staff without order:update', async ({ page }) => {
+  await startStaffSession(page, {
+    id: 817, role: 'KITCHEN', permissions: [],
+  })
+  await page.goto('/kitchen')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/kitchen')
+
+  await page.evaluate(() => sessionStorage.setItem('snh_staff_token', 'e2e-second-staff-token'))
+  await page.route('**/api/auth/me', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: { id: 818, role: 'STAFF', permissions: ['order:read'] } }),
+    })
+  })
+  await page.goto('/login')
+  await page.goto('/kitchen')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
+})
+
+test('POS route allows order:update and denies staff without it', async ({ page }) => {
+  await startStaffSession(page, {
+    id: 819, role: 'STAFF', permissions: ['order:update'],
+  })
+  await page.goto('/pos')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/pos')
+
+  await page.evaluate(() => {
+    sessionStorage.setItem('snh_staff_token', 'e2e-pos-denied-token')
+    sessionStorage.removeItem('snh_staff_session_meta')
+  })
+  await page.route('**/api/auth/me', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: { id: 820, role: 'STAFF', permissions: ['order:read'] } }),
+    })
+  })
+  await page.goto('/login')
+  await page.goto('/pos')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/dashboard')
+})
+
+test('legacy nested redirects preserve the intended destination and query', async ({ page }) => {
+  await startStaffSession(page, {
+    id: 821, role: 'STAFF', permissions: ['order:read'],
+  })
+
+  await page.goto('/payments')
+  await expect(page).toHaveURL(url => {
+    const parsed = new URL(url)
+    return parsed.pathname === '/orders' && parsed.searchParams.get('tab') === 'payments'
+  })
+
+  await page.goto('/delivery')
+  await expect(page).toHaveURL(url => new URL(url).pathname === '/delivery/orders')
+})
