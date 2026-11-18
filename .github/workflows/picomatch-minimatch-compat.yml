@@ -1,0 +1,43 @@
+name: minimatch compatibility experiment
+
+on:
+  push:
+    branches:
+      - experiment/picomatch-minimatch-compat
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install minimatch and override picomatch
+        run: |
+          npm pkg set 'overrides.picomatch=npm:minimatch@11.0.9'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify dependency tree
+        run: |
+          npm ls picomatch minimatch --all
+          node -e "const p=require('picomatch/package.json'); console.log(p.name,p.version); if (p.name !== 'minimatch') process.exit(1)"
+      - name: Security audit
+        run: npm audit --audit-level=high
+      - name: Unit tests
+        run: npm test -- --run
+      - name: Production build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright
+        run: npm run test:e2e -- --project=chromium
