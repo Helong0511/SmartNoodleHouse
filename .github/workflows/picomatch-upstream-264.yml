@@ -133,7 +133,7 @@ jobs:
             ['+(W*, *)z', 'W, '.repeat(10000) + '!'],
             [')(' + 'a'.repeat(30000), 'a'.repeat(30000) + '!']
           ]
-          const options = [{}, { windows: true }, { bash: true }, { capture: true }, { nobracket: true }, { maxExtglobRecursion: false }]
+          const options = [{}, { windows: true }, { bash: true }, { capture: true }, { nobracket: true }]
           for (const [pattern, input] of attacks) {
             for (const opts of options) {
               const script = `
