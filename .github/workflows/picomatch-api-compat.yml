@@ -30,6 +30,33 @@ jobs:
       - name: Verify dependency tree
         run: |
           node -e "const fs=require('fs'),path=require('path'); const entry=require.resolve('picomatch'); const m=JSON.parse(fs.readFileSync(path.resolve(entry,'../package.json'),'utf8')); console.log('resolved',entry,'version',m.version,'deps',m.dependencies); if (m.name !== 'picomatch' || m.dependencies?.minimatch !== '^11.0.9') process.exit(1); const pm=require('picomatch'); if (typeof pm !== 'function' || typeof pm.isMatch !== 'function' || typeof pm.makeRe !== 'function') process.exit(1); console.log('compat API OK')"
+      - name: Verify Vite and Vitest matcher contract
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import picomatch from 'picomatch'
+
+          // Vite's import.meta.glob uses ignore + noextglob + dot/nocase.
+          const globMatcher = picomatch(['**/*.ts'], {
+            noextglob: true,
+            dot: true,
+            nocase: true,
+            ignore: ['**/node_modules/**'],
+          })
+          assert.equal(globMatcher('src/App.ts'), true, 'positive glob should match')
+          assert.equal(globMatcher('src/.hidden/App.TS'), true, 'dot/nocase options should be honored')
+          assert.equal(globMatcher('node_modules/pkg/index.ts'), false, 'ignore patterns must be honored')
+
+          // Vite uses noextglob to force extglob syntax to remain literal.
+          const noExtglob = picomatch('+(foo|bar)', { noextglob: true })
+          assert.equal(noExtglob('foo'), false, 'noextglob must disable extglob expansion')
+
+          // Vitest repeatedly uses isMatch(input, patterns, { dot: true }).
+          assert.equal(picomatch.isMatch('src/.internal/test.ts', ['**/*.ts'], { dot: true }), true)
+          assert.equal(picomatch.isMatch('src/file.js', ['**/*.ts'], { dot: true }), false)
+
+          console.log('Vite/Vitest matcher contract OK')
+          NODE
       - name: Security audit
         run: npm audit --audit-level=high
       - name: Unit tests
