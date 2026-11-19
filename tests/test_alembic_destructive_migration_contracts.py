@@ -17,8 +17,12 @@ def _source(name: str) -> str:
 
 
 def _function_body(source: str, name: str) -> str:
+    # Alembic revisions may use either single-line or multi-line function signatures.
+    # Match through the closing signature delimiter, then stop at the next top-level
+    # function/class so helper functions cannot be mistaken for the migration body.
     match = re.search(
-        rf"(?ms)^def {re.escape(name)}\([^\n]*\):\n(?P<body>.*?)(?=^def |\Z)",
+        rf"(?ms)^def {re.escape(name)}\([\s\S]*?\):[ \t]*\n"
+        rf"(?P<body>.*?)(?=^def |^class |\Z)",
         source,
     )
     assert match, f"missing {name}()"
