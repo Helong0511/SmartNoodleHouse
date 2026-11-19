@@ -147,6 +147,7 @@ class PrivacyService:
                 .where(CustomerPreference.customer_id == int(customer.id))
                 .order_by(CustomerPreference.preference_score.desc())
                 .limit(20)
+                .with_for_update()
             )
         ).scalars().all()
         spec_prefs = [
