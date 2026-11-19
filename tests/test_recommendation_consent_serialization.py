@@ -10,6 +10,7 @@ from app.models import Customer, CustomerBehaviorEvent
 from app.services import behavior_event_service
 from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
+from app.services import reco_cache
 from app.services.taste_learning_service import TasteLearningService
 from reco_factories import make_customer
 
@@ -98,6 +99,7 @@ async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
         return None
 
     monkeypatch.setattr(AuditService, "log", staticmethod(no_audit))
+    monkeypatch.setattr(reco_cache, "spawn_bg", lambda coro: coro.close())
 
     async def ingest():
         async with async_session() as session:
