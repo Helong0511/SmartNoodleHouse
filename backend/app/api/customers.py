@@ -292,6 +292,16 @@ async def list_customers(
     # 智能口味：列表与详情一致，返回全部偏好（按分数排序）
     pref_map: dict[int, list[dict]] = {i: [] for i in ids}
     if ids:
+        # Serialize this derived-data read with consent revocation and its cleanup.
+        # Lock page customers in a stable order to avoid inconsistent snapshots and
+        # reduce the chance of lock-order deadlocks between concurrent list requests.
+        await db.execute(
+            select(Customer)
+            .where(Customer.id.in_(ids))
+            .order_by(Customer.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         pref_rows = (
             await db.execute(
                 select(CustomerPreference)
