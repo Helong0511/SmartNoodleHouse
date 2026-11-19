@@ -592,7 +592,13 @@ async def update_customer(
     from app.core.response import now_local
     from app.services.store_scope import require_bound_store
 
-    customer = await db.get(Customer, customer_id)
+    customer_result = await db.execute(
+        select(Customer)
+        .where(Customer.id == int(customer_id))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    customer = customer_result.scalar_one_or_none()
     if not customer:
         raise AppException(40401, "顾客不存在")
     effective_store = require_bound_store(user, None)
