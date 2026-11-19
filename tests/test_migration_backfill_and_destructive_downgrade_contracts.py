@@ -70,14 +70,17 @@ def test_0036_downgrade_explicitly_drops_business_data_tables():
         ROOT / "backend/alembic/versions/0036_audit_remaining_features.py"
     ).read_text(encoding="utf-8")
     downgrade = source.split("def downgrade() -> None:", 1)[1]
-    for table in (
+    expected_tables = (
         "archived_order_snapshots",
         "payment_reconcile_diffs",
         "payment_reconcile_batches",
         "role_delegations",
-    ):
+    )
+    for table in expected_tables:
         assert f'"{table}"' in downgrade
-        assert f"DROP TABLE {table}" in downgrade
+    # The migration intentionally interpolates each allow-listed table name.
+    assert "for table in (" in downgrade
+    assert 'text(f"DROP TABLE {table}")' in downgrade
 
 
 def test_0040_downgrade_drops_marketing_claim_and_order_attribution_data():
@@ -85,15 +88,19 @@ def test_0040_downgrade_drops_marketing_claim_and_order_attribution_data():
         ROOT / "backend/alembic/versions/0040_flash_sale_marketing.py"
     ).read_text(encoding="utf-8")
     downgrade = source.split("def downgrade() -> None:", 1)[1]
-    for table in (
+    expected_tables = (
         "marketing_flash_sale_claims",
         "marketing_flash_sale_stocks",
         "marketing_flash_sales",
         "marketing_campaign_stores",
-    ):
+    )
+    for table in expected_tables:
         assert f'"{table}"' in downgrade
-        assert f"DROP TABLE IF EXISTS {table}" in downgrade
+    assert "for table in (" in downgrade
+    assert 'f"DROP TABLE IF EXISTS {table}"' in downgrade
+
     for column in ("flash_claim_id", "marketing_campaign_id", "non_revenue"):
         assert f'"{column}"' in downgrade
-        assert f"DROP COLUMN `{column}`" in downgrade
+    assert 'for col in ("flash_claim_id", "marketing_campaign_id", "non_revenue")' in downgrade
+    assert 'f"ALTER TABLE orders DROP COLUMN `{col}`"' in downgrade
     assert "DROP COLUMN `code_key`" in downgrade
