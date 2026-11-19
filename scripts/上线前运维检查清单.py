@@ -20,11 +20,12 @@ CHECKS = [
     ("BLK-008", "InsightFace 模型商业授权与推理验收", "取得 buffalo_l 等实际部署模型/权重的书面商业许可并归档模型版本与 SHA256；完成当前 FaceAnalysis API 兼容性、真实目标硬件/摄像头推理、性能与失败回退验收；未完成前保持 FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=false 且人脸迎宾关闭"),
     ("BLK-005", "小程序上架", "按 docs/小程序上架检查清单.md 提交审核"),
     ("P1-R2", "备份演练", "python scripts/备份恢复演练.py；隔离库加 --restore-drill"),
+    ("BLK-010", "破坏性迁移数据预检", "执行 0003_p1_hardening 与 0017_financial_ledger_idempotency 前，先在生产数据副本统计并导出将被去重删除的优惠券/财务分录；核对财务账本业务键、金额与来源，完成加密备份及可恢复性验证，由业务/财务负责人书面批准；发现重复或无法解释的差异时停止迁移并人工对账，禁止直接依赖迁移脚本自动 DELETE"),
 ]
 
 
 _SENSITIVE_LOG_RE = re.compile(
-    r"(?i)(?:[?&]|\b)(?:secret|access_token|refresh_token|api[_-]?key|private[_-]?key|password)=([^&\s\"']+)"
+    r"(?i)(?:[?&]|\\b)(?:secret|access_token|refresh_token|api[_-]?key|private[_-]?key|password)=([^&\\s\\\"']+)"
 )
 
 
@@ -87,13 +88,13 @@ def main() -> int:
         print(f"  → {action}")
 
     if not args.acknowledge:
-        print("\n[BLOCKED] 人工阻塞项尚未由操作员确认；完成核验后显式传入 --acknowledge。")
+        print("\\n[BLOCKED] 人工阻塞项尚未由操作员确认；完成核验后显式传入 --acknowledge。")
         return 2
     if log_scan_failed:
-        print("\n[BLOCKED] 日志敏感信息扫描未通过；清理历史日志并轮换泄露凭据后再确认。")
+        print("\\n[BLOCKED] 日志敏感信息扫描未通过；清理历史日志并轮换泄露凭据后再确认。")
         return 2
 
-    print("\n[ACKNOWLEDGED] 操作员声明以上人工事项已逐项完成并核验。")
+    print("\\n[ACKNOWLEDGED] 操作员声明以上人工事项已逐项完成并核验。")
     print("注意：此结果是人工确认，不是系统自动验证或第三方平台验收证明。")
     return 0
 
