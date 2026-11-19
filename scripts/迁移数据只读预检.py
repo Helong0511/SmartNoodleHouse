@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -49,7 +48,7 @@ def _json_value(value: Any) -> Any:
 
 
 def summarize_financial_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """比较迁移去重会丢弃的财务业务事实；不把 id/created_at 当作金额事实。"""
+    """比较迁移去重将丢弃的财务业务事实。"""
     mismatches: dict[str, list[dict[str, Any]]] = {}
     for field in FINANCIAL_FACTS:
         values = [row.get(field) for row in rows]
@@ -113,22 +112,21 @@ def _index_names(cursor, table: str) -> set[str]:
 
 def _duplicate_groups(cursor, table: str, key_column: str, entry_type: str | None = None):
     if entry_type is None:
-        sql = (
+        cursor.execute(
             f"SELECT customer_id, template_id, COUNT(*) AS duplicate_count, "
             f"MIN(id) AS keep_id FROM {table} "
             "GROUP BY customer_id, template_id HAVING COUNT(*) > 1 "
             "ORDER BY customer_id, template_id"
         )
-        cursor.execute(sql)
     else:
-        sql = (
+        cursor.execute(
             f"SELECT {key_column} AS business_key, COUNT(*) AS duplicate_count, "
             f"MIN(id) AS keep_id FROM {table} "
             "WHERE entry_type = %s AND "
             f"{key_column} IS NOT NULL GROUP BY {key_column} "
-            "HAVING COUNT(*) > 1 ORDER BY {key_column}"
+            "HAVING COUNT(*) > 1 ORDER BY " + key_column,
+            (entry_type,),
         )
-        cursor.execute(sql, (entry_type,))
     return cursor.fetchall()
 
 
@@ -136,7 +134,7 @@ def _run_preflight(max_groups: int) -> dict[str, Any]:
     connection = _connect()
     try:
         with connection.cursor() as cursor:
-            # 这两条语句先于业务查询执行；整个会话只读，结束时显式回滚。
+            # 先切换只读事务，再执行任何业务查询。
             cursor.execute("SET SESSION TRANSACTION READ ONLY")
             cursor.execute("START TRANSACTION READ ONLY")
             cursor.execute("SELECT DATABASE() AS database_name, VERSION() AS server_version")
@@ -155,7 +153,6 @@ def _run_preflight(max_groups: int) -> dict[str, Any]:
             cursor.execute("SELECT version_num FROM alembic_version ORDER BY version_num")
             revisions = [row["version_num"] for row in cursor.fetchall()]
             coupon_indexes = _index_names(cursor, "customer_coupons")
-            financial_indexes = _index_names(cursor, "financial_ledger")
 
             coupon_groups = _duplicate_groups(cursor, "customer_coupons", "template_id")
             coupon_report = []
@@ -176,8 +173,12 @@ def _run_preflight(max_groups: int) -> dict[str, Any]:
                 })
 
             financial_report = []
+            financial_group_count = 0
+            financial_truncated = False
             for entry_type, key_column, index_name in FINANCIAL_KEYS:
                 groups = _duplicate_groups(cursor, "financial_ledger", key_column, entry_type)
+                financial_group_count += len(groups)
+                financial_truncated = financial_truncated or len(groups) > max_groups
                 for group in groups[:max_groups]:
                     cursor.execute(
                         "SELECT " + ", ".join(("id",) + FINANCIAL_FACTS) +
@@ -201,11 +202,10 @@ def _run_preflight(max_groups: int) -> dict[str, Any]:
 
             truncated = (
                 len(coupon_groups) > max_groups
-                or any(len(_duplicate_groups(cursor, "financial_ledger", col, et)) > max_groups
-                       for et, col, _idx in FINANCIAL_KEYS)
+                or financial_truncated
                 or any(item["row_sample_truncated"] for item in coupon_report + financial_report)
             )
-            has_duplicates = bool(coupon_groups or financial_report)
+            has_duplicates = bool(coupon_groups or financial_group_count)
             return {
                 "mode": "READ_ONLY",
                 "database": server["database_name"],
@@ -215,7 +215,7 @@ def _run_preflight(max_groups: int) -> dict[str, Any]:
                 "coupon_unique_index_present": "uk_cc_customer_template" in coupon_indexes,
                 "coupon_duplicate_groups": len(coupon_groups),
                 "coupon_groups": coupon_report,
-                "financial_duplicate_groups": len(financial_report),
+                "financial_duplicate_groups": financial_group_count,
                 "financial_groups": financial_report,
                 "truncated": truncated,
                 "blocked": has_duplicates or truncated,
@@ -252,7 +252,6 @@ def main() -> int:
     try:
         report = _run_preflight(args.max_groups)
     except Exception as exc:
-        # 不打印连接 URL 或驱动异常详情，避免泄漏数据库信息。
         print(json.dumps({
             "mode": "READ_ONLY",
             "blocked": True,
