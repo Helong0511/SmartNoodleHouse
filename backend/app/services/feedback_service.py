@@ -107,7 +107,18 @@ class FeedbackService:
         - 新评价落库后同步驱动画像 fold（失败由调用方隔离）。
         """
         from app.models import OrderItem
+        from app.services.privacy_service import PrivacyService
         from app.services.taste_learning_service import TasteLearningService
+
+        # Serialize feedback persistence with opt-out cleanup. Feedback remains a
+        # business record when opted out, but an in-flight pre-revocation submit
+        # must finish before the revocation cleanup can delete it.
+        if order.customer_id:
+            locked_customer = await PrivacyService.lock_customer_for_recommendation(
+                db, int(order.customer_id)
+            )
+            if locked_customer is None:
+                raise ValueError("顾客不存在，无法提交评价")
 
         order_items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order.id)
