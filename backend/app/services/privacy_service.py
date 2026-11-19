@@ -118,6 +118,7 @@ class PrivacyService:
                 select(CustomerTasteProfile)
                 .where(CustomerTasteProfile.customer_id == int(customer.id))
                 .order_by(CustomerTasteProfile.score.desc())
+                .with_for_update()
             )
         ).scalars().all()
 
