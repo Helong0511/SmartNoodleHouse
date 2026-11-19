@@ -20,6 +20,8 @@ CHECKS = [
     ("BLK-008", "InsightFace 模型商业授权与推理验收", "取得 buffalo_l 等实际部署模型/权重的书面商业许可并归档模型版本与 SHA256；完成当前 FaceAnalysis API 兼容性、真实目标硬件/摄像头推理、性能与失败回退验收；未完成前保持 FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=false 且人脸迎宾关闭"),
     ("BLK-005", "小程序上架", "按 docs/小程序上架检查清单.md 提交审核"),
     ("P1-R2", "备份演练", "python scripts/备份恢复演练.py；隔离库加 --restore-drill"),
+    ("BLK-009", "完整灾备范围与异地恢复", "数据库备份之外，须按 STORAGE_BACKEND 备份并恢复本地 uploads 或 S3/MinIO 对象；安全备份 .env、支付证书/私钥及 FACE/SECRET 加密密钥（密钥与备份分离保管）；数据库与文件备份须加密、异地/不可变保存并执行定期整库恢复演练，核验订单、支付、附件和历史加密数据可读。"),
+    ("BLK-016", "MySQL/Redis 菜单代际灾难恢复一致性", "若 MySQL 从较旧备份/PITR 恢复而 Redis 保留较新 menu_version，菜单接口会因 Redis 代际高于 MySQL 持久 menu_generation 而 fail-closed 返回 503。恢复演练须明确停写窗口、备份时间点与恢复顺序；恢复后清理受影响门店的 Redis 菜单 version/bundle/schedule 键（使用经审查的精确 key 清单，勿 FLUSHDB），再由菜单读路径从 MySQL 重建代际；验证所有门店菜单可读、版本单调且跨 Worker 缓存一致。"),
 ]
 
 
