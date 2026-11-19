@@ -33,6 +33,21 @@ CONSENT_VERSION = "1.0"
 
 class PrivacyService:
     @staticmethod
+    async def lock_customer_for_recommendation(db: AsyncSession, customer_id: int) -> Customer | None:
+        """Serialize consent changes, event ingestion and profile writes per customer.
+
+        populate_existing is essential: callers may already hold a stale Customer
+        instance loaded before waiting for this row lock.
+        """
+        result = await db.execute(
+            select(Customer)
+            .where(Customer.id == int(customer_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_privacy_settings(db: AsyncSession, customer: Customer) -> dict[str, Any]:
         """返回个性化推荐开关 + 同意版本/时间。"""
         return {
@@ -53,6 +68,10 @@ class PrivacyService:
         request: Any = None,
     ) -> dict[str, Any]:
         """更新个性化推荐开关；关闭时立即丢弃未入库的事件队列（前端职责），后端 ingest 已拒收。"""
+        locked_customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+        if locked_customer is None:
+            raise ValueError("customer not found while updating recommendation consent")
+        customer = locked_customer
         opt_in = 1 if opt_in else 0
         old = int(customer.recommend_opt_in or 0)
         customer.recommend_opt_in = opt_in
@@ -62,7 +81,7 @@ class PrivacyService:
             customer.recommend_consent_at = datetime.now(timezone.utc)
         else:
             # 撤回授权后立即清除派生画像与行为数据；订单及财务凭证不删除。
-            await cls.clear_taste_profile(db, customer, request=request)
+            await cls.clear_taste_profile(db, customer, request=request, acquire_lock=False)
         await db.flush()
         await AuditService.log(
             db,
@@ -142,9 +161,15 @@ class PrivacyService:
         db: AsyncSession,
         customer: Customer,
         request: Any = None,
+        acquire_lock: bool = True,
     ) -> dict[str, Any]:
         """清除画像派生数据：行为事件 + 画像 + 评价 + customer_preferences。
         订单本体保留；写审计日志。"""
+        if acquire_lock:
+            locked_customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+            if locked_customer is None:
+                return {"cleared": False, "events_deleted": 0, "tables": []}
+            customer = locked_customer
         cid = int(customer.id)
         events_n = (
             await db.execute(
@@ -211,6 +236,10 @@ class PrivacyService:
         request: Any = None,
     ) -> dict[str, Any]:
         """记录版本化同意留痕。"""
+        locked_customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+        if locked_customer is None:
+            raise ValueError("customer not found while recording recommendation consent")
+        customer = locked_customer
         ver = (version or CONSENT_VERSION).strip()[:40]
         now = datetime.now(timezone.utc)
         old_ver = customer.consent_version
