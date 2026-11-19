@@ -200,3 +200,28 @@ async def test_preference_recompute_uses_locked_consent_state(db_session, monkey
         ).scalars().all()
     )
     assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_privacy_settings_reads_locked_consent_state(monkeypatch):
+    stale_customer = Customer(id=94, customer_no="LOCK-94", recommend_opt_in=1)
+    latest_customer = Customer(
+        id=94,
+        customer_no="LOCK-94",
+        recommend_opt_in=0,
+        consent_version="1.0",
+        recommend_consent_at=None,
+    )
+    calls = []
+
+    async def locked(_db, customer_id):
+        calls.append(customer_id)
+        return latest_customer
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+
+    result = await PrivacyService.get_privacy_settings(object(), stale_customer)
+
+    assert calls == [94]
+    assert result["recommend_opt_in"] == 0
+    assert result["consent_version"] == "1.0"
