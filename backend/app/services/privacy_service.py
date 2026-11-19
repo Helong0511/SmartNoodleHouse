@@ -100,8 +100,9 @@ class PrivacyService:
         cls, db: AsyncSession, customer: Customer
     ) -> dict[str, Any]:
         """口味画像可读视图：仅对已授权顾客返回派生画像。"""
-        if not int(getattr(customer, "recommend_opt_in", 0) or 0):
-            return {"customer_id": int(customer.id), "dimensions": {"CATEGORY": [], "PRODUCT": [], "TASTE_TAG": []}, "spec_preferences": []}
+        customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+            return {"customer_id": int(getattr(customer, "id", 0) or 0), "dimensions": {"CATEGORY": [], "PRODUCT": [], "TASTE_TAG": []}, "spec_preferences": []}
         profiles = (
             await db.execute(
                 select(CustomerTasteProfile)
