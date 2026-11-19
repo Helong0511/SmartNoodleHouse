@@ -1,0 +1,59 @@
+name: Prepare Vue Router 4.6.5 lockfile
+
+on:
+  push:
+    branches:
+      - security/vue-router-4.6.5-production-deps
+    paths:
+      - .github/workflows/prepare-vue-router4-lockfile.yml
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate-lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: true
+
+      - name: Set up Node.js and npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.19.1
+          npm --version
+
+      - name: Regenerate committed candidate lockfile
+        working-directory: frontend
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify reproducible install and production dependency graph
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          npm ls vue-router picomatch --omit=dev --all
+          npm audit --omit=dev --audit-level=high
+
+      - name: Commit lockfile to this candidate branch
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package-lock.json
+          if git diff --cached --quiet; then
+            echo "Candidate lockfile is already current."
+            exit 0
+          fi
+          git commit -m "chore(frontend): regenerate lockfile for Vue Router 4.6.5"
+          git push origin "HEAD:${BRANCH_NAME}"
