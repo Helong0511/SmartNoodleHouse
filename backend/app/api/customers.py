@@ -727,7 +727,7 @@ async def update_customer(
             customer.recommend_opt_in = new_opt
             if not new_opt:
                 from app.services.privacy_service import PrivacyService
-                await PrivacyService.clear_taste_profile(db, customer, request=request)
+                await PrivacyService.clear_taste_profile(db, customer, request=request, acquire_lock=False)
 
     if not changes:
         # 提交字段与现值相同：不写审计、不空刷渠道
