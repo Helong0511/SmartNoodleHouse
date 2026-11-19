@@ -80,6 +80,7 @@ async def test_profile_learning_uses_locked_consent_state(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.mysql
 @pytest.mark.parametrize("revoke_first", [False, True])
 async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
     db_session, monkeypatch, revoke_first
