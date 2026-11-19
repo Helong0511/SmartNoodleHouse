@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import Customer, CustomerBehaviorEvent
@@ -102,6 +103,7 @@ async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
         async with async_session() as session:
             current = await session.get(Customer, customer_id)
             if revoke_first:
+                second_started.set()
                 await lock_acquired.wait()
             result = await behavior_event_service.ingest_events(
                 session,
@@ -133,7 +135,7 @@ async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
         first = asyncio.create_task(revoke())
         await asyncio.wait_for(lock_acquired.wait(), timeout=5)
         second = asyncio.create_task(ingest())
-        await asyncio.wait_for(second_started.wait(), timeout=1) if False else asyncio.sleep(0)
+        await asyncio.wait_for(second_started.wait(), timeout=5)
         continue_first.set()
         await asyncio.wait_for(first, timeout=10)
         await asyncio.wait_for(second, timeout=10)
@@ -151,7 +153,7 @@ async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
         events = list(
             (
                 await verify.execute(
-                    __import__("sqlalchemy").select(CustomerBehaviorEvent).where(
+                    select(CustomerBehaviorEvent).where(
                         CustomerBehaviorEvent.customer_id == customer_id
                     )
                 )
