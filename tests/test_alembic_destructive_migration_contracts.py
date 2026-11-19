@@ -18,7 +18,7 @@ def _source(name: str) -> str:
 
 def _function_body(source: str, name: str) -> str:
     match = re.search(
-        rf"(?ms)^def {re.escape(name)}\\([^\\n]*\\):\\n(?P<body>.*?)(?=^def |\\Z)",
+        rf"(?ms)^def {re.escape(name)}\([^\n]*\):\n(?P<body>.*?)(?=^def |\Z)",
         source,
     )
     assert match, f"missing {name}()"
@@ -29,8 +29,8 @@ def test_0002_downgrade_is_explicitly_data_destructive():
     source = _source("0002_p0_hardening.py")
     downgrade = _function_body(source, "downgrade")
 
-    assert re.search(r"DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?point_ledger", downgrade, re.I)
-    assert re.search(r"DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?financial_ledger", downgrade, re.I)
+    assert re.search(r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?point_ledger", downgrade, re.I)
+    assert re.search(r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?financial_ledger", downgrade, re.I)
 
 
 def test_0003_coupon_deduplication_conflict_remains_documented():
@@ -48,7 +48,7 @@ def test_0010_removes_the_coupon_uniqueness_rule_introduced_by_0003():
     source = _source("0010_coupon_ledger_idempotency.py")
 
     assert "uk_cc_customer_template" in source
-    assert re.search(r"DROP\\s+INDEX\\s+uk_cc_customer_template", source, re.I)
+    assert re.search(r"DROP\s+INDEX\s+uk_cc_customer_template", source, re.I)
     assert "同模板可多张" in source
 
 
