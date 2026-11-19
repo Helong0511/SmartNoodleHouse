@@ -93,8 +93,8 @@ def test_connection_rejects_unreviewed_url_query_parameters(monkeypatch):
 
 def test_applied_revision_walks_current_head_ancestry(monkeypatch):
     parents = {
-        "0051_head": "0017_financial_ledger_idempotency",
-        "0017_financial_ledger_idempotency": "0003_p1_hardening",
+        "0051_head": "0017_fin_ledger_idempotency",
+        "0017_fin_ledger_idempotency": "0003_p1_hardening",
         "0003_p1_hardening": "0002_p0_hardening",
         "0002_p0_hardening": "0001_baseline",
         "0001_baseline": None,
