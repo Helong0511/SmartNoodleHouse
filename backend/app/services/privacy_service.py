@@ -49,12 +49,22 @@ class PrivacyService:
 
     @staticmethod
     async def get_privacy_settings(db: AsyncSession, customer: Customer) -> dict[str, Any]:
-        """返回个性化推荐开关 + 同意版本/时间。"""
+        """返回个性化推荐开关 + 同意版本/时间；与撤回操作串行读取。"""
+        locked_customer = await PrivacyService.lock_customer_for_recommendation(
+            db, int(customer.id)
+        )
+        if locked_customer is None:
+            return {
+                "recommend_opt_in": 0,
+                "consent_version": None,
+                "consented_at": None,
+                "retention_days": DEFAULT_RETENTION_DAYS,
+            }
         return {
-            "recommend_opt_in": int(customer.recommend_opt_in or 0),
-            "consent_version": customer.consent_version,
-            "consented_at": serialize_dt(customer.recommend_consent_at)
-            if customer.recommend_consent_at
+            "recommend_opt_in": int(locked_customer.recommend_opt_in or 0),
+            "consent_version": locked_customer.consent_version,
+            "consented_at": serialize_dt(locked_customer.recommend_consent_at)
+            if locked_customer.recommend_consent_at
             else None,
             "retention_days": DEFAULT_RETENTION_DAYS,
         }
