@@ -20,7 +20,8 @@ CHECKS = [
     ("BLK-008", "InsightFace 模型商业授权与推理验收", "取得 buffalo_l 等实际部署模型/权重的书面商业许可并归档模型版本与 SHA256；完成当前 FaceAnalysis API 兼容性、真实目标硬件/摄像头推理、性能与失败回退验收；未完成前保持 FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=false 且人脸迎宾关闭"),
     ("BLK-005", "小程序上架", "按 docs/小程序上架检查清单.md 提交审核"),
     ("P1-R2", "备份演练", "python scripts/备份恢复演练.py；隔离库加 --restore-drill"),
-    ("BLK-010", "破坏性迁移数据预检", "执行 0003_p1_hardening 与 0017_financial_ledger_idempotency 前，先在生产数据副本统计并导出将被去重删除的优惠券/财务分录；核对财务账本业务键、金额与来源，完成加密备份及可恢复性验证，由业务/财务负责人书面批准；发现重复或无法解释的差异时停止迁移并人工对账，禁止直接依赖迁移脚本自动 DELETE"),
+    ("BLK-010", "破坏性迁移数据预检", "执行 0003_p1_hardening 与 0017_financial_ledger_idempotency 前，先在生产数据副本统计并导出将被去重删除的优惠券/财务分录；0003 会删除同一 customer_id/template_id 下除最小 id 外的券，而 0010 才移除该唯一约束，必须确认这不会吞掉合法的同模板多券；核对财务账本业务键、金额与来源，完成加密备份及可恢复性验证，由业务/财务负责人书面批准；发现重复或无法解释的差异时停止迁移并人工对账，禁止直接依赖迁移脚本自动 DELETE"),
+    ("BLK-011", "MySQL 在线 DDL 与锁表演练", "针对 0002、0007 等 ALTER TABLE ADD/DROP COLUMN/INDEX 操作，在与生产同版本、近似数据量的预生产副本实测执行时间、metadata lock 等待、复制延迟和回滚/中止策略；确认算法与 LOCK 等级可用、低峰窗口及维护窗口，未完成前不得在生产直接执行 alembic upgrade head"),
 ]
 
 
