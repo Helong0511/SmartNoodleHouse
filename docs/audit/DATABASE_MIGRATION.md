@@ -15,7 +15,7 @@
 - ORM：SQLAlchemy 2.x async（Mapped / mapped_column 类型注解风格）
 - 驱动：aiomysql（生产 MySQL 8）、aiosqlite（测试 in-memory）
 - 迁移：Alembic，配置 [backend/alembic.ini](file:///e:/SmartNoodleHouse/backend/alembic.ini)
-- 迁移目录：[backend/alembic/versions/](file:///e:/SmartNoodleHouse/backend/alembic/versions/)，共 24 个版本文件
+- 迁移目录：`backend/alembic/versions/`。截至 2026-11-19，main 中有 51 个版本文件；文件数量不代表 revision 图已验证为单一 head，执行生产迁移前必须在目标版本环境运行 `alembic heads` 与 `alembic history` 并留存结果。
 - 结构真源：[sql/struct.sql](file:///e:/SmartNoodleHouse/sql/struct.sql)，种子数据 [sql/data_sys.sql](file:///e:/SmartNoodleHouse/sql/data_sys.sql) + [sql/data_custom.sql](file:///e:/SmartNoodleHouse/sql/data_custom.sql)
 - 字符集：utf8mb4 / utf8mb4_unicode_ci
 - 时区：业务时间 Asia/Shanghai；DB 连接不依赖会话时区
