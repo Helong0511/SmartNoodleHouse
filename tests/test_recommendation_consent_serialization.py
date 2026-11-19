@@ -12,6 +12,7 @@ from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
 from app.services import reco_cache
 from app.services.taste_learning_service import TasteLearningService
+from app.services.preference_service import PreferenceService
 from reco_factories import make_customer
 
 
@@ -163,3 +164,36 @@ async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
         )
         assert stored_customer.recommend_opt_in == 0
         assert events == []
+
+
+
+@pytest.mark.asyncio
+async def test_preference_recompute_uses_locked_consent_state(db_session, monkeypatch):
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    locked_customer = Customer(
+        id=customer_id, customer_no=customer.customer_no, recommend_opt_in=0
+    )
+    calls = []
+
+    async def locked(_db, requested_id):
+        calls.append(requested_id)
+        return locked_customer
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+
+    await PreferenceService.recompute_for_customer(db_session, customer_id)
+
+    assert calls == [customer_id]
+    from app.models import CustomerPreference
+
+    remaining = list(
+        (
+            await db_session.execute(
+                select(CustomerPreference).where(
+                    CustomerPreference.customer_id == customer_id
+                )
+            )
+        ).scalars().all()
+    )
+    assert remaining == []
