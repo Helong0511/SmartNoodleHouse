@@ -22,6 +22,8 @@ CHECKS = [
     ("P1-R2", "备份演练", "python scripts/备份恢复演练.py；隔离库加 --restore-drill"),
     ("BLK-010", "破坏性迁移数据预检", "执行 0003_p1_hardening 与 0017_financial_ledger_idempotency 前，先在生产数据副本统计并导出将被去重删除的优惠券/财务分录；0003 会删除同一 customer_id/template_id 下除最小 id 外的券，而 0010 才移除该唯一约束，必须确认这不会吞掉合法的同模板多券；核对财务账本业务键、金额与来源，完成加密备份及可恢复性验证，由业务/财务负责人书面批准；发现重复或无法解释的差异时停止迁移并人工对账，禁止直接依赖迁移脚本自动 DELETE"),
     ("BLK-011", "MySQL 在线 DDL 与锁表演练", "针对 0002、0007 等 ALTER TABLE ADD/DROP COLUMN/INDEX 操作，在与生产同版本、近似数据量的预生产副本实测执行时间、metadata lock 等待、复制延迟和回滚/中止策略；确认算法与 LOCK 等级可用、低峰窗口及维护窗口，未完成前不得在生产直接执行 alembic upgrade head"),
+    ("BLK-012", "迁移 downgrade 数据保全", "逐个审查所有将执行 downgrade 的 revision；特别注意 0002_p0_hardening.py 的 downgrade 会 DROP point_ledger 与 financial_ledger，其他迁移也会删除新建表/列。不得将 downgrade 当作无损回滚；先确认目标版本应用兼容性、导出迁移后新增数据、加密备份并完成恢复验证，优先采用向前修复或经批准的整库恢复。未证明数据可恢复前禁止生产 downgrade"),
+    ("BLK-013", "迁移历史数据回填语义核验", "审查 0016 operation_logs.category、0019 NOT NULL 字段回填、0040 marketing_campaigns.code_key 去重后缀及 0042 recommend_opt_in 默认关闭等历史数据变更；在生产数据副本统计影响行数、抽样核对业务语义及唯一键冲突，保存变更前后导出与审批记录。不得仅因迁移成功或唯一索引创建成功就认定历史数据语义正确"),
 ]
 
 
