@@ -25,7 +25,7 @@ CHECKS = [
 
 
 _SENSITIVE_LOG_RE = re.compile(
-    r"(?i)(?:[?&]|\\b)(?:secret|access_token|refresh_token|api[_-]?key|private[_-]?key|password)=([^&\\s\\\"']+)"
+    r"(?i)(?:[?&]|\b)(?:secret|access_token|refresh_token|api[_-]?key|private[_-]?key|password)=([^&\s\"']+)"
 )
 
 
@@ -88,13 +88,13 @@ def main() -> int:
         print(f"  → {action}")
 
     if not args.acknowledge:
-        print("\\n[BLOCKED] 人工阻塞项尚未由操作员确认；完成核验后显式传入 --acknowledge。")
+        print("\n[BLOCKED] 人工阻塞项尚未由操作员确认；完成核验后显式传入 --acknowledge。")
         return 2
     if log_scan_failed:
-        print("\\n[BLOCKED] 日志敏感信息扫描未通过；清理历史日志并轮换泄露凭据后再确认。")
+        print("\n[BLOCKED] 日志敏感信息扫描未通过；清理历史日志并轮换泄露凭据后再确认。")
         return 2
 
-    print("\\n[ACKNOWLEDGED] 操作员声明以上人工事项已逐项完成并核验。")
+    print("\n[ACKNOWLEDGED] 操作员声明以上人工事项已逐项完成并核验。")
     print("注意：此结果是人工确认，不是系统自动验证或第三方平台验收证明。")
     return 0
 
