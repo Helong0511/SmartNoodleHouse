@@ -21,7 +21,7 @@ from pymysql.cursors import DictCursor
 from sqlalchemy.engine import make_url
 
 TARGET_COUPON = "0003_p1_hardening"
-TARGET_FINANCIAL = "0017_financial_ledger_idempotency"
+TARGET_FINANCIAL = "0017_fin_ledger_idempotency"
 FINANCIAL_KEYS = (
     ("SALE", "payment_id", "uq_fin_ledger_entry_payment"),
     ("REFUND", "refund_id", "uq_fin_ledger_entry_refund"),
