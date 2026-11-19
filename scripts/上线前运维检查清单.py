@@ -19,6 +19,8 @@ CHECKS = [
     ("BLK-007", "人脸识别个人信息合规门禁", "如启用人脸处理，须先完成个人信息保护影响评估、显著告知、单独同意与撤回、非人脸替代方式、最短保存期限及存储/传输合规审查；否则保持 ENABLE_FACE_WELCOME=false 且 FACE_RECOGNITION_LEGAL_REVIEWED=false"),
     ("BLK-008", "InsightFace 模型商业授权与推理验收", "取得 buffalo_l 等实际部署模型/权重的书面商业许可并归档模型版本与 SHA256；完成当前 FaceAnalysis API 兼容性、真实目标硬件/摄像头推理、性能与失败回退验收；未完成前保持 FACE_MODEL_COMMERCIAL_LICENSE_CONFIRMED=false 且人脸迎宾关闭"),
     ("BLK-005", "小程序上架", "按 docs/小程序上架检查清单.md 提交审核"),
+    ("BLK-014", "0019 回填与唯一约束回滚审查", "在生产数据副本统计 delivery_orders.platform_fee/packing_fee/delivery_fee/refund_status 的 NULL 行；确认金额 NULL→0.00、状态 NULL→NONE 的业务语义；核验 0019 downgrade 恢复 payment_id/refund_id/delivery_refund_id 单列唯一索引前不存在跨 entry_type 等冲突；留存导出、恢复验证与业务审批"),
+    ("BLK-015", "0036/0040 降级数据保全", "0036 downgrade 会 DROP archived_order_snapshots、payment_reconcile_diffs、payment_reconcile_batches、role_delegations；0040 downgrade 会 DROP marketing_flash_sale_claims/stocks/sales/campaign_stores、orders 营销标记列及 marketing_campaigns.code_key；禁止将 downgrade 当无损回滚，先导出相关业务数据并验证恢复，优先向前修复或经批准整库恢复"),
     ("P1-R2", "备份演练", "python scripts/备份恢复演练.py；隔离库加 --restore-drill"),
 ]
 
