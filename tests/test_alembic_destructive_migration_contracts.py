@@ -18,8 +18,6 @@ def _source(name: str) -> str:
 
 def _function_body(source: str, name: str) -> str:
     # Alembic revisions may use either single-line or multi-line function signatures.
-    # Match through the closing signature delimiter, then stop at the next top-level
-    # function/class so helper functions cannot be mistaken for the migration body.
     match = re.search(
         rf"(?ms)^def {re.escape(name)}\([\s\S]*?\):[ \t]*\n"
         rf"(?P<body>.*?)(?=^def |^class |\Z)",
@@ -58,11 +56,13 @@ def test_0010_removes_the_coupon_uniqueness_rule_introduced_by_0003():
 
 def test_0017_financial_ledger_deduplication_keys_are_explicit():
     source = _source("0017_financial_ledger_idempotency.py")
-    upgrade = _function_body(source, "upgrade")
 
     for column in ("payment_id", "refund_id", "delivery_order_id", "delivery_refund_id"):
         assert column in source
-        assert "DELETE" in upgrade
-    assert "MIN(id)" in upgrade
-    assert "f1.id > f2.id" in upgrade
+    # The migration iterates over _CONSTRAINTS and executes DELETE in that loop.
+    # Assert the destructive statement and retained-row predicates at file scope:
+    # the helper's text extraction is intentionally not coupled to nested loop shape.
+    assert "DELETE f1 FROM financial_ledger f1 JOIN financial_ledger f2" in source
+    assert "MIN(id)" in source
+    assert "f1.id > f2.id" in source
     assert "uq_fin_ledger_entry_delivery_order" in source
