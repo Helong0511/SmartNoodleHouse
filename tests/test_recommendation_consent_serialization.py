@@ -142,15 +142,17 @@ async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
         await asyncio.wait_for(second_started.wait(), timeout=5)
         continue_first.set()
         await asyncio.wait_for(first, timeout=10)
-        await asyncio.wait_for(second, timeout=10)
+        second_result = await asyncio.wait_for(second, timeout=10)
+        assert second_result["accepted"] == 0
     else:
         first = asyncio.create_task(ingest())
         await asyncio.wait_for(lock_acquired.wait(), timeout=5)
         second = asyncio.create_task(revoke())
         await asyncio.wait_for(second_started.wait(), timeout=5)
         continue_first.set()
-        await asyncio.wait_for(first, timeout=10)
+        first_result = await asyncio.wait_for(first, timeout=10)
         await asyncio.wait_for(second, timeout=10)
+        assert first_result["accepted"] == 1
 
     async with async_session() as verify:
         stored_customer = await verify.get(Customer, customer_id)
