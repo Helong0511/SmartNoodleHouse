@@ -308,6 +308,7 @@ async def list_customers(
                 .join(Customer, Customer.id == CustomerPreference.customer_id)
                 .where(CustomerPreference.customer_id.in_(ids), Customer.recommend_opt_in == 1)
                 .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+                .with_for_update()
             )
         ).scalars().all()
         for p in pref_rows:
