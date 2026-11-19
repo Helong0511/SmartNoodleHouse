@@ -241,6 +241,7 @@ class PreferenceService:
                 CustomerPreference.order_count >= PreferenceService.MIN_ORDER_COUNT,
             )
             .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
         )
         prefs = list(prefs_result.scalars().all())
         # 若无达到阈值的，退回全部（首单也能出推荐）
