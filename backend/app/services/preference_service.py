@@ -252,6 +252,7 @@ class PreferenceService:
                         select(CustomerPreference)
                         .where(CustomerPreference.customer_id == customer_id)
                         .order_by(CustomerPreference.preference_score.desc())
+                        .with_for_update()
                     )
                 ).scalars().all()
             )
