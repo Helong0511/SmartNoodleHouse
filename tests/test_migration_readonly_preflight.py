@@ -110,7 +110,14 @@ def test_applied_revision_walks_current_head_ancestry(monkeypatch):
                 return None
             return SimpleNamespace(down_revision=parents[revision])
 
-    monkeypatch.setattr(PREFLIGHT, "Config", lambda _path: object())
+    class FakeConfig:
+        def __init__(self, _path):
+            self.options = {}
+
+        def set_main_option(self, key, value):
+            self.options[key] = value
+
+    monkeypatch.setattr(PREFLIGHT, "Config", FakeConfig)
     monkeypatch.setattr(PREFLIGHT, "ScriptDirectory", FakeScripts)
 
     applied = PREFLIGHT._applied_revisions(["0051_head"])
@@ -129,7 +136,14 @@ def test_unknown_database_revision_fails_closed(monkeypatch):
         def get_revision(self, _revision):
             return None
 
-    monkeypatch.setattr(PREFLIGHT, "Config", lambda _path: object())
+    class FakeConfig:
+        def __init__(self, _path):
+            self.options = {}
+
+        def set_main_option(self, key, value):
+            self.options[key] = value
+
+    monkeypatch.setattr(PREFLIGHT, "Config", FakeConfig)
     monkeypatch.setattr(PREFLIGHT, "ScriptDirectory", FakeScripts)
 
     with pytest.raises(RuntimeError, match="revision 不存在"):
