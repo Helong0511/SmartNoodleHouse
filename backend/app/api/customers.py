@@ -465,6 +465,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             select(CustomerPreference)
             .where(CustomerPreference.customer_id == customer_id)
             .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
         )).scalars().all())
         if int(getattr(customer, "recommend_opt_in", 0) or 0)
         else []
@@ -828,6 +829,7 @@ async def get_preferences(
             Customer.recommend_opt_in == 1,
         )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
     )
     prefs["all"] = [
         {
