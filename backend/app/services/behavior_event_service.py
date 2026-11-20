@@ -116,7 +116,7 @@ async def ingest_events(db, customer, raw_events: list[Any]) -> dict[str, Any]:
         select(CustomerBehaviorEvent.event_id).where(
             CustomerBehaviorEvent.customer_id == int(customer.id),
             CustomerBehaviorEvent.event_id.in_(batch_seen),
-        )
+        ).with_for_update()
     )
     existing = {r[0] for r in existing_rows.all()}
     to_insert = [e for e in normalized if e.event_id not in existing]
