@@ -102,6 +102,7 @@ async def get_my_preferences(
             Customer.recommend_opt_in == 1,
         )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
     )
     prefs["all"] = [
         {
