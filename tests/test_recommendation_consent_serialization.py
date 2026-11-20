@@ -13,6 +13,7 @@ from app.services.privacy_service import PrivacyService
 from app.services import reco_cache
 from app.services.taste_learning_service import TasteLearningService
 from app.services.preference_service import PreferenceService
+from app.services.customer_merge_service import CustomerMergeService
 from reco_factories import make_customer
 
 
@@ -371,3 +372,53 @@ async def test_mysql_event_ingestion_uses_current_read_for_idempotency(
             )
         )
         assert count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_opt_in", "target_opt_in"),
+    [(0, 1), (1, 0), (0, 0)],
+)
+async def test_customer_merge_does_not_resurrect_preferences_without_both_consents(
+    db_session, source_opt_in, target_opt_in
+):
+    source = await make_customer(db_session, recommend_opt_in=source_opt_in)
+    target = await make_customer(db_session, recommend_opt_in=target_opt_in)
+    db_session.add_all(
+        [
+            CustomerPreference(
+                customer_id=int(source.id),
+                category="辣度",
+                option_code="HOT",
+                option_name="特辣",
+                preference_score="0.9000",
+                order_count=3,
+            ),
+            CustomerPreference(
+                customer_id=int(target.id),
+                category="辣度",
+                option_code="MILD",
+                option_name="微辣",
+                preference_score="0.7000",
+                order_count=2,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    stats = {"preferences_moved": 0, "preferences_merged": 0}
+    await CustomerMergeService._merge_preferences_for_consent(
+        db_session, source, target, stats
+    )
+
+    remaining = list(
+        (
+            await db_session.execute(
+                select(CustomerPreference).where(
+                    CustomerPreference.customer_id.in_((int(source.id), int(target.id)))
+                )
+            )
+        ).scalars().all()
+    )
+    assert remaining == []
+    assert stats["preferences_cleared_for_consent"] == 2
