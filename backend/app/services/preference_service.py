@@ -119,7 +119,7 @@ class PreferenceService:
         if not orders:
             existing = (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update()
                 )
             ).scalars().all()
             for pref in existing:
@@ -189,7 +189,7 @@ class PreferenceService:
             (p.category, p.option_code): p
             for p in (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update()
                 )
             ).scalars().all()
         }
