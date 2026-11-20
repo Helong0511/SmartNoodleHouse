@@ -646,7 +646,10 @@ async def create_recharge(
         extra=extra,
     )
     await db.refresh(ro)
-    cust = await db.get(Customer, customer.id)
+    # A merge may have reassigned this recharge while payment creation was in
+    # flight. Never expose the surviving target customer's wallet to a request
+    # authenticated as the source customer; return an empty snapshot instead.
+    cust = await db.get(Customer, customer.id) if int(ro.customer_id) == int(customer.id) else None
     wallet = BalanceService.snapshot(cust) if cust else {}
     out = {
         **_ro_ser(ro),
