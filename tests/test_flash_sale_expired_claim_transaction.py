@@ -110,9 +110,9 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
     if expect_success:
         result = await flash_sale_service.FlashSaleService.claim(
             db_session,
-            campaign_id=campaign.id,
-            store_id=store.id,
-            customer_id=customer.id,
+            campaign_id=campaign_id,
+            store_id=store_id,
+            customer_id=customer_id,
         )
         assert result["status"] == "CLAIMED"
         await db_session.commit()
@@ -120,9 +120,9 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
         with pytest.raises(AppException):
             await flash_sale_service.FlashSaleService.claim(
                 db_session,
-                campaign_id=campaign.id,
-                store_id=store.id,
-                customer_id=customer.id,
+                campaign_id=campaign_id,
+                store_id=store_id,
+                customer_id=customer_id,
             )
         # The API/request transaction rolls back after the service exception.
         await db_session.rollback()
@@ -142,9 +142,9 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
             (
                 await db_session.execute(
                     select(FlashSaleClaim).where(
-                        FlashSaleClaim.campaign_id == campaign.id,
-                        FlashSaleClaim.customer_id == customer.id,
-                        FlashSaleClaim.id != old_claim.id,
+                        FlashSaleClaim.campaign_id == campaign_id,
+                        FlashSaleClaim.customer_id == customer_id,
+                        FlashSaleClaim.id != old_claim_id,
                     )
                 )
             ).scalars()
@@ -156,9 +156,9 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
         assert persisted_stock.remaining_quantity == remaining
         new_claim_count = await db_session.scalar(
             select(FlashSaleClaim.id).where(
-                FlashSaleClaim.campaign_id == campaign.id,
-                FlashSaleClaim.customer_id == customer.id,
-                FlashSaleClaim.id != old_claim.id,
+                FlashSaleClaim.campaign_id == campaign_id,
+                FlashSaleClaim.customer_id == customer_id,
+                FlashSaleClaim.id != old_claim_id,
             )
         )
         assert new_claim_count is None
