@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import BIZ_OT, BIZ_PF, TABLE_TAKEAWAY, generate_no
 from app.core.exceptions import AppException
+from app.core.error_codes import ACCOUNT_DISABLED
 from app.core.response import naive_local_now
 from app.models import (
     Customer,
@@ -35,6 +36,24 @@ from app.services.stock_service import deduct_stock
 from app.utils.campaign_schedule import campaign_in_schedule_window
 
 logger = logging.getLogger(__name__)
+
+
+async def _lock_active_customer(db: AsyncSession, customer_id: int) -> Customer:
+    """Serialize customer-owned writes with merge and reject stale authenticated owners."""
+    result = await db.execute(
+        select(Customer)
+        .where(Customer.id == int(customer_id))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    customer = result.scalar_one_or_none()
+    if (
+        customer is None
+        or int(customer.status or 0) != 1
+        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+    ):
+        raise AppException(ACCOUNT_DISABLED, "顾客不存在或已禁用", status_code=401)
+    return customer
 
 STATUS_CLAIMED = "CLAIMED"
 STATUS_USED = "USED"
@@ -309,8 +328,9 @@ class FlashSaleService:
         ):
             raise AppException(40011, "本店未配置可用的抢购餐品")
 
-        # 顾客行锁：串行化同一顾客的并发抢购，保证限购计数与 unit_no 正确
-        await db.execute(select(Customer.id).where(Customer.id == cid).with_for_update())
+        # Current-read the full row: an authenticated request may have become stale
+        # while customer merge disabled this account in another transaction.
+        await _lock_active_customer(db, cid)
 
         request_id = (client_request_id or "").strip() or None
         if request_id:
