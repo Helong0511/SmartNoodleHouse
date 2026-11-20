@@ -154,7 +154,7 @@ class TasteLearningService:
     @staticmethod
     async def _load_rows(db, customer_id: int) -> dict[tuple[str, str], CustomerTasteProfile]:
         result = await db.execute(
-            select(CustomerTasteProfile).where(CustomerTasteProfile.customer_id == customer_id)
+            select(CustomerTasteProfile).where(CustomerTasteProfile.customer_id == customer_id).with_for_update()
         )
         return {(r.dim_type, r.target_key): r for r in result.scalars().all()}
 
@@ -200,7 +200,7 @@ class TasteLearningService:
         watermark = max((r.last_event_at for r in rows.values() if r.last_event_at), default=None)
         q = select(CustomerBehaviorEvent).where(
             CustomerBehaviorEvent.customer_id == customer_id
-        ).order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id)
+        ).order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id).with_for_update()
         if watermark is not None:
             q = q.where(CustomerBehaviorEvent.created_at > watermark)
         events = list((await db.execute(q.limit(limit))).scalars().all())
@@ -296,7 +296,7 @@ class TasteLearningService:
                         CustomerBehaviorEvent.event_id.in_(
                             [f"order_refund:{order_id}:{pid}" for pid in pids]
                         ),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         }
@@ -354,7 +354,7 @@ class TasteLearningService:
                         CustomerBehaviorEvent.event_id.in_(
                             [f"order_paid:{order_id}:{pid}" for pid in qty_by_product]
                         ),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         }
