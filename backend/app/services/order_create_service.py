@@ -10,9 +10,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Store
+from app.models import Customer, Option, OptionGroup, Order, OrderItem, OrderItemOption, Store
 from app.services.customer_service import CustomerService
 from app.services.order_service import OrderPriceCalculator
+
+
+async def _lock_active_order_customer(db: AsyncSession, customer_id: int):
+    """Serialize creation of customer-owned orders with account merge/disable.
+
+    Acquire the lifecycle row lock before inserting any Order (and before
+    dining-session side effects). Merge locks existing Orders before Customer;
+    a new-order writer holds only Customer here and creates a new child row,
+    so it never waits on an existing Order held by merge.
+    """
+    customer = (
+        await db.execute(
+            select(Customer)
+            .where(Customer.id == int(customer_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if (
+        customer is None
+        or int(customer.status or 0) != 1
+        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+    ):
+        raise AppException(40102, "顾客不存在或已禁用", status_code=401)
+    return customer
 
 
 class OrderCreateService:
@@ -263,6 +288,13 @@ class OrderCreateService:
                 raise AppException(40401, "门店不存在")
             if int(store.status or 0) != 1:
                 raise AppException(40302, "该门店当前不可下单")
+
+        # Lock and refresh the authenticated customer before any new Order insert
+        # or dining-session mutation. This closes the stale-auth window with merge:
+        # if merge wins, this current read sees DISABLED; if creation wins, merge's
+        # later customer lock waits and its bulk reassignment includes the new order.
+        if customer_id is not None:
+            await _lock_active_order_customer(db, int(customer_id))
 
         scoped_key = OrderCreateService._scoped_idempotency_key(
             idempotency_key,
