@@ -366,9 +366,10 @@ class FlashSaleService:
         if held is not None:
             if held.expires_at and held.expires_at > now:
                 return await cls._claim_payload(db, held, already_claimed=True)
-            # 超时未核销：名额作废（不返还库存）
-            held.status = STATUS_EXPIRED
-            await db.flush()
+            # Keep the expired row CLAIMED while checks that may raise are running.
+            # CLAIMED is already in _CONSUMED_STATUSES, so the quota count below
+            # still reserves this unit. Persist EXPIRED only after stock deduction
+            # succeeds and the replacement claim can be committed with it.
 
         used = int(
             await db.scalar(
@@ -407,6 +408,12 @@ class FlashSaleService:
         )
         if not deducted.rowcount:
             raise AppException(40011, "本店名额已抢完")
+
+        # Do not flush EXPIRED before the quota/stock checks above: those checks
+        # intentionally raise and the request transaction would roll this state
+        # transition back. The previous CLAIMED row already counted as consumed.
+        if held is not None and held.expires_at and held.expires_at <= now:
+            held.status = STATUS_EXPIRED
 
         expiry = cls._resolve_expiry(cfg, camp, now)
         claim = FlashSaleClaim(
