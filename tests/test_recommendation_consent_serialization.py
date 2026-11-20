@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.dialects import mysql
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import Customer, CustomerBehaviorEvent, CustomerPreference
@@ -13,7 +14,7 @@ from app.services.privacy_service import PrivacyService
 from app.services import reco_cache
 from app.services.taste_learning_service import TasteLearningService
 from app.services.preference_service import PreferenceService
-from app.services.customer_merge_service import CustomerMergeService
+from app.services.customer_merge_service import CustomerMergeService, _lock_merge_scope
 from reco_factories import make_customer
 
 
@@ -422,3 +423,36 @@ async def test_customer_merge_does_not_resurrect_preferences_without_both_consen
     )
     assert remaining == []
     assert stats["preferences_cleared_for_consent"] == 2
+
+
+@pytest.mark.asyncio
+async def test_customer_merge_locks_orders_and_recharges_before_customers():
+    class ScalarResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class RecordingSession:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            return ScalarResult()
+
+    session = RecordingSession()
+    await _lock_merge_scope(session, [11, 22])
+
+    sql = [
+        str(statement.compile(dialect=mysql.dialect())).lower()
+        for statement in session.statements
+    ]
+    assert len(sql) == 3
+    assert "from orders" in sql[0] and "for update" in sql[0]
+    assert "order by orders.id" in sql[0]
+    assert "from recharge_orders" in sql[1] and "for update" in sql[1]
+    assert "order by recharge_orders.id" in sql[1]
+    assert "from customers" in sql[2] and "for update" in sql[2]
+    assert "order by customers.id" in sql[2]
