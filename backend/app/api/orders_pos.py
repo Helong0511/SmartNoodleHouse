@@ -336,7 +336,16 @@ async def bind_pos_customer(
     user: CurrentUser,
 ):
     """待支付 POS 单绑定/更换/清除会员；重算会员折扣与优惠券。"""
-    order = await db.get(Order, order_id)
+    # Match CustomerMergeService's parent-before-customer lock order. A current
+    # read refreshes an Order that may have been reassigned by a concurrent merge.
+    order = (
+        await db.execute(
+            select(Order)
+            .where(Order.id == int(order_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     if not order:
         raise AppException(40404, "订单不存在")
     assert_order_store_access(user, order)
@@ -349,8 +358,22 @@ async def bind_pos_customer(
     if new_cid:
         from app.api.customers import _assert_customer_in_store
 
-        cust = await db.get(Customer, new_cid)
-        if not cust or int(cust.status) != 1:
+        # Lock and refresh the selected customer only after the Order lock. This
+        # serializes with merge's Order -> RechargeOrder -> Customer sequence and
+        # rejects a stale POS request targeting a source account already merged.
+        cust = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == new_cid)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            not cust
+            or int(cust.status or 0) != 1
+            or str(getattr(cust, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+        ):
             raise AppException(40406, "顾客不存在或已停用")
         await _assert_customer_in_store(db, new_cid, int(order.store_id), action="收银台绑客")
     order.customer_id = new_cid
