@@ -1,4 +1,4 @@
-"""MySQL regression for ordinary order creation racing customer merge."""
+"""MySQL regression for the customer lifecycle gate used by order creation."""
 from __future__ import annotations
 
 import asyncio
@@ -15,8 +15,8 @@ from app.services.order_create_service import _lock_active_order_customer
 
 @pytest.mark.mysql
 @pytest.mark.asyncio
-async def test_order_create_customer_gate_reloads_disabled_state_after_merge_commit(db_session):
-    """A request authenticated before merge must not create a source-owned order."""
+async def test_order_customer_gate_waits_for_merge_and_refreshes_disabled_state(db_session):
+    """The pre-insert gate rejects a stale request after merge commits."""
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
 
