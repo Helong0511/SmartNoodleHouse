@@ -95,7 +95,7 @@ class PreferenceService:
         customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             # 未明确同意：不构建画像，并清除可能残留的规格偏好。
-            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id))).scalars().all()
+            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update())).scalars().all()
             for pref in stale:
                 await db.delete(pref)
             return
