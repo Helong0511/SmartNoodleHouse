@@ -131,13 +131,7 @@ async def test_create_order_rejects_idempotent_hit_on_paid_order():
     )
     db = MagicMock()
     db.get = AsyncMock(return_value=SimpleNamespace(status=1))
-    active_customer = SimpleNamespace(status=1, account_status="ACTIVE")
-    db.execute = AsyncMock(
-        side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=active_customer)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=paid)),
-        ]
-    )
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=paid)))
 
     with patch.object(OrderCreateService, "_scoped_idempotency_key", return_value="cust:1:k"):
         with pytest.raises(AppException) as ei:
