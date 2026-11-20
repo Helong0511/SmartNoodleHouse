@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import Customer, CustomerBehaviorEvent, CustomerPreference
@@ -308,3 +308,66 @@ async def test_mysql_preference_projection_uses_current_read_after_revocation(
     rows = await asyncio.wait_for(read_preferences(), timeout=10)
     await asyncio.wait_for(revoke_task, timeout=10)
     assert rows == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.mysql
+async def test_mysql_event_ingestion_uses_current_read_for_idempotency(
+    db_session, monkeypatch
+):
+    if db_session.bind.dialect.name != "mysql":
+        pytest.skip("current-read idempotency regression requires MySQL REPEATABLE READ")
+
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    await db_session.commit()
+
+    async_session = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    snapshot_ready = asyncio.Event()
+    first_insert_committed = asyncio.Event()
+
+    async def stale_snapshot_request():
+        async with async_session() as session:
+            # Establish a REPEATABLE READ snapshot before the competing insert.
+            await session.execute(
+                select(CustomerBehaviorEvent.id).where(
+                    CustomerBehaviorEvent.customer_id == customer_id
+                )
+            )
+            snapshot_ready.set()
+            await asyncio.wait_for(first_insert_committed.wait(), timeout=10)
+            result = await behavior_event_service.ingest_events(
+                session,
+                await session.get(Customer, customer_id),
+                [{"event_id": "same-event-id", "event_type": "CLICK"}],
+            )
+            await session.commit()
+            return result
+
+    async def first_insert():
+        await asyncio.wait_for(snapshot_ready.wait(), timeout=10)
+        async with async_session() as session:
+            result = await behavior_event_service.ingest_events(
+                session,
+                await session.get(Customer, customer_id),
+                [{"event_id": "same-event-id", "event_type": "CLICK"}],
+            )
+            assert result["accepted"] == 1
+            await session.commit()
+            first_insert_committed.set()
+
+    stale_task = asyncio.create_task(stale_snapshot_request())
+    insert_task = asyncio.create_task(first_insert())
+    await asyncio.wait_for(insert_task, timeout=15)
+    stale_result = await asyncio.wait_for(stale_task, timeout=15)
+
+    assert stale_result["accepted"] == 0
+    assert stale_result["duplicate"] == 1
+    async with async_session() as verify:
+        count = await verify.scalar(
+            select(func.count()).select_from(CustomerBehaviorEvent).where(
+                CustomerBehaviorEvent.customer_id == customer_id,
+                CustomerBehaviorEvent.event_id == "same-event-id",
+            )
+        )
+        assert count == 1
