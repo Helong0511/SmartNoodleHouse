@@ -18,7 +18,7 @@ bcrypt>=4.1.2,<5.0
 redis>=8.1.0,<8.2.0
 httpx>=0.28.1,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
-python-multipart>=0.0.33,<1.0
+python-multipart>=0.0.34,<1.0
 apscheduler>=3.11.3,<4.0
 websockets>=17.4,<18
 opencv-python-headless>=5.0.0.93,<6.0
