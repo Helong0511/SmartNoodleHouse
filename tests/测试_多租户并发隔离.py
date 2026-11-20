@@ -80,14 +80,26 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
 
     source = SimpleNamespace(id=2, status=1)
     target = SimpleNamespace(id=1, status=1)
-    locked = MagicMock()
-    locked.scalars.return_value.all.return_value = [target, source]
+    order_locks = MagicMock()
+    recharge_locks = MagicMock()
+    locked_customers = MagicMock()
+    locked_customers.scalars.return_value.all.return_value = [target, source]
     foreign_order = MagicMock()
     foreign_order.scalar_one_or_none.return_value = 50
     foreign_recharge = MagicMock()
     foreign_recharge.scalar_one_or_none.return_value = None
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[locked, foreign_order, foreign_recharge])
+    # merge() now locks payment parents (Orders, RechargeOrders) before Customers,
+    # then performs the store-scope authorization probes.
+    db.execute = AsyncMock(
+        side_effect=[
+            order_locks,
+            recharge_locks,
+            locked_customers,
+            foreign_order,
+            foreign_recharge,
+        ]
+    )
 
     with pytest.raises(AppException) as ei:
         await CustomerMergeService.merge(
