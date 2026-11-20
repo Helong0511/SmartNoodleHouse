@@ -940,8 +940,10 @@ class PaymentService:
             reused = True
             if operator_id is not None:
                 payment.operator_id = operator_id
-            if customer_id is not None:
-                payment.customer_id = customer_id
+            # The locked RechargeOrder is the ownership authority. The optional
+            # customer_id may come from a request authenticated before a merge
+            # committed while this call was waiting for the RechargeOrder lock.
+            payment.customer_id = int(recharge.customer_id)
         else:
             t_no, t_ph = await _order_table_parts(db, order)
             sno = await _order_store_no(db, order)
@@ -1178,6 +1180,7 @@ class PaymentService:
                 )
                 .order_by(Payment.id.desc())
                 .limit(1)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         reused = False
@@ -1199,7 +1202,7 @@ class PaymentService:
                 payment_no=generate_no(payment_biz(provider_u), sno, "00"),
                 order_id=None,
                 recharge_order_id=recharge.id,
-                customer_id=customer_id or recharge.customer_id,
+                customer_id=int(recharge.customer_id),
                 provider=provider_u,
                 channel=channel,
                 amount=pay_amount,
