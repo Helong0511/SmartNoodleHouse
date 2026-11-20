@@ -76,6 +76,31 @@ def _customer_snapshot(c: Customer) -> dict[str, Any]:
     }
 
 
+async def _lock_merge_scope(db: AsyncSession, customer_ids: list[int]) -> list[Customer]:
+    """Lock payment parents before customers, matching payment/refund settlement lock order."""
+    await db.execute(
+        select(Order.id)
+        .where(Order.customer_id.in_(customer_ids))
+        .order_by(Order.id)
+        .with_for_update()
+    )
+    await db.execute(
+        select(RechargeOrder.id)
+        .where(RechargeOrder.customer_id.in_(customer_ids))
+        .order_by(RechargeOrder.id)
+        .with_for_update()
+    )
+    return (
+        await db.execute(
+            select(Customer)
+            .where(Customer.id.in_(customer_ids))
+            .order_by(Customer.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
+
+
 def _defer_recommendation_cache_invalidation(db: AsyncSession, *customer_ids: int) -> None:
     """Persist cache invalidation for every account affected by a customer merge."""
     from app.services.reco_cache import defer_invalidate_customer
@@ -100,31 +125,10 @@ class CustomerMergeService:
         if int(target_customer_id) == int(source_customer_id):
             raise AppException(40061, "不能合并同一顾客")
 
-        # 支付/退款结算按 Order 或 RechargeOrder → Customer 加锁。
-        # 合并也必须先锁两类资金父记录，再按 id 锁顾客，避免与迟到支付、
-        # 退款回收/充值入账形成 Customer ↔ Order/RechargeOrder 死锁环。
+        # Payment/refund flows lock Order or RechargeOrder before Customer.
+        # Keep the same global order here to avoid Customer ↔ payment-parent deadlocks.
         ids = sorted([int(target_customer_id), int(source_customer_id)])
-        await db.execute(
-            select(Order.id)
-            .where(Order.customer_id.in_(ids))
-            .order_by(Order.id)
-            .with_for_update()
-        )
-        await db.execute(
-            select(RechargeOrder.id)
-            .where(RechargeOrder.customer_id.in_(ids))
-            .order_by(RechargeOrder.id)
-            .with_for_update()
-        )
-        locked = (
-            await db.execute(
-                select(Customer)
-                .where(Customer.id.in_(ids))
-                .order_by(Customer.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalars().all()
+        locked = await _lock_merge_scope(db, ids)
         by_id = {int(c.id): c for c in locked}
         target = by_id.get(int(target_customer_id))
         source = by_id.get(int(source_customer_id))
