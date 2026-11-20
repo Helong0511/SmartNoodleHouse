@@ -100,10 +100,30 @@ class CustomerMergeService:
         if int(target_customer_id) == int(source_customer_id):
             raise AppException(40061, "不能合并同一顾客")
 
-        # 按 id 升序加锁，避免死锁
+        # 支付/退款结算按 Order 或 RechargeOrder → Customer 加锁。
+        # 合并也必须先锁两类资金父记录，再按 id 锁顾客，避免与迟到支付、
+        # 退款回收/充值入账形成 Customer ↔ Order/RechargeOrder 死锁环。
         ids = sorted([int(target_customer_id), int(source_customer_id)])
+        await db.execute(
+            select(Order.id)
+            .where(Order.customer_id.in_(ids))
+            .order_by(Order.id)
+            .with_for_update()
+        )
+        await db.execute(
+            select(RechargeOrder.id)
+            .where(RechargeOrder.customer_id.in_(ids))
+            .order_by(RechargeOrder.id)
+            .with_for_update()
+        )
         locked = (
-            await db.execute(select(Customer).where(Customer.id.in_(ids)).order_by(Customer.id).with_for_update().execution_options(populate_existing=True))
+            await db.execute(
+                select(Customer)
+                .where(Customer.id.in_(ids))
+                .order_by(Customer.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalars().all()
         by_id = {int(c.id): c for c in locked}
         target = by_id.get(int(target_customer_id))
