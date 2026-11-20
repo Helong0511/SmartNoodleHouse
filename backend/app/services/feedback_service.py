@@ -126,7 +126,14 @@ class FeedbackService:
         valid_pids = {int(it.product_id) for it in order_items if it.product_id}
         existing = {
             f.product_id: f
-            for f in await FeedbackService.list_order_feedback(db, order.id)
+            for f in (
+                await db.execute(
+                    select(ProductFeedback)
+                    .where(ProductFeedback.order_id == order.id)
+                    .order_by(ProductFeedback.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
         }
 
         saved: list[int] = []
