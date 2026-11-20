@@ -186,7 +186,7 @@ class PrivacyService:
         cid = int(customer.id)
         events_n = (
             await db.execute(
-                select(CustomerBehaviorEvent.id).where(CustomerBehaviorEvent.customer_id == cid)
+                select(CustomerBehaviorEvent.id).where(CustomerBehaviorEvent.customer_id == cid).with_for_update()
             )
         ).all()
         events_count = len(events_n)
