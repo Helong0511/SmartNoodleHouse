@@ -76,6 +76,14 @@ def _customer_snapshot(c: Customer) -> dict[str, Any]:
     }
 
 
+def _defer_recommendation_cache_invalidation(db: AsyncSession, *customer_ids: int) -> None:
+    """Persist cache invalidation for every account affected by a customer merge."""
+    from app.services.reco_cache import defer_invalidate_customer
+
+    for customer_id in sorted({int(cid) for cid in customer_ids if int(cid) > 0}):
+        defer_invalidate_customer(db, customer_id)
+
+
 class CustomerMergeService:
     @classmethod
     async def merge(
@@ -173,10 +181,7 @@ class CustomerMergeService:
         # Customer IDs are part of recommendation cache keys. Preference migration
         # or consent-driven cleanup must invalidate both accounts after this
         # transaction commits, with durable outbox delivery on Redis failure.
-        from app.services.reco_cache import defer_invalidate_customer
-
-        defer_invalidate_customer(db, int(source.id))
-        defer_invalidate_customer(db, int(target.id))
+        _defer_recommendation_cache_invalidation(db, int(source.id), int(target.id))
         await cls._merge_faces(db, source.id, target.id, stats)
         await cls._merge_social_benefits(db, source.id, target.id, stats)
         await cls._reassign_simple(
