@@ -99,6 +99,12 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
         expires_at=now - timedelta(minutes=1),
     )
     db_session.add_all([config, stock, old_claim])
+    await db_session.flush()
+    campaign_id = int(campaign.id)
+    store_id = int(store.id)
+    customer_id = int(customer.id)
+    old_claim_id = int(old_claim.id)
+    stock_id = int(stock.id)
     await db_session.commit()
 
     if expect_success:
@@ -122,10 +128,10 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
         await db_session.rollback()
 
     persisted_old = await db_session.scalar(
-        select(FlashSaleClaim).where(FlashSaleClaim.id == old_claim.id)
+        select(FlashSaleClaim).where(FlashSaleClaim.id == old_claim_id)
     )
     persisted_stock = await db_session.scalar(
-        select(FlashSaleStock).where(FlashSaleStock.id == stock.id)
+        select(FlashSaleStock).where(FlashSaleStock.id == stock_id)
     )
     assert persisted_stock is not None
 
