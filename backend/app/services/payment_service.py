@@ -1187,8 +1187,9 @@ class PaymentService:
         if pending and pending.provider == provider_u and pending.channel == channel:
             payment = pending
             reused = True
-            if customer_id is not None:
-                payment.customer_id = customer_id
+            # The locked RechargeOrder is authoritative after a possible customer merge.
+            # Never reattach a reused payment to a stale request-scoped customer_id.
+            payment.customer_id = int(recharge.customer_id)
         else:
             if pending:
                 raise AppException(
