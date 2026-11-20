@@ -22,7 +22,7 @@ def test_pending_recharge_payment_is_locked_after_recharge_order():
 
 
 def test_recharge_response_does_not_disclose_merged_target_wallet():
-    source = inspect.getsource(wallet.recharge)
+    source = inspect.getsource(wallet.create_recharge)
     owner_check = source.index("int(ro.customer_id) == int(customer.id)")
     wallet_snapshot = source.index("BalanceService.snapshot(cust)", owner_check)
     assert owner_check < wallet_snapshot
