@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Customer, CustomerBehaviorEvent
+from app.models import Customer, CustomerBehaviorEvent, CustomerPreference
 from app.services import behavior_event_service
 from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
@@ -225,3 +225,86 @@ async def test_privacy_settings_reads_locked_consent_state(monkeypatch):
     assert calls == [94]
     assert result["recommend_opt_in"] == 0
     assert result["consent_version"] == "1.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.mysql
+async def test_mysql_preference_projection_uses_current_read_after_revocation(
+    db_session, monkeypatch
+):
+    if db_session.bind.dialect.name != "mysql":
+        pytest.skip("locking current reads require the MySQL CI database")
+
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    db_session.add(
+        CustomerPreference(
+            customer_id=customer_id,
+            category="辣度",
+            option_code="MILD",
+            option_name="微辣",
+            preference_score="0.5000",
+            order_count=2,
+        )
+    )
+    await db_session.commit()
+
+    async_session = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    lock_acquired = asyncio.Event()
+    snapshot_read = asyncio.Event()
+
+    async def no_audit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(AuditService, "log", staticmethod(no_audit))
+    monkeypatch.setattr(reco_cache, "spawn_bg", lambda coro: coro.close())
+
+    async def revoke():
+        async with async_session() as session:
+            current = await session.get(Customer, customer_id)
+            await PrivacyService.lock_customer_for_recommendation(session, customer_id)
+            lock_acquired.set()
+            await asyncio.wait_for(snapshot_read.wait(), timeout=5)
+            await PrivacyService.update_opt_in(session, current, 0)
+            await session.commit()
+
+    async def read_preferences():
+        await asyncio.wait_for(lock_acquired.wait(), timeout=5)
+        async with async_session() as session:
+            # Establish a REPEATABLE READ snapshot before revocation commits.
+            old_rows = list(
+                (
+                    await session.execute(
+                        select(CustomerPreference).where(
+                            CustomerPreference.customer_id == customer_id
+                        )
+                    )
+                ).scalars().all()
+            )
+            assert len(old_rows) == 1
+            snapshot_read.set()
+
+            current = await PrivacyService.lock_customer_for_recommendation(
+                session, customer_id
+            )
+            assert current is not None
+            assert current.recommend_opt_in == 0
+            # This mirrors the API projection: FOR UPDATE is a current read,
+            # not a stale consistent read from the earlier transaction snapshot.
+            rows = list(
+                (
+                    await session.execute(
+                        select(CustomerPreference)
+                        .where(CustomerPreference.customer_id == customer_id)
+                        .with_for_update()
+                    )
+                ).scalars().all()
+            )
+            await session.commit()
+            return rows
+
+    revoke_task = asyncio.create_task(revoke())
+    await asyncio.wait_for(lock_acquired.wait(), timeout=5)
+    rows = await asyncio.wait_for(read_preferences(), timeout=10)
+    await asyncio.wait_for(revoke_task, timeout=10)
+    assert rows == []
