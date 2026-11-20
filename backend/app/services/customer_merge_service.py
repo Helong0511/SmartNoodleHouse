@@ -95,7 +95,7 @@ class CustomerMergeService:
         # 按 id 升序加锁，避免死锁
         ids = sorted([int(target_customer_id), int(source_customer_id)])
         locked = (
-            await db.execute(select(Customer).where(Customer.id.in_(ids)).with_for_update())
+            await db.execute(select(Customer).where(Customer.id.in_(ids)).order_by(Customer.id).with_for_update().execution_options(populate_existing=True))
         ).scalars().all()
         by_id = {int(c.id): c for c in locked}
         target = by_id.get(int(target_customer_id))
@@ -168,7 +168,7 @@ class CustomerMergeService:
         await cls._merge_dining_sessions(db, source.id, target.id, stats)
         await cls._reassign_orders_payments(db, source.id, target.id, stats)
         await cls._merge_coupons(db, source.id, target.id, stats)
-        await cls._merge_preferences(db, source.id, target.id, stats)
+        await cls._merge_preferences_for_consent(db, source, target, stats)
         await cls._merge_faces(db, source.id, target.id, stats)
         await cls._merge_social_benefits(db, source.id, target.id, stats)
         await cls._reassign_simple(
@@ -340,6 +340,33 @@ class CustomerMergeService:
         await db.flush()
 
     @classmethod
+    async def _merge_preferences_for_consent(
+        cls, db: AsyncSession, source: Customer, target: Customer, stats: dict
+    ) -> None:
+        """Only combine derived recommendation preferences when both accounts consent."""
+        if int(getattr(source, "recommend_opt_in", 0) or 0) == 1 and int(
+            getattr(target, "recommend_opt_in", 0) or 0
+        ) == 1:
+            await cls._merge_preferences(db, int(source.id), int(target.id), stats)
+            return
+
+        # A merge must not resurrect preference data under an account whose consent
+        # is absent. Clear both sides using current reads while the customer locks
+        # acquired by merge() serialize concurrent recommendation writers/revocation.
+        rows = (
+            await db.execute(
+                select(CustomerPreference)
+                .where(CustomerPreference.customer_id.in_((int(source.id), int(target.id))))
+                .order_by(CustomerPreference.customer_id, CustomerPreference.id)
+                .with_for_update()
+            )
+        ).scalars().all()
+        for row in rows:
+            await db.delete(row)
+        stats["preferences_cleared_for_consent"] = len(rows)
+        await db.flush()
+
+    @classmethod
     async def _merge_preferences(
         cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
     ) -> None:
@@ -347,13 +374,13 @@ class CustomerMergeService:
             (p.category, p.option_code): p
             for p in (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == target_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == target_id).with_for_update()
                 )
             ).scalars().all()
         }
         for sp in (
             await db.execute(
-                select(CustomerPreference).where(CustomerPreference.customer_id == source_id)
+                select(CustomerPreference).where(CustomerPreference.customer_id == source_id).with_for_update()
             )
         ).scalars().all():
             key = (sp.category, sp.option_code)
