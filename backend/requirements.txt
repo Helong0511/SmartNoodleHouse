@@ -11,7 +11,7 @@ pydantic-settings>=2.16.2,<3.0
 python-dotenv>=1.2.4,<2.0
 PyJWT[crypto]>=2.15.1,<3.0
 # FastAPI 官方文档推荐 pwdlib + Argon2；BcryptHasher 仅用于历史哈希平滑迁移。
-pwdlib[argon2,bcrypt]>=0.3.1,<0.4
+pwdlib[argon2,bcrypt]>=0.4.2,<0.5
 # 限制 bcrypt <5，兼容历史 Passlib bcrypt（包括旧版 72 字节截断语义）；新哈希不再使用 bcrypt。
 bcrypt>=4.1.2,<5.0
 # redis-py 8.1.0 为当前稳定版；8.2.0b1 是预发布版，不进入生产锁。CI 使用 Redis 7.4.12 验证 RESP2、Lua、连接池与故障策略。
