@@ -10,6 +10,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_customer_gate_for_payment_unit_mocks(monkeypatch):
+    """These tests exercise payment behavior with fake sessions, not Gate SQL."""
+    monkeypatch.setattr(
+        "app.services.payment_service.lock_customer_write_gates",
+        AsyncMock(),
+    )
+
+
 from app.core.exceptions import AppException
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.payment_service import AlipayProvider, PaymentService
@@ -438,6 +447,9 @@ class _RefundCallbackDB:
     async def get(self, model, row_id):
         return self.payment
 
+    async def scalar(self, statement):
+        return None
+
 
 @pytest.mark.asyncio
 async def test_alipay_provider_preserves_actual_refund_status_instead_of_synthesizing_success():
@@ -759,6 +771,9 @@ class _SyncRefundDB:
 
     async def get(self, model, row_id):
         return self.payment
+
+    async def scalar(self, statement):
+        return None
 
     async def execute(self, statement):
         result = MagicMock()

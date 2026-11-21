@@ -5,6 +5,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.services.balance_service import BalanceService
+from app.services import balance_service
+
+
+@pytest.fixture(autouse=True)
+def _mock_customer_gate_for_unit_sessions(monkeypatch):
+    # 这些测试以 mocked AsyncSession 验证账务分摊；Gate 协议由独立集成测试覆盖。
+    monkeypatch.setattr(balance_service, "lock_customer_write_gates", AsyncMock())
 
 
 def _result(value=None, *, one=None):

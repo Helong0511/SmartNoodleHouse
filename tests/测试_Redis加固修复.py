@@ -688,7 +688,7 @@ async def test_privacy_profile_clear_schedules_recommendation_cache_invalidation
         patch.object(privacy_service.AuditService, "log", new_callable=AsyncMock),
     ):
         await privacy_service.PrivacyService.clear_taste_profile(
-            FakeDb(), SimpleNamespace(id=987), request=None,
+            FakeDb(), SimpleNamespace(id=987), request=None, acquire_lock=False,
         )
 
     assert len(scheduled) == 1

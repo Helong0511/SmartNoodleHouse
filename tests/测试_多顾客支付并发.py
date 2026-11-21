@@ -7,6 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_customer_gate_for_payment_unit_mocks(monkeypatch):
+    """These tests exercise payment behavior with fake sessions, not Gate SQL."""
+    monkeypatch.setattr(
+        "app.services.payment_service.lock_customer_write_gates",
+        AsyncMock(),
+    )
+
+
 from app.services.payment_service import PaymentService
 
 
@@ -39,6 +48,28 @@ async def test_lock_order_then_payment_orders_locks():
     order_i = next(i for i, s in enumerate(calls) if "orders" in s and "for update" in s)
     pay_fus = [i for i, s in enumerate(calls) if "payments" in s and "for update" in s]
     assert pay_fus and order_i < pay_fus[0]
+
+
+@pytest.mark.asyncio
+async def test_lock_order_then_payment_aborts_if_customer_owner_changed_before_gate():
+    from app.core.exceptions import AppException
+    from app.services import payment_service
+
+    payment_peek = MagicMock()
+    payment_peek.first.return_value = (9, None)
+    locked_order = SimpleNamespace(id=9, customer_id=2)
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = locked_order
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=1)
+    db.execute = AsyncMock(side_effect=[payment_peek, order_result])
+    gate = AsyncMock()
+    with patch.object(payment_service, "lock_customer_write_gates", gate):
+        with pytest.raises(AppException) as exc:
+            await PaymentService._lock_order_then_payment(db, 1)
+    assert exc.value.code == 40906
+    gate.assert_awaited_once_with(db, [1])
+    assert db.execute.await_count == 2
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,9 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    event,
 )
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -27,7 +29,7 @@ from app.models.base import TimestampMixin
 class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
     id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"),
+        MySQLBigInteger(unsigned=True).with_variant(Integer, "sqlite"),
         primary_key=True,
         autoincrement=True,
     )
@@ -65,6 +67,39 @@ class Customer(Base, TimestampMixin):
     recommend_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
+class CustomerWriteGate(Base):
+    """Dedicated transaction mutex for customer-owned writes and account merges."""
+
+    __tablename__ = "customer_write_gates"
+
+    # The gate intentionally has no FK: metadata drop_all() must be able to
+    # remove customers before this mutex table in MySQL test databases.
+    # Migration 0052's same-transaction INSERT/DELETE triggers plus backfill
+    # maintain gate lifecycle; application writes always lock by customer_id.
+    customer_id: Mapped[int] = mapped_column(
+        MySQLBigInteger(unsigned=True).with_variant(Integer, "sqlite"),
+        primary_key=True,
+    )
+
+
+@event.listens_for(Customer, "after_insert")
+def _create_customer_write_gate(mapper, connection, target) -> None:
+    """Create the gate in the same transaction as every ORM Customer insert.
+
+    Existing rows are backfilled by Alembic migration 0052. Bulk/Core inserts
+    bypass mapper events and must explicitly create their gate row.
+    """
+    statement = CustomerWriteGate.__table__.insert().values(
+        customer_id=int(target.id)
+    )
+    # Production MySQL also has an AFTER INSERT trigger, which covers Core/bulk
+    # inserts. IGNORE makes this ORM hook coexist with that trigger; SQLite has
+    # no trigger in create_all-based tests, so the hook provisions the row.
+    if connection.dialect.name == "mysql":
+        statement = statement.prefix_with("IGNORE")
+    connection.execute(statement)
+
+
 class CustomerIdentity(Base, TimestampMixin):
     """服务端验证过的稳定身份；昵称、头像和手输手机号不得写入此表。"""
 
@@ -82,7 +117,7 @@ class CustomerIdentity(Base, TimestampMixin):
         primary_key=True,
         autoincrement=True,
     )
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     provider: Mapped[str] = mapped_column(String(32))
     provider_subject: Mapped[str] = mapped_column(String(128))
     verified: Mapped[int] = mapped_column(Integer, default=1)
@@ -95,7 +130,7 @@ class DiningSession(Base, TimestampMixin):
         Index("ix_ds_status_store_table", "status", "store_id", "table_id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     table_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tables.id"), index=True)
     table_token: Mapped[str | None] = mapped_column(String(64), default=None)
@@ -116,7 +151,7 @@ class TableParty(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     table_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tables.id"), index=True)
-    host_customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    host_customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="OPEN")
     revision: Mapped[int] = mapped_column(Integer, default=1)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -128,7 +163,7 @@ class TablePartyMember(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("party_id", "customer_id", name="uk_tpm_party_customer"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     party_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("table_parties.id", ondelete="CASCADE"), index=True)
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     role: Mapped[str] = mapped_column(String(20), default="MEMBER")
     nickname_snap: Mapped[str | None] = mapped_column(String(100), default=None)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -139,7 +174,7 @@ class SharedCartItem(Base, TimestampMixin):
     __tablename__ = "shared_cart_items"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     party_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("table_parties.id", ondelete="CASCADE"), index=True)
-    added_by_customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    added_by_customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"), index=True)
     product_name: Mapped[str] = mapped_column(String(100))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
@@ -159,7 +194,7 @@ class CustomerWechatAccount(Base, TimestampMixin):
         primary_key=True,
         autoincrement=True,
     )
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     openid: Mapped[str] = mapped_column(String(64), unique=True)
     unionid: Mapped[str | None] = mapped_column(String(64), index=True)
     profile_completed: Mapped[int] = mapped_column(Integer, default=0)
@@ -174,7 +209,7 @@ class CustomerAlipayAccount(Base, TimestampMixin):
         primary_key=True,
         autoincrement=True,
     )
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     alipay_user_id: Mapped[str] = mapped_column(String(64), unique=True)
     alipay_union_id: Mapped[str | None] = mapped_column(String(64))
     profile_completed: Mapped[int] = mapped_column(Integer, default=0)
@@ -190,7 +225,7 @@ class CustomerPreference(Base):
         Index("ix_cp_category_customer", "category", "customer_id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     category: Mapped[str] = mapped_column(String(50))
     option_code: Mapped[str] = mapped_column(String(50))
     option_name: Mapped[str | None] = mapped_column(String(50))
@@ -214,7 +249,7 @@ class CustomerFavoriteProduct(Base, TimestampMixin):
         autoincrement=True,
     )
     customer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+        MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"), index=True
     )
     product_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("products.id", ondelete="CASCADE"), index=True
@@ -236,7 +271,7 @@ class CustomerLifecycle(Base, TimestampMixin):
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
     customer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customers.id", ondelete="CASCADE")
+        MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE")
     )
     lifecycle_code: Mapped[str] = mapped_column(String(20), default="GUEST")
     rfm_segment: Mapped[str | None] = mapped_column(String(32), default=None)
@@ -265,7 +300,7 @@ class InvoiceRequest(Base, TimestampMixin):
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
     order_no: Mapped[str] = mapped_column(String(40))
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
-    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int | None] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     title_type: Mapped[str] = mapped_column(String(10), default="PERSON")  # PERSON/COMPANY
     title: Mapped[str] = mapped_column(String(200))
     tax_no: Mapped[str | None] = mapped_column(String(50), default=None)
@@ -291,7 +326,7 @@ class QueueTicket(Base, TimestampMixin):
         autoincrement=True,
     )
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
-    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int | None] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     ticket_no: Mapped[str] = mapped_column(String(20))  # 展示号，如 A08
     number: Mapped[int] = mapped_column(Integer, default=1)
     issue_date: Mapped[date] = mapped_column(Date)

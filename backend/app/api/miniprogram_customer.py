@@ -102,6 +102,7 @@ async def get_my_preferences(
             Customer.recommend_opt_in == 1,
         )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+        .with_for_update()
     )
     prefs["all"] = [
         {
@@ -169,7 +170,12 @@ async def clear_my_taste_profile(request: Request, db: DbSession, customer: Curr
     """清除画像派生数据（行为事件/画像/评价/customer_preferences），订单本体保留；写审计。"""
     from app.services.privacy_service import PrivacyService
 
-    result = await PrivacyService.clear_taste_profile(db, customer, request=request)
+    locked_customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer.id))
+    if locked_customer is None:
+        raise ValueError("customer not found while clearing recommendation profile")
+    result = await PrivacyService.clear_taste_profile(
+        db, locked_customer, request=request, acquire_lock=False
+    )
     await db.commit()
     return success(result, request=request)
 

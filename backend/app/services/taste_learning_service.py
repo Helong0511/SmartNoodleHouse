@@ -154,7 +154,7 @@ class TasteLearningService:
     @staticmethod
     async def _load_rows(db, customer_id: int) -> dict[tuple[str, str], CustomerTasteProfile]:
         result = await db.execute(
-            select(CustomerTasteProfile).where(CustomerTasteProfile.customer_id == customer_id)
+            select(CustomerTasteProfile).where(CustomerTasteProfile.customer_id == customer_id).with_for_update()
         )
         return {(r.dim_type, r.target_key): r for r in result.scalars().all()}
 
@@ -192,15 +192,15 @@ class TasteLearningService:
     @staticmethod
     async def learn_from_events(db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT) -> int:
         """仅对明确同意个性化推荐的顾客增量 fold 行为事件。"""
-        from app.models import Customer
-        customer = await db.get(Customer, customer_id)
+        from app.services.privacy_service import PrivacyService
+        customer = await PrivacyService.lock_customer_for_recommendation(db, customer_id)
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         rows = await TasteLearningService._load_rows(db, customer_id)
         watermark = max((r.last_event_at for r in rows.values() if r.last_event_at), default=None)
         q = select(CustomerBehaviorEvent).where(
             CustomerBehaviorEvent.customer_id == customer_id
-        ).order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id)
+        ).order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id).with_for_update()
         if watermark is not None:
             q = q.where(CustomerBehaviorEvent.created_at > watermark)
         events = list((await db.execute(q.limit(limit))).scalars().all())
@@ -235,8 +235,8 @@ class TasteLearningService:
         """轻量评价直接 fold（评价明细已独立入库；此处分流口味信号）。"""
         from datetime import timezone
 
-        from app.models import Customer
-        customer = await db.get(Customer, int(feedback.customer_id))
+        from app.services.privacy_service import PrivacyService
+        customer = await PrivacyService.lock_customer_for_recommendation(db, int(feedback.customer_id))
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return
         sentiment = (feedback.sentiment or "NEUTRAL").upper()
@@ -277,8 +277,8 @@ class TasteLearningService:
         order = await db.get(Order, order_id)
         if not order or not order.customer_id or (order.payment_status or "") != "REFUNDED":
             return 0
-        from app.models import Customer
-        customer = await db.get(Customer, int(order.customer_id))
+        from app.services.privacy_service import PrivacyService
+        customer = await PrivacyService.lock_customer_for_recommendation(db, int(order.customer_id))
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         items = list((await db.execute(
@@ -296,7 +296,7 @@ class TasteLearningService:
                         CustomerBehaviorEvent.event_id.in_(
                             [f"order_refund:{order_id}:{pid}" for pid in pids]
                         ),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         }
@@ -327,13 +327,13 @@ class TasteLearningService:
         由 paid_side_effects 的 taste_learning handler 调用；outbox 重试安全：
         重复事件被唯一约束去重，学习以水位增量 fold。
         """
-        from app.models import Customer
+        from app.services.privacy_service import PrivacyService
 
         order = await db.get(Order, order_id)
         if not order or not order.customer_id:
             return 0
-        customer = await db.get(Customer, int(order.customer_id))
-        if customer and not int(getattr(customer, "recommend_opt_in", 1) or 0):
+        customer = await PrivacyService.lock_customer_for_recommendation(db, int(order.customer_id))
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
@@ -354,7 +354,7 @@ class TasteLearningService:
                         CustomerBehaviorEvent.event_id.in_(
                             [f"order_paid:{order_id}:{pid}" for pid in qty_by_product]
                         ),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         }

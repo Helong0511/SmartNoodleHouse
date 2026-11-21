@@ -90,10 +90,12 @@ class PreferenceService:
         """根据顾客近期已付订单重算全部口味偏好（分析 + 修正）。"""
         if not customer_id:
             return
-        customer = await db.get(Customer, customer_id)
+        from app.services.privacy_service import PrivacyService
+
+        customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             # 未明确同意：不构建画像，并清除可能残留的规格偏好。
-            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id))).scalars().all()
+            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update())).scalars().all()
             for pref in stale:
                 await db.delete(pref)
             return
@@ -117,7 +119,7 @@ class PreferenceService:
         if not orders:
             existing = (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update()
                 )
             ).scalars().all()
             for pref in existing:
@@ -187,7 +189,7 @@ class PreferenceService:
             (p.category, p.option_code): p
             for p in (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update()
                 )
             ).scalars().all()
         }
@@ -227,7 +229,9 @@ class PreferenceService:
         store_id: int | None = None,
         apply_scene: bool = True,
     ) -> dict:
-        customer = await db.get(Customer, customer_id)
+        from app.services.privacy_service import PrivacyService
+
+        customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return {"preferences": [], "scene": {"enabled": False, "scene_enabled": False, "weather_active": False, "weather_reason": "顾客未授权个性化推荐", "label": None}}
         prefs_result = await db.execute(
@@ -237,6 +241,7 @@ class PreferenceService:
                 CustomerPreference.order_count >= PreferenceService.MIN_ORDER_COUNT,
             )
             .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
         )
         prefs = list(prefs_result.scalars().all())
         # 若无达到阈值的，退回全部（首单也能出推荐）
@@ -247,6 +252,7 @@ class PreferenceService:
                         select(CustomerPreference)
                         .where(CustomerPreference.customer_id == customer_id)
                         .order_by(CustomerPreference.preference_score.desc())
+                        .with_for_update()
                     )
                 ).scalars().all()
             )

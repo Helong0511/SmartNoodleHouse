@@ -425,8 +425,11 @@ def test_prod_startup_rejects_payment_mock():
 
 
 @pytest.mark.asyncio
-async def test_balance_restore_for_refund_is_idempotent_by_refund_id():
+async def test_balance_restore_for_refund_is_idempotent_by_refund_id(monkeypatch):
+    from app.services import balance_service
     from app.services.balance_service import BalanceService
+
+    monkeypatch.setattr(balance_service, "lock_customer_write_gates", AsyncMock())
 
     existing = SimpleNamespace(
         id=1, entry_type="REFUND_RESTORE", customer_id=1, order_id=2,

@@ -39,6 +39,7 @@ from app.models import (
     CustomerWechatAccount,
     DiningSession,
     FaceProfile,
+    FlashSaleClaim,
     Order,
     Payment,
     PointLedger,
@@ -49,6 +50,7 @@ from app.models import (
 from app.core.response import money, serialize_dt
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_customer_write_gates
 
 
 def _mask_phone(phone: str | None) -> str | None:
@@ -76,6 +78,49 @@ def _customer_snapshot(c: Customer) -> dict[str, Any]:
     }
 
 
+async def _lock_merge_scope(db: AsyncSession, customer_ids: list[int]) -> list[Customer]:
+    """Lock payment parents before customers, matching payment/refund settlement lock order."""
+    await db.execute(
+        select(Order.id)
+        .where(Order.customer_id.in_(customer_ids))
+        .order_by(Order.id)
+        .with_for_update()
+    )
+    await db.execute(
+        select(RechargeOrder.id)
+        .where(RechargeOrder.customer_id.in_(customer_ids))
+        .order_by(RechargeOrder.id)
+        .with_for_update()
+    )
+    # Lock outstanding customer-owned entitlements before Customer rows.
+    await db.execute(
+        select(FlashSaleClaim.id)
+        .where(
+            FlashSaleClaim.customer_id.in_(customer_ids),
+            FlashSaleClaim.status == "CLAIMED",
+        )
+        .order_by(FlashSaleClaim.id)
+        .with_for_update()
+    )
+    return (
+        await db.execute(
+            select(Customer)
+            .where(Customer.id.in_(customer_ids))
+            .order_by(Customer.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
+
+
+def _defer_recommendation_cache_invalidation(db: AsyncSession, *customer_ids: int) -> None:
+    """Persist cache invalidation for every account affected by a customer merge."""
+    from app.services.reco_cache import defer_invalidate_customer
+
+    for customer_id in sorted({int(cid) for cid in customer_ids if int(cid) > 0}):
+        defer_invalidate_customer(db, customer_id)
+
+
 class CustomerMergeService:
     @classmethod
     async def merge(
@@ -92,11 +137,11 @@ class CustomerMergeService:
         if int(target_customer_id) == int(source_customer_id):
             raise AppException(40061, "不能合并同一顾客")
 
-        # 按 id 升序加锁，避免死锁
+        # Global order: customer gates → payment parents → customer rows.
+        # Never acquire a lifecycle gate after an Order/RechargeOrder lock.
         ids = sorted([int(target_customer_id), int(source_customer_id)])
-        locked = (
-            await db.execute(select(Customer).where(Customer.id.in_(ids)).with_for_update())
-        ).scalars().all()
+        await lock_customer_write_gates(db, ids)
+        locked = await _lock_merge_scope(db, ids)
         by_id = {int(c.id): c for c in locked}
         target = by_id.get(int(target_customer_id))
         source = by_id.get(int(source_customer_id))
@@ -161,14 +206,35 @@ class CustomerMergeService:
             "social_identities_moved": 0,
             "social_identities_revoked": 0,
             "social_redemptions": 0,
+            "flash_sale_claims_cancelled": 0,
         }
+
+        # Unverified, time-limited claims do not transfer to another account.
+        # Preserve USED claims and their historical order references.
+        outstanding_claims = (
+            await db.execute(
+                select(FlashSaleClaim).where(
+                    FlashSaleClaim.customer_id == source.id,
+                    FlashSaleClaim.status == "CLAIMED",
+                ).order_by(FlashSaleClaim.id)
+            )
+        ).scalars().all()
+        for claim in outstanding_claims:
+            claim.status = "CANCELLED"
+            claim.status_reason = "CUSTOMER_MERGED"
+        stats["flash_sale_claims_cancelled"] = len(outstanding_claims)
 
         await cls._merge_platform_accounts(db, source.id, target.id, stats)
         await cls._merge_identities(db, source.id, target.id, stats)
         await cls._merge_dining_sessions(db, source.id, target.id, stats)
         await cls._reassign_orders_payments(db, source.id, target.id, stats)
         await cls._merge_coupons(db, source.id, target.id, stats)
-        await cls._merge_preferences(db, source.id, target.id, stats)
+        await cls._merge_preferences_for_consent(db, source, target, stats)
+
+        # Customer IDs are part of recommendation cache keys. Preference migration
+        # or consent-driven cleanup must invalidate both accounts after this
+        # transaction commits, with durable outbox delivery on Redis failure.
+        _defer_recommendation_cache_invalidation(db, int(source.id), int(target.id))
         await cls._merge_faces(db, source.id, target.id, stats)
         await cls._merge_social_benefits(db, source.id, target.id, stats)
         await cls._reassign_simple(
@@ -340,6 +406,33 @@ class CustomerMergeService:
         await db.flush()
 
     @classmethod
+    async def _merge_preferences_for_consent(
+        cls, db: AsyncSession, source: Customer, target: Customer, stats: dict
+    ) -> None:
+        """Only combine derived recommendation preferences when both accounts consent."""
+        if int(getattr(source, "recommend_opt_in", 0) or 0) == 1 and int(
+            getattr(target, "recommend_opt_in", 0) or 0
+        ) == 1:
+            await cls._merge_preferences(db, int(source.id), int(target.id), stats)
+            return
+
+        # A merge must not resurrect preference data under an account whose consent
+        # is absent. Clear both sides using current reads while the customer locks
+        # acquired by merge() serialize concurrent recommendation writers/revocation.
+        rows = (
+            await db.execute(
+                select(CustomerPreference)
+                .where(CustomerPreference.customer_id.in_((int(source.id), int(target.id))))
+                .order_by(CustomerPreference.customer_id, CustomerPreference.id)
+                .with_for_update()
+            )
+        ).scalars().all()
+        for row in rows:
+            await db.delete(row)
+        stats["preferences_cleared_for_consent"] = len(rows)
+        await db.flush()
+
+    @classmethod
     async def _merge_preferences(
         cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
     ) -> None:
@@ -347,13 +440,13 @@ class CustomerMergeService:
             (p.category, p.option_code): p
             for p in (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == target_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == target_id).with_for_update()
                 )
             ).scalars().all()
         }
         for sp in (
             await db.execute(
-                select(CustomerPreference).where(CustomerPreference.customer_id == source_id)
+                select(CustomerPreference).where(CustomerPreference.customer_id == source_id).with_for_update()
             )
         ).scalars().all():
             key = (sp.category, sp.option_code)

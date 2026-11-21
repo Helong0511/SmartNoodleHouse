@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -38,7 +39,7 @@ class Payment(Base, TimestampMixin):
     recharge_order_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("recharge_orders.id"), index=True, default=None
     )
-    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
     provider: Mapped[str] = mapped_column(String(20))
     channel: Mapped[str] = mapped_column(String(30))

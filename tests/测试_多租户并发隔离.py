@@ -54,6 +54,9 @@ async def test_balance_debit_locks_customer_before_ledger_and_stays_idempotent()
         sql = str(stmt).lower()
         order.append(sql)
         res = MagicMock()
+        if "from customer_write_gates" in sql:
+            res.scalars.return_value.all.return_value = [1]
+            return res
         if "from customers" in sql:
             res.scalar_one_or_none.return_value = customer
             return res
@@ -71,7 +74,9 @@ async def test_balance_debit_locks_customer_before_ledger_and_stays_idempotent()
     )
     assert out is ledger
     db.add.assert_not_called()
-    assert order[0].find("customers") < order[1].find("balance_ledger") or "customers" in order[0]
+    assert "customer_write_gates" in order[0]
+    assert "customers" in order[1]
+    assert "balance_ledger" in order[2]
 
 
 @pytest.mark.asyncio
@@ -80,14 +85,31 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
 
     source = SimpleNamespace(id=2, status=1)
     target = SimpleNamespace(id=1, status=1)
-    locked = MagicMock()
-    locked.scalars.return_value.all.return_value = [target, source]
+    order_locks = MagicMock()
+    recharge_locks = MagicMock()
+    flash_sale_claim_locks = MagicMock()
+    locked_customers = MagicMock()
+    locked_customers.scalars.return_value.all.return_value = [target, source]
     foreign_order = MagicMock()
     foreign_order.scalar_one_or_none.return_value = 50
     foreign_recharge = MagicMock()
     foreign_recharge.scalar_one_or_none.return_value = None
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[locked, foreign_order, foreign_recharge])
+    # merge() locks payment parents and outstanding claims before Customers,
+    # then performs the store-scope authorization probes.
+    gate_locks = MagicMock()
+    gate_locks.scalars.return_value.all.return_value = [1, 2]
+    db.execute = AsyncMock(
+        side_effect=[
+            gate_locks,
+            order_locks,
+            recharge_locks,
+            flash_sale_claim_locks,
+            locked_customers,
+            foreign_order,
+            foreign_recharge,
+        ]
+    )
 
     with pytest.raises(AppException) as ei:
         await CustomerMergeService.merge(

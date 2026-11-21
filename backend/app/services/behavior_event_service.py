@@ -83,8 +83,15 @@ def normalize_event(raw: Any) -> tuple[CustomerBehaviorEvent | None, str | None]
 async def ingest_events(db, customer, raw_events: list[Any]) -> dict[str, Any]:
     """批量入库。返回 {accepted, duplicate, dropped, reason?}。"""
     total = len(raw_events)
+    # Consent check and inserts share the same customer-row lock as revocation.
+    from app.services.privacy_service import PrivacyService
+
+    locked_customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer.id))
+    if locked_customer is None:
+        return {"accepted": 0, "duplicate": 0, "dropped": total, "reason": "customer_missing"}
+    customer = locked_customer
     # 隐私：顾客关闭个性化推荐 → 不落任何行为数据
-    if not int(getattr(customer, "recommend_opt_in", 1) or 0):
+    if not int(getattr(customer, "recommend_opt_in", 0) or 0):
         return {"accepted": 0, "duplicate": 0, "dropped": total, "reason": "opt_out"}
 
     normalized: list[CustomerBehaviorEvent] = []
@@ -109,7 +116,7 @@ async def ingest_events(db, customer, raw_events: list[Any]) -> dict[str, Any]:
         select(CustomerBehaviorEvent.event_id).where(
             CustomerBehaviorEvent.customer_id == int(customer.id),
             CustomerBehaviorEvent.event_id.in_(batch_seen),
-        )
+        ).with_for_update()
     )
     existing = {r[0] for r in existing_rows.all()}
     to_insert = [e for e in normalized if e.event_id not in existing]

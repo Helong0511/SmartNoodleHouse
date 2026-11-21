@@ -2154,6 +2154,7 @@ CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
   `unit_no` int NOT NULL DEFAULT 1 COMMENT '每人第几份资格',
   `claim_no` varchar(40) NOT NULL COMMENT '抢购资格编号',
   `status` varchar(20) NOT NULL DEFAULT 'CLAIMED' COMMENT 'CLAIMED/USED/EXPIRED/CANCELLED',
+  `status_reason` varchar(40) NULL DEFAULT NULL COMMENT '终态原因，如 CUSTOMER_MERGED',
   `claimed_at` datetime(3) NOT NULL COMMENT '领取时间',
   `expires_at` datetime(3) NOT NULL COMMENT '资格过期时间',
   `verify_deadline_at` datetime(3) NULL DEFAULT NULL COMMENT '核销截止时间',
@@ -2233,6 +2234,7 @@ CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
   `unit_no` int NOT NULL DEFAULT 1 COMMENT '同一顾客第几份，配合唯一键限购',
   `claim_no` varchar(40) NOT NULL,
   `status` varchar(20) NOT NULL DEFAULT 'CLAIMED',
+  `status_reason` varchar(40) NULL DEFAULT NULL,
   `claimed_at` datetime(3) NOT NULL,
   `expires_at` datetime(3) NOT NULL,
   `verify_deadline_at` datetime(3) NULL DEFAULT NULL,
@@ -2251,3 +2253,27 @@ CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
   INDEX `idx_mfsc_campaign_store`(`campaign_id` ASC, `store_id` ASC, `status` ASC) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='顾客抢购资格';
+
+
+-- Per-customer transaction mutex used to serialize lifecycle-sensitive writes.
+CREATE TABLE IF NOT EXISTS `customer_write_gates` (
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '→ customers.id, transaction mutex only',
+  PRIMARY KEY (`customer_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客写入串行化锁';
+
+
+-- Ensure direct SQL / Core inserts also create their lifecycle mutex row.
+DELIMITER $$
+CREATE TRIGGER `trg_customers_create_write_gate`
+AFTER INSERT ON `customers`
+FOR EACH ROW
+BEGIN
+  INSERT IGNORE INTO `customer_write_gates` (`customer_id`) VALUES (NEW.`id`);
+END$
+CREATE TRIGGER `trg_customers_delete_write_gate`
+AFTER DELETE ON `customers`
+FOR EACH ROW
+BEGIN
+  DELETE FROM `customer_write_gates` WHERE `customer_id` = OLD.`id`;
+END$
+DELIMITER ;

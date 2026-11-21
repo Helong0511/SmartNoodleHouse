@@ -1,0 +1,466 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.dialects import mysql
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.models import Customer, CustomerBehaviorEvent, CustomerPreference
+from app.services import behavior_event_service
+from app.services.audit_service import AuditService
+from app.services.privacy_service import PrivacyService
+from app.services import reco_cache
+from app.services.taste_learning_service import TasteLearningService
+from app.services.preference_service import PreferenceService
+from app.services.customer_merge_service import CustomerMergeService, _lock_merge_scope
+from reco_factories import make_customer
+
+
+@pytest.mark.asyncio
+async def test_customer_consent_lock_uses_for_update_and_refreshes_identity_map(monkeypatch):
+    class Result:
+        def scalar_one_or_none(self):
+            return customer
+
+    class Session:
+        statement = None
+
+        async def execute(self, statement):
+            self.statement = statement
+            return Result()
+
+    customer = Customer(id=91, customer_no="LOCK-91", recommend_opt_in=0)
+    session = Session()
+    from app.services import privacy_service
+
+    async def no_gate(_db, _ids):
+        return [91]
+
+    monkeypatch.setattr(privacy_service, "lock_customer_write_gates", no_gate)
+
+    locked = await PrivacyService.lock_customer_for_recommendation(session, 91)
+
+    assert locked is customer
+    assert session.statement._for_update_arg is not None
+    assert session.statement.get_execution_options()["populate_existing"] is True
+
+
+@pytest.mark.asyncio
+async def test_event_ingestion_uses_locked_consent_state(monkeypatch):
+    customer = Customer(id=92, customer_no="LOCK-92", recommend_opt_in=1)
+    locked_customer = Customer(id=92, customer_no="LOCK-92", recommend_opt_in=0)
+    calls = []
+
+    async def locked(_db, customer_id):
+        calls.append(customer_id)
+        return locked_customer
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+
+    result = await behavior_event_service.ingest_events(
+        object(), customer, [{"event_id": "must-not-store", "event_type": "CLICK"}]
+    )
+
+    assert calls == [92]
+    assert result == {
+        "accepted": 0,
+        "duplicate": 0,
+        "dropped": 1,
+        "reason": "opt_out",
+    }
+
+
+@pytest.mark.asyncio
+async def test_profile_learning_uses_locked_consent_state(monkeypatch):
+    locked_customer = Customer(id=93, customer_no="LOCK-93", recommend_opt_in=0)
+    calls = []
+
+    async def locked(_db, customer_id):
+        calls.append(customer_id)
+        return locked_customer
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+
+    assert await TasteLearningService.learn_from_events(object(), 93) == 0
+    assert calls == [93]
+
+
+@pytest.mark.asyncio
+@pytest.mark.mysql
+@pytest.mark.parametrize("revoke_first", [False, True])
+async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
+    db_session, monkeypatch, revoke_first
+):
+    if db_session.bind.dialect.name != "mysql":
+        pytest.skip("SELECT FOR UPDATE concurrency requires the MySQL CI database")
+
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    await db_session.commit()
+
+    async_session = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    lock_acquired = asyncio.Event()
+    continue_first = asyncio.Event()
+    second_started = asyncio.Event()
+
+    async def no_audit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(AuditService, "log", staticmethod(no_audit))
+    monkeypatch.setattr(reco_cache, "spawn_bg", lambda coro: coro.close())
+
+    async def ingest():
+        async with async_session() as session:
+            current = await session.get(Customer, customer_id)
+            if revoke_first:
+                second_started.set()
+                await lock_acquired.wait()
+            result = await behavior_event_service.ingest_events(
+                session,
+                current,
+                [{"event_id": "consent-race-event", "event_type": "CLICK"}],
+            )
+            if not revoke_first:
+                lock_acquired.set()
+                await continue_first.wait()
+            await session.commit()
+            return result
+
+    async def revoke():
+        async with async_session() as session:
+            current = await session.get(Customer, customer_id)
+            if revoke_first:
+                await PrivacyService.lock_customer_for_recommendation(session, customer_id)
+                await PrivacyService.update_opt_in(session, current, 0)
+                lock_acquired.set()
+                await continue_first.wait()
+                await session.commit()
+            else:
+                await lock_acquired.wait()
+                second_started.set()
+                await PrivacyService.update_opt_in(session, current, 0)
+                await session.commit()
+
+    if revoke_first:
+        first = asyncio.create_task(revoke())
+        await asyncio.wait_for(lock_acquired.wait(), timeout=5)
+        second = asyncio.create_task(ingest())
+        await asyncio.wait_for(second_started.wait(), timeout=5)
+        continue_first.set()
+        await asyncio.wait_for(first, timeout=10)
+        second_result = await asyncio.wait_for(second, timeout=10)
+        assert second_result["accepted"] == 0
+    else:
+        first = asyncio.create_task(ingest())
+        await asyncio.wait_for(lock_acquired.wait(), timeout=5)
+        second = asyncio.create_task(revoke())
+        await asyncio.wait_for(second_started.wait(), timeout=5)
+        continue_first.set()
+        first_result = await asyncio.wait_for(first, timeout=10)
+        await asyncio.wait_for(second, timeout=10)
+        assert first_result["accepted"] == 1
+
+    async with async_session() as verify:
+        stored_customer = await verify.get(Customer, customer_id)
+        events = list(
+            (
+                await verify.execute(
+                    select(CustomerBehaviorEvent).where(
+                        CustomerBehaviorEvent.customer_id == customer_id
+                    )
+                )
+            ).scalars().all()
+        )
+        assert stored_customer.recommend_opt_in == 0
+        assert events == []
+
+
+
+@pytest.mark.asyncio
+async def test_preference_recompute_uses_locked_consent_state(db_session, monkeypatch):
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    locked_customer = Customer(
+        id=customer_id, customer_no=customer.customer_no, recommend_opt_in=0
+    )
+    calls = []
+
+    async def locked(_db, requested_id):
+        calls.append(requested_id)
+        return locked_customer
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+
+    await PreferenceService.recompute_for_customer(db_session, customer_id)
+
+    assert calls == [customer_id]
+    from app.models import CustomerPreference
+
+    remaining = list(
+        (
+            await db_session.execute(
+                select(CustomerPreference).where(
+                    CustomerPreference.customer_id == customer_id
+                )
+            )
+        ).scalars().all()
+    )
+    assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_privacy_settings_reads_locked_consent_state(monkeypatch):
+    stale_customer = Customer(id=94, customer_no="LOCK-94", recommend_opt_in=1)
+    latest_customer = Customer(
+        id=94,
+        customer_no="LOCK-94",
+        recommend_opt_in=0,
+        consent_version="1.0",
+        recommend_consent_at=None,
+    )
+    calls = []
+
+    async def locked(_db, customer_id):
+        calls.append(customer_id)
+        return latest_customer
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+
+    result = await PrivacyService.get_privacy_settings(object(), stale_customer)
+
+    assert calls == [94]
+    assert result["recommend_opt_in"] == 0
+    assert result["consent_version"] == "1.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.mysql
+async def test_mysql_preference_projection_uses_current_read_after_revocation(
+    db_session, monkeypatch
+):
+    if db_session.bind.dialect.name != "mysql":
+        pytest.skip("locking current reads require the MySQL CI database")
+
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    db_session.add(
+        CustomerPreference(
+            customer_id=customer_id,
+            category="辣度",
+            option_code="MILD",
+            option_name="微辣",
+            preference_score="0.5000",
+            order_count=2,
+        )
+    )
+    await db_session.commit()
+
+    async_session = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    lock_acquired = asyncio.Event()
+    snapshot_read = asyncio.Event()
+
+    async def no_audit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(AuditService, "log", staticmethod(no_audit))
+    monkeypatch.setattr(reco_cache, "spawn_bg", lambda coro: coro.close())
+
+    async def revoke():
+        async with async_session() as session:
+            current = await session.get(Customer, customer_id)
+            await PrivacyService.lock_customer_for_recommendation(session, customer_id)
+            lock_acquired.set()
+            await asyncio.wait_for(snapshot_read.wait(), timeout=5)
+            await PrivacyService.update_opt_in(session, current, 0)
+            await session.commit()
+
+    async def read_preferences():
+        await asyncio.wait_for(lock_acquired.wait(), timeout=5)
+        async with async_session() as session:
+            # Establish a REPEATABLE READ snapshot before revocation commits.
+            old_rows = list(
+                (
+                    await session.execute(
+                        select(CustomerPreference).where(
+                            CustomerPreference.customer_id == customer_id
+                        )
+                    )
+                ).scalars().all()
+            )
+            assert len(old_rows) == 1
+            snapshot_read.set()
+
+            current = await PrivacyService.lock_customer_for_recommendation(
+                session, customer_id
+            )
+            assert current is not None
+            assert current.recommend_opt_in == 0
+            # This mirrors the API projection: FOR UPDATE is a current read,
+            # not a stale consistent read from the earlier transaction snapshot.
+            rows = list(
+                (
+                    await session.execute(
+                        select(CustomerPreference)
+                        .where(CustomerPreference.customer_id == customer_id)
+                        .with_for_update()
+                    )
+                ).scalars().all()
+            )
+            await session.commit()
+            return rows
+
+    revoke_task = asyncio.create_task(revoke())
+    await asyncio.wait_for(lock_acquired.wait(), timeout=5)
+    rows = await asyncio.wait_for(read_preferences(), timeout=10)
+    await asyncio.wait_for(revoke_task, timeout=10)
+    assert rows == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.mysql
+async def test_mysql_event_ingestion_uses_current_read_for_idempotency(
+    db_session, monkeypatch
+):
+    if db_session.bind.dialect.name != "mysql":
+        pytest.skip("current-read idempotency regression requires MySQL REPEATABLE READ")
+
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    await db_session.commit()
+
+    async_session = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    snapshot_ready = asyncio.Event()
+    first_insert_committed = asyncio.Event()
+
+    async def stale_snapshot_request():
+        async with async_session() as session:
+            # Establish a REPEATABLE READ snapshot before the competing insert.
+            await session.execute(
+                select(CustomerBehaviorEvent.id).where(
+                    CustomerBehaviorEvent.customer_id == customer_id
+                )
+            )
+            snapshot_ready.set()
+            await asyncio.wait_for(first_insert_committed.wait(), timeout=10)
+            result = await behavior_event_service.ingest_events(
+                session,
+                await session.get(Customer, customer_id),
+                [{"event_id": "same-event-id", "event_type": "CLICK"}],
+            )
+            await session.commit()
+            return result
+
+    async def first_insert():
+        await asyncio.wait_for(snapshot_ready.wait(), timeout=10)
+        async with async_session() as session:
+            result = await behavior_event_service.ingest_events(
+                session,
+                await session.get(Customer, customer_id),
+                [{"event_id": "same-event-id", "event_type": "CLICK"}],
+            )
+            assert result["accepted"] == 1
+            await session.commit()
+            first_insert_committed.set()
+
+    stale_task = asyncio.create_task(stale_snapshot_request())
+    insert_task = asyncio.create_task(first_insert())
+    await asyncio.wait_for(insert_task, timeout=15)
+    stale_result = await asyncio.wait_for(stale_task, timeout=15)
+
+    assert stale_result["accepted"] == 0
+    assert stale_result["duplicate"] == 1
+    async with async_session() as verify:
+        count = await verify.scalar(
+            select(func.count()).select_from(CustomerBehaviorEvent).where(
+                CustomerBehaviorEvent.customer_id == customer_id,
+                CustomerBehaviorEvent.event_id == "same-event-id",
+            )
+        )
+        assert count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_opt_in", "target_opt_in"),
+    [(0, 1), (1, 0), (0, 0)],
+)
+async def test_customer_merge_does_not_resurrect_preferences_without_both_consents(
+    db_session, source_opt_in, target_opt_in
+):
+    source = await make_customer(db_session, recommend_opt_in=source_opt_in)
+    target = await make_customer(db_session, recommend_opt_in=target_opt_in)
+    db_session.add_all(
+        [
+            CustomerPreference(
+                customer_id=int(source.id),
+                category="辣度",
+                option_code="HOT",
+                option_name="特辣",
+                preference_score="0.9000",
+                order_count=3,
+            ),
+            CustomerPreference(
+                customer_id=int(target.id),
+                category="辣度",
+                option_code="MILD",
+                option_name="微辣",
+                preference_score="0.7000",
+                order_count=2,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    stats = {"preferences_moved": 0, "preferences_merged": 0}
+    await CustomerMergeService._merge_preferences_for_consent(
+        db_session, source, target, stats
+    )
+
+    remaining = list(
+        (
+            await db_session.execute(
+                select(CustomerPreference).where(
+                    CustomerPreference.customer_id.in_((int(source.id), int(target.id)))
+                )
+            )
+        ).scalars().all()
+    )
+    assert remaining == []
+    assert stats["preferences_cleared_for_consent"] == 2
+
+
+@pytest.mark.asyncio
+async def test_customer_merge_locks_orders_and_recharges_before_customers():
+    class ScalarResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class RecordingSession:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            return ScalarResult()
+
+    session = RecordingSession()
+    await _lock_merge_scope(session, [11, 22])
+
+    sql = [
+        str(statement.compile(dialect=mysql.dialect())).lower()
+        for statement in session.statements
+    ]
+    assert len(sql) == 4
+    assert "from orders" in sql[0] and "for update" in sql[0]
+    assert "order by orders.id" in sql[0]
+    assert "from recharge_orders" in sql[1] and "for update" in sql[1]
+    assert "order by recharge_orders.id" in sql[1]
+    assert "from marketing_flash_sale_claims" in sql[2] and "for update" in sql[2]
+    assert "order by marketing_flash_sale_claims.id" in sql[2]
+    assert "from customers" in sql[3] and "for update" in sql[3]
+    assert "order by customers.id" in sql[3]
