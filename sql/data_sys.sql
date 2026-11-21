@@ -51,6 +51,7 @@ TRUNCATE TABLE `customer_segments`;
 TRUNCATE TABLE `customer_social_identities`;
 TRUNCATE TABLE `customer_taste_profiles`;
 TRUNCATE TABLE `customer_wechat_accounts`;
+TRUNCATE TABLE `customer_write_gates`;
 TRUNCATE TABLE `customers`;
 TRUNCATE TABLE `delivery_callback_logs`;
 TRUNCATE TABLE `delivery_orders`;
