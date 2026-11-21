@@ -22,7 +22,7 @@ def upgrade() -> None:
             "customer_write_gates",
             sa.Column(
                 "customer_id",
-                sa.BigInteger(),
+                sa.BigInteger(unsigned=True),
                 sa.ForeignKey("customers.id", ondelete="CASCADE"),
                 primary_key=True,
                 nullable=False,
