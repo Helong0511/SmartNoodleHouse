@@ -39,7 +39,11 @@ async def test_pos_bind_rejects_customer_disabled_by_merge_after_request_started
             return self.value
 
     db = SimpleNamespace(
-        execute=AsyncMock(side_effect=[Result(order), Result(disabled_customer)])
+        scalar=AsyncMock(return_value=None),
+        execute=AsyncMock(side_effect=[Result(order), Result(disabled_customer)]),
+    )
+    monkeypatch.setattr(
+        orders_pos, "lock_customer_write_gates", AsyncMock(return_value=[33])
     )
     monkeypatch.setattr(orders_pos, "assert_order_store_access", lambda *_: None)
 
@@ -53,8 +57,10 @@ async def test_pos_bind_rejects_customer_disabled_by_merge_after_request_started
         )
 
     assert exc.value.status_code == 404
+    assert db.scalar.await_count == 1
     assert db.execute.await_count == 2
     statements = [call.args[0] for call in db.execute.await_args_list]
     assert statements[0].column_descriptions[0]["entity"] is Order
     assert statements[1].column_descriptions[0]["entity"] is Customer
     assert all(stmt._for_update_arg is not None for stmt in statements)
+    orders_pos.lock_customer_write_gates.assert_awaited_once_with(db, [33])
