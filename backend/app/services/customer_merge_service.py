@@ -49,6 +49,7 @@ from app.models import (
 from app.core.response import money, serialize_dt
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_customer_write_gates
 
 
 def _mask_phone(phone: str | None) -> str | None:
@@ -125,9 +126,10 @@ class CustomerMergeService:
         if int(target_customer_id) == int(source_customer_id):
             raise AppException(40061, "不能合并同一顾客")
 
-        # Payment/refund flows lock Order or RechargeOrder before Customer.
-        # Keep the same global order here to avoid Customer ↔ payment-parent deadlocks.
+        # Global order: customer gates → payment parents → customer rows.
+        # Never acquire a lifecycle gate after an Order/RechargeOrder lock.
         ids = sorted([int(target_customer_id), int(source_customer_id)])
+        await lock_customer_write_gates(db, ids)
         locked = await _lock_merge_scope(db, ids)
         by_id = {int(c.id): c for c in locked}
         target = by_id.get(int(target_customer_id))
