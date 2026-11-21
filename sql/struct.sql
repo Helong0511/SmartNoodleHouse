@@ -2255,7 +2255,7 @@ COMMENT='顾客抢购资格';
 
 -- Per-customer transaction mutex used to serialize lifecycle-sensitive writes.
 CREATE TABLE IF NOT EXISTS `customer_write_gates` (
-  `customer_id` bigint UNSIGNED NOT NULL COMMENT '→ customers.id; transaction mutex only',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '→ customers.id, transaction mutex only',
   PRIMARY KEY (`customer_id`),
   CONSTRAINT `fk_customer_write_gates_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客写入串行化锁';
