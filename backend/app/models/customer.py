@@ -20,6 +20,7 @@ from sqlalchemy import (
     func,
     event,
 )
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -72,7 +73,7 @@ class CustomerWriteGate(Base):
     __tablename__ = "customer_write_gates"
 
     customer_id: Mapped[int] = mapped_column(
-        BigInteger(unsigned=True),
+        MySQLBigInteger(unsigned=True).with_variant(Integer, "sqlite"),
         ForeignKey("customers.id", ondelete="CASCADE"),
         primary_key=True,
     )
