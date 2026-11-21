@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -50,7 +51,7 @@ class CustomerSocialIdentity(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"), index=True)
     identity_code: Mapped[str] = mapped_column(String(32))
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
@@ -112,7 +113,7 @@ class SocialBenefitRedemption(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), default=None)
     identity_code: Mapped[str] = mapped_column(String(32))

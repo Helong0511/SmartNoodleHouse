@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -67,7 +68,7 @@ class CustomerCoupon(Base):
     )
     # 同模板可持有多张（满减/折扣/代金券均由业务按张核销）
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     template_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("coupon_templates.id"), index=True)
     coupon_no: Mapped[str] = mapped_column(String(40), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="AVAILABLE")
@@ -103,7 +104,7 @@ class PointLedger(Base):
     __tablename__ = "point_ledger"
     __table_args__ = (Index("ix_pl_created_at_customer_id", "created_at", "customer_id"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
     refund_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("payment_refunds.id"), unique=True, comment="退款幂等键：每单至多一条扣减", index=True
@@ -120,7 +121,7 @@ class BalanceLedger(Base):
     __tablename__ = "balance_ledger"
     __table_args__ = (Index("ix_bl_created_at_customer_id", "created_at", "customer_id"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"), index=True)
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), default=None)
     recharge_order_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -164,7 +165,7 @@ class RechargeOrder(Base, TimestampMixin):
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     recharge_no: Mapped[str] = mapped_column(String(40))
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id"))
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     package_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("recharge_packages.id"), default=None)
     pay_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))

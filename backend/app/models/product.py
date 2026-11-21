@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -223,7 +224,7 @@ class CustomerTasteProfile(Base):
         autoincrement=True,
     )
     customer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+        MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"), index=True
     )
     # CATEGORY=品类亲和 / PRODUCT=单品偏好 / TASTE_TAG=口味标签偏好
     dim_type: Mapped[str] = mapped_column(String(16))
@@ -260,7 +261,7 @@ class CustomerBehaviorEvent(Base):
     # 客户端生成的幂等 UUID，重复上报靠它去重
     event_id: Mapped[str] = mapped_column(String(64))
     customer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customers.id", ondelete="CASCADE")
+        MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE")
     )
     store_id: Mapped[int | None] = mapped_column(BigInteger)
     # EXPOSE/CLICK/CART_ADD/CART_REMOVE/ORDER_PAID/REORDER/FEEDBACK
@@ -292,7 +293,7 @@ class ProductFeedback(Base, TimestampMixin):
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
     product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"), index=True)
     customer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+        MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"), index=True
     )
     store_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     # 白名单标签，如 ["TOO_SPICY","DISLIKE"] / ["TASTY"]
@@ -337,7 +338,7 @@ class AbAssignment(Base):
     )
     experiment_key: Mapped[str] = mapped_column(String(64), index=True)
     customer_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+        MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"), index=True
     )
     bucket: Mapped[str] = mapped_column(String(40))
     assigned_at: Mapped[datetime] = mapped_column(

@@ -24,7 +24,6 @@ def upgrade() -> None:
             sa.Column(
                 "customer_id",
                 MySQLBigInteger(unsigned=True).with_variant(sa.Integer(), "sqlite"),
-                sa.ForeignKey("customers.id", ondelete="CASCADE"),
                 primary_key=True,
                 nullable=False,
             ),
