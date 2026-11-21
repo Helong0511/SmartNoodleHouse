@@ -2259,3 +2259,14 @@ CREATE TABLE IF NOT EXISTS `customer_write_gates` (
   PRIMARY KEY (`customer_id`),
   CONSTRAINT `fk_customer_write_gates_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客写入串行化锁';
+
+
+-- Ensure direct SQL / Core inserts also create their lifecycle mutex row.
+DELIMITER $$
+CREATE TRIGGER `trg_customers_create_write_gate`
+AFTER INSERT ON `customers`
+FOR EACH ROW
+BEGIN
+  INSERT IGNORE INTO `customer_write_gates` (`customer_id`) VALUES (NEW.`id`);
+END$$
+DELIMITER ;
