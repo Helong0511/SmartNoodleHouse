@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.services import alipay_client, wechat_pay_client
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_customer_write_gates
 from app.services.order_lifecycle import apply_order_status
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.status_history import record_payment_status
@@ -1139,11 +1140,26 @@ class PaymentService:
         """储值充值：微信/支付宝实付入账后写入本金+赠送金。"""
         from types import SimpleNamespace
 
+        # Read owner without locking, acquire its lifecycle gate, then lock the
+        # RechargeOrder. Merge uses the same gate-before-parent order.
+        observed_owner_id = await db.scalar(
+            select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge.id))
+        )
+        if observed_owner_id is None:
+            raise AppException(40491, "充值单不存在")
+        await lock_customer_write_gates(db, [int(observed_owner_id)])
         locked = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40491, "充值单不存在")
+        if int(locked.customer_id) != int(observed_owner_id):
+            raise AppException(40906, "充值单顾客归属已变化，请重试", status_code=409)
         recharge = locked
         if recharge.status == "PAID":
             raise AppException(40010, "充值单已支付")
