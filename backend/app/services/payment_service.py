@@ -1484,7 +1484,7 @@ class PaymentService:
     async def _lock_order_then_payment(
         cls, db: AsyncSession, payment_id: int
     ) -> Payment | None:
-        """统一锁序：先 Order（若有）再 Payment，降低与关单路径的死锁概率。"""
+        """统一锁序：先 Customer Gate，再 Order/RechargeOrder，最后 Payment。"""
         peek = (
             await db.execute(
                 select(Payment.order_id, Payment.recharge_order_id).where(Payment.id == int(payment_id))
@@ -1494,6 +1494,11 @@ class PaymentService:
             return None
         order_id, recharge_id = peek[0], peek[1]
         if order_id:
+            owner_id = await db.scalar(
+                select(Order.customer_id).where(Order.id == int(order_id))
+            )
+            if owner_id is not None:
+                await lock_customer_write_gates(db, [int(owner_id)])
             await db.execute(
                 select(Order)
                 .where(Order.id == int(order_id))
@@ -1501,6 +1506,11 @@ class PaymentService:
                 .execution_options(populate_existing=True)
             )
         elif recharge_id:
+            owner_id = await db.scalar(
+                select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
+            )
+            if owner_id is not None:
+                await lock_customer_write_gates(db, [int(owner_id)])
             await db.execute(
                 select(RechargeOrder)
                 .where(RechargeOrder.id == int(recharge_id))
