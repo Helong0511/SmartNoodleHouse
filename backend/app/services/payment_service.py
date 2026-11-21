@@ -1499,24 +1499,45 @@ class PaymentService:
             )
             if isinstance(owner_id, int) and not isinstance(owner_id, bool):
                 await lock_customer_write_gates(db, [owner_id])
-            await db.execute(
-                select(Order)
-                .where(Order.id == int(order_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
+            locked_order = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == int(order_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if locked_order is None:
+                raise AppException(40402, "支付关联订单不存在")
+            # A merge may have completed between the unlocked owner peek and
+            # acquiring the old owner's gate. Never continue with only that
+            # stale gate; abort so the caller retries under the new owner gate.
+            locked_owner_id = getattr(locked_order, "customer_id", None)
+            if (owner_id is None) != (locked_owner_id is None) or (
+                isinstance(owner_id, int) and int(owner_id) != int(locked_owner_id)
+            ):
+                raise AppException(40906, "订单顾客归属在加锁期间发生变化，请重试", status_code=409)
         elif recharge_id:
             owner_id = await db.scalar(
                 select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
             )
             if owner_id is not None:
                 await lock_customer_write_gates(db, [int(owner_id)])
-            await db.execute(
-                select(RechargeOrder)
-                .where(RechargeOrder.id == int(recharge_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
+            locked_recharge = (
+                await db.execute(
+                    select(RechargeOrder)
+                    .where(RechargeOrder.id == int(recharge_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if locked_recharge is None:
+                raise AppException(40402, "支付关联充值单不存在")
+            locked_owner_id = getattr(locked_recharge, "customer_id", None)
+            if (owner_id is None) != (locked_owner_id is None) or (
+                isinstance(owner_id, int) and int(owner_id) != int(locked_owner_id)
+            ):
+                raise AppException(40906, "充值单顾客归属在加锁期间发生变化，请重试", status_code=409)
         # FOR UPDATE 是当前读；populate_existing 同步刷新当前 Session 中可能已加载的旧 ORM 快照。
         return (
             await db.execute(
