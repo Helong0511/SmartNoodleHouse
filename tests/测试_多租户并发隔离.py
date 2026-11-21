@@ -54,6 +54,9 @@ async def test_balance_debit_locks_customer_before_ledger_and_stays_idempotent()
         sql = str(stmt).lower()
         order.append(sql)
         res = MagicMock()
+        if "from customer_write_gates" in sql:
+            res.scalars.return_value.all.return_value = [1]
+            return res
         if "from customers" in sql:
             res.scalar_one_or_none.return_value = customer
             return res
@@ -71,7 +74,9 @@ async def test_balance_debit_locks_customer_before_ledger_and_stays_idempotent()
     )
     assert out is ledger
     db.add.assert_not_called()
-    assert order[0].find("customers") < order[1].find("balance_ledger") or "customers" in order[0]
+    assert "customer_write_gates" in order[0]
+    assert "customers" in order[1]
+    assert "balance_ledger" in order[2]
 
 
 @pytest.mark.asyncio
@@ -91,8 +96,11 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
     db = AsyncMock()
     # merge() now locks payment parents (Orders, RechargeOrders) before Customers,
     # then performs the store-scope authorization probes.
+    gate_locks = MagicMock()
+    gate_locks.scalars.return_value.all.return_value = [1, 2]
     db.execute = AsyncMock(
         side_effect=[
+            gate_locks,
             order_locks,
             recharge_locks,
             locked_customers,
