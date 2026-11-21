@@ -72,9 +72,13 @@ class CustomerWriteGate(Base):
 
     __tablename__ = "customer_write_gates"
 
+    # Keep the deployed MySQL column UNSIGNED to match the canonical DDL.
+    # Customer.id's legacy ORM declaration is signed even though sql/struct.sql
+    # defines it UNSIGNED; declaring an ORM FK here makes metadata.create_all()
+    # fail on MySQL 8 (3780). Referential integrity is enforced by migration
+    # 0052's production FK, while the gate itself is locked by customer_id.
     customer_id: Mapped[int] = mapped_column(
         MySQLBigInteger(unsigned=True).with_variant(Integer, "sqlite"),
-        ForeignKey("customers.id", ondelete="CASCADE"),
         primary_key=True,
     )
 
