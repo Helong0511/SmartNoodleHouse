@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.customer_write_gate import lock_customer_write_gates
 from app.models import (
     Customer,
     CustomerBehaviorEvent,
@@ -39,6 +40,7 @@ class PrivacyService:
         populate_existing is essential: callers may already hold a stale Customer
         instance loaded before waiting for this row lock.
         """
+        await lock_customer_write_gates(db, [int(customer_id)])
         result = await db.execute(
             select(Customer)
             .where(Customer.id == int(customer_id))
