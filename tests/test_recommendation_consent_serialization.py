@@ -19,7 +19,7 @@ from reco_factories import make_customer
 
 
 @pytest.mark.asyncio
-async def test_customer_consent_lock_uses_for_update_and_refreshes_identity_map():
+async def test_customer_consent_lock_uses_for_update_and_refreshes_identity_map(monkeypatch):
     class Result:
         def scalar_one_or_none(self):
             return customer
@@ -33,6 +33,12 @@ async def test_customer_consent_lock_uses_for_update_and_refreshes_identity_map(
 
     customer = Customer(id=91, customer_no="LOCK-91", recommend_opt_in=0)
     session = Session()
+    from app.services import privacy_service
+
+    async def no_gate(_db, _ids):
+        return [91]
+
+    monkeypatch.setattr(privacy_service, "lock_customer_write_gates", no_gate)
 
     locked = await PrivacyService.lock_customer_for_recommendation(session, 91)
 
