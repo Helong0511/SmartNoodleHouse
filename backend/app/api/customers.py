@@ -603,7 +603,9 @@ async def update_customer(
     """员工编辑顾客基础信息（昵称/展示名/手机/启用状态/生日/推荐开关）。"""
     from app.core.response import now_local
     from app.services.store_scope import require_bound_store
+    from app.services.customer_write_gate import lock_customer_write_gates
 
+    await lock_customer_write_gates(db, [int(customer_id)])
     customer_result = await db.execute(
         select(Customer)
         .where(Customer.id == int(customer_id))
