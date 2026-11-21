@@ -30,6 +30,15 @@ def upgrade() -> None:
             comment="One transaction mutex row per customer; no business state",
         )
 
+    # Ensure all future inserts, including SQLAlchemy Core/bulk inserts that
+    # bypass ORM mapper events, receive a gate in the same database transaction.
+    if conn.dialect.name == "mysql":
+        op.execute(
+            "CREATE TRIGGER trg_customers_create_write_gate "
+            "AFTER INSERT ON customers FOR EACH ROW "
+            "INSERT IGNORE INTO customer_write_gates (customer_id) VALUES (NEW.id)"
+        )
+
     # Idempotent backfill: supports partially provisioned environments and can
     # be safely re-run after a failed deployment.
     if inspector.has_table("customers"):
@@ -45,5 +54,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
+    if conn.dialect.name == "mysql":
+        op.execute("DROP TRIGGER IF EXISTS trg_customers_create_write_gate")
     if sa.inspect(conn).has_table("customer_write_gates"):
         op.drop_table("customer_write_gates")
