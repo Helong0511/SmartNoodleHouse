@@ -18,6 +18,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,6 +64,30 @@ class Customer(Base, TimestampMixin):
     # 个性化推荐同意的隐私政策版本与同意时间（版本化留痕，PIPL 合规）
     consent_version: Mapped[str | None] = mapped_column(String(40), default=None)
     recommend_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class CustomerWriteGate(Base):
+    """Dedicated transaction mutex for customer-owned writes and account merges."""
+
+    __tablename__ = "customer_write_gates"
+
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+@event.listens_for(Customer, "after_insert")
+def _create_customer_write_gate(mapper, connection, target) -> None:
+    """Create the gate in the same transaction as every ORM Customer insert.
+
+    Existing rows are backfilled by Alembic migration 0052. Bulk/Core inserts
+    bypass mapper events and must explicitly create their gate row.
+    """
+    connection.execute(
+        CustomerWriteGate.__table__.insert().values(customer_id=int(target.id))
+    )
 
 
 class CustomerIdentity(Base, TimestampMixin):
