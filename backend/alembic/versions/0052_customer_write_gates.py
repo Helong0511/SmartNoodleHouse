@@ -6,6 +6,7 @@ Revises: 0051_pos_refund_fencing
 from __future__ import annotations
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from alembic import op
 
 revision = "0052_customer_write_gates"
@@ -22,7 +23,7 @@ def upgrade() -> None:
             "customer_write_gates",
             sa.Column(
                 "customer_id",
-                sa.BigInteger(unsigned=True),
+                MySQLBigInteger(unsigned=True).with_variant(sa.Integer(), "sqlite"),
                 sa.ForeignKey("customers.id", ondelete="CASCADE"),
                 primary_key=True,
                 nullable=False,
