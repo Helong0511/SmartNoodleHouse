@@ -72,7 +72,7 @@ class CustomerWriteGate(Base):
     __tablename__ = "customer_write_gates"
 
     customer_id: Mapped[int] = mapped_column(
-        BigInteger,
+        BigInteger(unsigned=True),
         ForeignKey("customers.id", ondelete="CASCADE"),
         primary_key=True,
     )
