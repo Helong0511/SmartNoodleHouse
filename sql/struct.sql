@@ -2234,6 +2234,7 @@ CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
   `unit_no` int NOT NULL DEFAULT 1 COMMENT '同一顾客第几份，配合唯一键限购',
   `claim_no` varchar(40) NOT NULL,
   `status` varchar(20) NOT NULL DEFAULT 'CLAIMED',
+  `status_reason` varchar(40) NULL DEFAULT NULL,
   `claimed_at` datetime(3) NOT NULL,
   `expires_at` datetime(3) NOT NULL,
   `verify_deadline_at` datetime(3) NULL DEFAULT NULL,
