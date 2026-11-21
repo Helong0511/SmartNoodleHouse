@@ -26,3 +26,17 @@ def test_recharge_response_does_not_disclose_merged_target_wallet():
     owner_check = source.index("int(ro.customer_id) == int(customer.id)")
     wallet_snapshot = source.index("BalanceService.snapshot(cust)", owner_check)
     assert owner_check < wallet_snapshot
+
+
+def test_recharge_payment_acquires_customer_gate_before_parent_row_lock():
+    source = inspect.getsource(PaymentService.create_recharge_payment)
+    gate = source.index("await lock_customer_write_gates(db, [int(observed_owner_id)])")
+    locked_recharge = source.index(".with_for_update()", source.index("locked = ("))
+    assert gate < locked_recharge
+
+
+def test_recharge_creation_acquires_customer_gate_before_creating_recharge_order():
+    source = inspect.getsource(wallet.create_recharge)
+    gate = source.index("lock_active_customer_for_write")
+    package_lookup = source.index("pkg = await db.get")
+    assert gate < package_lookup
