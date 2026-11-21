@@ -40,3 +40,20 @@ def test_recharge_creation_acquires_customer_gate_before_creating_recharge_order
     gate = source.index("lock_active_customer_for_write")
     package_lookup = source.index("pkg = await db.get")
     assert gate < package_lookup
+
+
+def test_recharge_settlement_acquires_gate_before_recharge_and_payment_locks():
+    source = inspect.getsource(PaymentService._settle_recharge_payment)
+    gate = source.index("await lock_customer_write_gates")
+    recharge_lock = source.index(".with_for_update()")
+    payment_lock = source.index("select(Payment)")
+    assert gate < recharge_lock < payment_lock
+
+
+def test_recharge_callback_and_query_defer_parent_lock_to_settlement():
+    callback = inspect.getsource(PaymentService._apply_recharge_callback)
+    query = inspect.getsource(PaymentService._settle_from_query)
+    assert "SimpleNamespace(id=int(payment.recharge_order_id))" in callback
+    assert "SimpleNamespace(id=int(payment.recharge_order_id))" in query
+    assert ".with_for_update()" not in callback[callback.index("if parsed[\"status\"] == \"PAID\""):callback.index("await cls._settle_recharge_payment")]
+    assert ".with_for_update()" not in query[query.index("# 储值充值单"):query.index("await cls._settle_recharge_payment")]
