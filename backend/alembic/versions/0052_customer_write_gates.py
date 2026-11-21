@@ -34,6 +34,15 @@ def upgrade() -> None:
             mysql_collate="utf8mb4_unicode_ci",
         )
 
+    # Record why an outstanding flash-sale entitlement became terminal.
+    if inspector.has_table("marketing_flash_sale_claims") and "status_reason" not in {
+        c["name"] for c in inspector.get_columns("marketing_flash_sale_claims")
+    }:
+        op.add_column(
+            "marketing_flash_sale_claims",
+            sa.Column("status_reason", sa.String(length=40), nullable=True),
+        )
+
     # Ensure all future inserts, including SQLAlchemy Core/bulk inserts that
     # bypass ORM mapper events, receive a gate in the same database transaction.
     if conn.dialect.name == "mysql":
@@ -60,5 +69,10 @@ def downgrade() -> None:
     conn = op.get_bind()
     if conn.dialect.name == "mysql":
         op.execute("DROP TRIGGER IF EXISTS trg_customers_create_write_gate")
-    if sa.inspect(conn).has_table("customer_write_gates"):
+    inspector = sa.inspect(conn)
+    if inspector.has_table("marketing_flash_sale_claims") and "status_reason" in {
+        c["name"] for c in inspector.get_columns("marketing_flash_sale_claims")
+    }:
+        op.drop_column("marketing_flash_sale_claims", "status_reason")
+    if inspector.has_table("customer_write_gates"):
         op.drop_table("customer_write_gates")

@@ -1,18 +1,18 @@
 # Customer lifecycle write-gate protocol
 
-Status: design proposal for PR #217; not implemented by this document.
+Status: implementation notes for PR #217; the gate and flash-sale merge policy are implemented on the PR branch. MySQL concurrency validation remains in progress.
 
 ## Why a separate gate is required
 
 `app.models.customer.CustomerLifecycle` is an analytical RFM/lifecycle snapshot. It is not guaranteed to exist for every customer and is updated by analytics jobs, so it must not be used as a serialization primitive.
 
-Current merge lock order in `CustomerMergeService._lock_merge_scope()` is Order rows, RechargeOrder rows, then Customer rows (each ordered by primary key). Flash-sale claim creation locks an active customer, but `FlashSaleService.verify()` currently locks the FlashSaleClaim first and does not validate/lock its customer. Merge does not currently move or invalidate outstanding FlashSaleClaim rows. POS order creation reads a customer without a current locked read before creating the order.
+Merge acquires sorted CustomerWriteGate rows first, then locks Order, RechargeOrder, outstanding FlashSaleClaim, and Customer rows. Flash-sale claim creation and verification acquire the customer gate before claim/customer locks. Merge cancels outstanding `CLAIMED` claims with `status_reason=CUSTOMER_MERGED`; `USED` claims and historical order references are preserved.
 
 Adding a customer lock after an operation-specific row lock is unsafe: merge can hold an order/recharge parent while waiting for a claim/customer, while a verifier holds the claim/customer and proceeds to create an order.
 
 ## Proposed invariant
 
-Introduce a dedicated `CustomerWriteGate` table with exactly one durable row per customer:
+The implementation uses a dedicated `CustomerWriteGate` table with exactly one durable row per customer:
 
 - `customer_id`: primary key and FK to `customers.id`;
 - optional `created_at` / `updated_at` timestamps;
@@ -36,7 +36,7 @@ No participating operation may acquire a gate after locking an order, recharge, 
 
 ### Operation requirements
 
-- **Customer merge:** lock source and target gates in sorted order first; then lock orders, recharge orders, outstanding flash-sale claims, and customer rows in stable order. Apply an explicit flash-sale policy in the same transaction. Recommended default: invalidate unverified source claims (set a terminal status such as CANCELLED and record a merge reason) rather than silently transferring a time-limited entitlement to another account. Preserve already-used claims and historical order references.
+- **Customer merge:** lock source and target gates in sorted order first; then lock orders, recharge orders, outstanding flash-sale claims, and customer rows in stable order. Apply an explicit flash-sale policy in the same transaction. Implemented: invalidate unverified source claims (`status=CANCELLED`, `status_reason=CUSTOMER_MERGED`) rather than silently transferring a time-limited entitlement to another account. Preserve already-used claims and historical order references.
 - **POS order create:** acquire the selected customer's gate before customer status validation and before `OrderCreateService.create_order`. No gate is needed for anonymous POS orders.
 - **POS bind/unbind:** perform a non-locking read of the order's current customer ID only to determine the gate set; lock old and new customer gates in sorted order; then lock/re-read the order and verify its owner has not changed. If it changed, abort with a retryable conflict rather than proceeding with a stale gate set.
 - **Recharge create:** acquire the customer's gate before creating or reusing a recharge order. Payment creation may continue to lock the recharge order; it must derive ownership from the locked recharge row, not the request-scoped customer.

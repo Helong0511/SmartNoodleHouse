@@ -39,6 +39,7 @@ from app.models import (
     CustomerWechatAccount,
     DiningSession,
     FaceProfile,
+    FlashSaleClaim,
     Order,
     Payment,
     PointLedger,
@@ -89,6 +90,16 @@ async def _lock_merge_scope(db: AsyncSession, customer_ids: list[int]) -> list[C
         select(RechargeOrder.id)
         .where(RechargeOrder.customer_id.in_(customer_ids))
         .order_by(RechargeOrder.id)
+        .with_for_update()
+    )
+    # Lock outstanding customer-owned entitlements before Customer rows.
+    await db.execute(
+        select(FlashSaleClaim.id)
+        .where(
+            FlashSaleClaim.customer_id.in_(customer_ids),
+            FlashSaleClaim.status == "CLAIMED",
+        )
+        .order_by(FlashSaleClaim.id)
         .with_for_update()
     )
     return (
@@ -195,7 +206,23 @@ class CustomerMergeService:
             "social_identities_moved": 0,
             "social_identities_revoked": 0,
             "social_redemptions": 0,
+            "flash_sale_claims_cancelled": 0,
         }
+
+        # Unverified, time-limited claims do not transfer to another account.
+        # Preserve USED claims and their historical order references.
+        outstanding_claims = (
+            await db.execute(
+                select(FlashSaleClaim).where(
+                    FlashSaleClaim.customer_id == source.id,
+                    FlashSaleClaim.status == "CLAIMED",
+                ).order_by(FlashSaleClaim.id)
+            )
+        ).scalars().all()
+        for claim in outstanding_claims:
+            claim.status = "CANCELLED"
+            claim.status_reason = "CUSTOMER_MERGED"
+        stats["flash_sale_claims_cancelled"] = len(outstanding_claims)
 
         await cls._merge_platform_accounts(db, source.id, target.id, stats)
         await cls._merge_identities(db, source.id, target.id, stats)

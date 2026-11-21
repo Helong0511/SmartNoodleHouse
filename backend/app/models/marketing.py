@@ -276,8 +276,9 @@ class FlashSaleClaim(Base, TimestampMixin):
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
     unit_no: Mapped[int] = mapped_column(Integer, default=1)
     claim_no: Mapped[str] = mapped_column(String(40))
-    # CLAIMED=待核销；USED=已核销；EXPIRED=超时失效；CANCELLED=活动终止
+    # CLAIMED=待核销；USED=已核销；EXPIRED=超时失效；CANCELLED=终态取消
     status: Mapped[str] = mapped_column(String(20), default="CLAIMED")
+    status_reason: Mapped[str | None] = mapped_column(String(40), default=None)
     claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     verify_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

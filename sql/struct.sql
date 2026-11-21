@@ -2154,6 +2154,7 @@ CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
   `unit_no` int NOT NULL DEFAULT 1 COMMENT '每人第几份资格',
   `claim_no` varchar(40) NOT NULL COMMENT '抢购资格编号',
   `status` varchar(20) NOT NULL DEFAULT 'CLAIMED' COMMENT 'CLAIMED/USED/EXPIRED/CANCELLED',
+  `status_reason` varchar(40) NULL DEFAULT NULL COMMENT '终态原因，如 CUSTOMER_MERGED',
   `claimed_at` datetime(3) NOT NULL COMMENT '领取时间',
   `expires_at` datetime(3) NOT NULL COMMENT '资格过期时间',
   `verify_deadline_at` datetime(3) NULL DEFAULT NULL COMMENT '核销截止时间',
