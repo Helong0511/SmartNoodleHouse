@@ -29,6 +29,9 @@ def upgrade() -> None:
                 nullable=False,
             ),
             comment="One transaction mutex row per customer; no business state",
+            mysql_engine="InnoDB",
+            mysql_charset="utf8mb4",
+            mysql_collate="utf8mb4_unicode_ci",
         )
 
     # Ensure all future inserts, including SQLAlchemy Core/bulk inserts that
