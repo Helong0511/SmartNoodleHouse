@@ -32,6 +32,7 @@ from app.models import (
     Store,
 )
 from app.services.marketing_service import MarketingService
+from app.services.customer_write_gate import lock_active_customer_for_write, lock_customer_write_gates
 from app.services.stock_service import deduct_stock
 from app.utils.campaign_schedule import campaign_in_schedule_window
 
@@ -39,21 +40,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _lock_active_customer(db: AsyncSession, customer_id: int) -> Customer:
-    """Serialize customer-owned writes with merge and reject stale authenticated owners."""
-    result = await db.execute(
-        select(Customer)
-        .where(Customer.id == int(customer_id))
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    customer = result.scalar_one_or_none()
-    if (
-        customer is None
-        or int(customer.status or 0) != 1
-        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
-    ):
-        raise AppException(ACCOUNT_DISABLED, "顾客不存在或已禁用", status_code=401)
-    return customer
+    """Acquire lifecycle gate before current-reading the customer row."""
+    return await lock_active_customer_for_write(db, int(customer_id))
 
 STATUS_CLAIMED = "CLAIMED"
 STATUS_USED = "USED"
@@ -533,13 +521,26 @@ class FlashSaleService:
         if not code:
             raise AppException(40008, "请填写核销码")
         now = naive_local_now()
+        # Discover the owner without locking the claim. The gate must precede
+        # the claim row to preserve the global lifecycle lock order.
+        owner_id = await db.scalar(
+            select(FlashSaleClaim.customer_id).where(FlashSaleClaim.claim_no == code)
+        )
+        if owner_id is None:
+            raise AppException(40404, "抢购资格不存在")
+        await lock_customer_write_gates(db, [int(owner_id)])
         claim = await db.scalar(
             select(FlashSaleClaim)
             .where(FlashSaleClaim.claim_no == code)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not claim:
             raise AppException(40404, "抢购资格不存在")
+        if int(claim.customer_id) != int(owner_id):
+            raise AppException(40906, "抢购资格归属已变化，请重试", status_code=409)
+        # Customer is current-read only after its gate has been acquired.
+        await lock_active_customer_for_write(db, int(owner_id))
         # store_id 由后端门店范围决定（非超管强制本店），不接受前端指定他店
         if store_id is not None and int(claim.store_id) != int(store_id):
             raise AppException(40300, "无权核销其他门店的抢购资格", status_code=403)
