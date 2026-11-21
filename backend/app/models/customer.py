@@ -85,9 +85,15 @@ def _create_customer_write_gate(mapper, connection, target) -> None:
     Existing rows are backfilled by Alembic migration 0052. Bulk/Core inserts
     bypass mapper events and must explicitly create their gate row.
     """
-    connection.execute(
-        CustomerWriteGate.__table__.insert().values(customer_id=int(target.id))
+    statement = CustomerWriteGate.__table__.insert().values(
+        customer_id=int(target.id)
     )
+    # Production MySQL also has an AFTER INSERT trigger, which covers Core/bulk
+    # inserts. IGNORE makes this ORM hook coexist with that trigger; SQLite has
+    # no trigger in create_all-based tests, so the hook provisions the row.
+    if connection.dialect.name == "mysql":
+        statement = statement.prefix_with("IGNORE")
+    connection.execute(statement)
 
 
 class CustomerIdentity(Base, TimestampMixin):
