@@ -2268,5 +2268,11 @@ AFTER INSERT ON `customers`
 FOR EACH ROW
 BEGIN
   INSERT IGNORE INTO `customer_write_gates` (`customer_id`) VALUES (NEW.`id`);
-END$$
+END$
+CREATE TRIGGER `trg_customers_delete_write_gate`
+AFTER DELETE ON `customers`
+FOR EACH ROW
+BEGIN
+  DELETE FROM `customer_write_gates` WHERE `customer_id` = OLD.`id`;
+END$
 DELIMITER ;

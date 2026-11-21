@@ -87,6 +87,7 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
     target = SimpleNamespace(id=1, status=1)
     order_locks = MagicMock()
     recharge_locks = MagicMock()
+    flash_sale_claim_locks = MagicMock()
     locked_customers = MagicMock()
     locked_customers.scalars.return_value.all.return_value = [target, source]
     foreign_order = MagicMock()
@@ -94,7 +95,7 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
     foreign_recharge = MagicMock()
     foreign_recharge.scalar_one_or_none.return_value = None
     db = AsyncMock()
-    # merge() now locks payment parents (Orders, RechargeOrders) before Customers,
+    # merge() locks payment parents and outstanding claims before Customers,
     # then performs the store-scope authorization probes.
     gate_locks = MagicMock()
     gate_locks.scalars.return_value.all.return_value = [1, 2]
@@ -103,6 +104,7 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
             gate_locks,
             order_locks,
             recharge_locks,
+            flash_sale_claim_locks,
             locked_customers,
             foreign_order,
             foreign_recharge,

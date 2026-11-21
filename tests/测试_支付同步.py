@@ -5,6 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_customer_gate_for_payment_unit_mocks(monkeypatch):
+    """These tests exercise payment behavior with fake sessions, not Gate SQL."""
+    monkeypatch.setattr(
+        "app.services.payment_service.lock_customer_write_gates",
+        AsyncMock(),
+    )
+
+
 from app.core.exceptions import AppException
 from app.services.payment_service import PaymentService
 from app.services.wechat_pay_client import build_jsapi_pay_params

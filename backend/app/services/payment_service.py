@@ -1497,8 +1497,8 @@ class PaymentService:
             owner_id = await db.scalar(
                 select(Order.customer_id).where(Order.id == int(order_id))
             )
-            if owner_id is not None:
-                await lock_customer_write_gates(db, [int(owner_id)])
+            if isinstance(owner_id, int) and not isinstance(owner_id, bool):
+                await lock_customer_write_gates(db, [owner_id])
             await db.execute(
                 select(Order)
                 .where(Order.id == int(order_id))

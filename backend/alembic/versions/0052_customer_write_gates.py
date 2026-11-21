@@ -50,6 +50,11 @@ def upgrade() -> None:
             "AFTER INSERT ON customers FOR EACH ROW "
             "INSERT IGNORE INTO customer_write_gates (customer_id) VALUES (NEW.id)"
         )
+        op.execute(
+            "CREATE TRIGGER trg_customers_delete_write_gate "
+            "AFTER DELETE ON customers FOR EACH ROW "
+            "DELETE FROM customer_write_gates WHERE customer_id = OLD.id"
+        )
 
     # Idempotent backfill: supports partially provisioned environments and can
     # be safely re-run after a failed deployment.
@@ -67,6 +72,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
     if conn.dialect.name == "mysql":
+        op.execute("DROP TRIGGER IF EXISTS trg_customers_delete_write_gate")
         op.execute("DROP TRIGGER IF EXISTS trg_customers_create_write_gate")
     inspector = sa.inspect(conn)
     if inspector.has_table("marketing_flash_sale_claims") and "status_reason" in {

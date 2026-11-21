@@ -455,10 +455,12 @@ async def test_customer_merge_locks_orders_and_recharges_before_customers():
         str(statement.compile(dialect=mysql.dialect())).lower()
         for statement in session.statements
     ]
-    assert len(sql) == 3
+    assert len(sql) == 4
     assert "from orders" in sql[0] and "for update" in sql[0]
     assert "order by orders.id" in sql[0]
     assert "from recharge_orders" in sql[1] and "for update" in sql[1]
     assert "order by recharge_orders.id" in sql[1]
-    assert "from customers" in sql[2] and "for update" in sql[2]
-    assert "order by customers.id" in sql[2]
+    assert "from marketing_flash_sale_claims" in sql[2] and "for update" in sql[2]
+    assert "order by marketing_flash_sale_claims.id" in sql[2]
+    assert "from customers" in sql[3] and "for update" in sql[3]
+    assert "order by customers.id" in sql[3]
