@@ -22,6 +22,7 @@ from app.models import (
 from app.services import flash_sale_service
 
 
+@pytest.mark.mysql
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("limit", "remaining", "expect_success"),
@@ -35,6 +36,9 @@ async def test_expired_claim_transition_is_atomic_with_replacement(
     db_session, monkeypatch, limit, remaining, expect_success
 ):
     """Failed checks must not leave a flushed EXPIRED state; success must persist it."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
     now = flash_sale_service.naive_local_now()
     monkeypatch.setattr(flash_sale_service, "naive_local_now", lambda: now)
 
