@@ -114,3 +114,72 @@ def test_same_name_trigger_with_different_definition_fails_closed():
         _ensure(conn)
 
     assert conn.created == []
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_mysql_trigger_installation_can_resume_after_first_trigger_committed(db_session):
+    """Exercise information_schema checks against MySQL after a partial trigger install."""
+    import uuid
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind.sync_engine
+    suffix = uuid.uuid4().hex[:12]
+    insert_name = f"trg_test_cwg_i_{suffix}"
+    delete_name = f"trg_test_cwg_d_{suffix}"
+    insert_action = (
+        "INSERT IGNORE INTO customer_write_gates (customer_id) VALUES (NEW.id)"
+    )
+    delete_action = "DELETE FROM customer_write_gates WHERE customer_id = OLD.id"
+    insert_sql = (
+        f"CREATE TRIGGER {insert_name} AFTER INSERT ON customers FOR EACH ROW "
+        f"{insert_action}"
+    )
+    delete_sql = (
+        f"CREATE TRIGGER {delete_name} AFTER DELETE ON customers FOR EACH ROW "
+        f"{delete_action}"
+    )
+
+    insert_args = {
+        "name": insert_name,
+        "table": "customers",
+        "timing": "AFTER",
+        "event": "INSERT",
+        "action": insert_action,
+        "create_sql": insert_sql,
+    }
+    delete_args = {
+        "name": delete_name,
+        "table": "customers",
+        "timing": "AFTER",
+        "event": "DELETE",
+        "action": delete_action,
+        "create_sql": delete_sql,
+    }
+
+    try:
+        with engine.connect() as conn:
+            # Simulate a failed migration after its first CREATE TRIGGER committed.
+            migration._ensure_mysql_trigger(conn, **insert_args)
+            migration._ensure_mysql_trigger(conn, **insert_args)
+            migration._ensure_mysql_trigger(conn, **delete_args)
+            # A complete retry must accept both matching definitions without DDL.
+            migration._ensure_mysql_trigger(conn, **insert_args)
+            migration._ensure_mysql_trigger(conn, **delete_args)
+
+            found = conn.execute(
+                migration.sa.text(
+                    "SELECT COUNT(*) FROM information_schema.TRIGGERS "
+                    "WHERE TRIGGER_SCHEMA = DATABASE() "
+                    "AND TRIGGER_NAME IN (:insert_name, :delete_name)"
+                ),
+                {"insert_name": insert_name, "delete_name": delete_name},
+            ).scalar_one()
+            assert int(found) == 2
+    finally:
+        with engine.connect() as conn:
+            conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {delete_name}")
+            conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {insert_name}")
