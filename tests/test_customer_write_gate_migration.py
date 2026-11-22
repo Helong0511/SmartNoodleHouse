@@ -126,7 +126,7 @@ async def test_mysql_trigger_installation_can_resume_after_first_trigger_committ
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
 
-    engine = db_session.bind.sync_engine
+    engine = db_session.bind
     suffix = uuid.uuid4().hex[:12]
     insert_name = f"trg_test_cwg_i_{suffix}"
     delete_name = f"trg_test_cwg_d_{suffix}"
@@ -160,17 +160,17 @@ async def test_mysql_trigger_installation_can_resume_after_first_trigger_committ
         "create_sql": delete_sql,
     }
 
-    try:
-        with engine.connect() as conn:
+    def exercise(sync_conn):
+        try:
             # Simulate a failed migration after its first CREATE TRIGGER committed.
-            migration._ensure_mysql_trigger(conn, **insert_args)
-            migration._ensure_mysql_trigger(conn, **insert_args)
-            migration._ensure_mysql_trigger(conn, **delete_args)
+            migration._ensure_mysql_trigger(sync_conn, **insert_args)
+            migration._ensure_mysql_trigger(sync_conn, **insert_args)
+            migration._ensure_mysql_trigger(sync_conn, **delete_args)
             # A complete retry must accept both matching definitions without DDL.
-            migration._ensure_mysql_trigger(conn, **insert_args)
-            migration._ensure_mysql_trigger(conn, **delete_args)
+            migration._ensure_mysql_trigger(sync_conn, **insert_args)
+            migration._ensure_mysql_trigger(sync_conn, **delete_args)
 
-            found = conn.execute(
+            found = sync_conn.execute(
                 migration.sa.text(
                     "SELECT COUNT(*) FROM information_schema.TRIGGERS "
                     "WHERE TRIGGER_SCHEMA = DATABASE() "
@@ -179,7 +179,9 @@ async def test_mysql_trigger_installation_can_resume_after_first_trigger_committ
                 {"insert_name": insert_name, "delete_name": delete_name},
             ).scalar_one()
             assert int(found) == 2
-    finally:
-        with engine.connect() as conn:
-            conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {delete_name}")
-            conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {insert_name}")
+        finally:
+            sync_conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {delete_name}")
+            sync_conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {insert_name}")
+
+    async with engine.connect() as conn:
+        await conn.run_sync(exercise)
