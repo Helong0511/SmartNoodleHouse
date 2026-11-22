@@ -1,0 +1,102 @@
+"""MySQL regression: customer order creation must reject a pre-authenticated customer merged concurrently."""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy import delete, event, func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.core.exceptions import AppException
+from app.models import Customer, Order, Store
+from app.schemas.order import OrderCreate
+from app.services.customer_merge_service import CustomerMergeService
+from app.api.orders import create_order as create_customer_order
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_customer_order_create_rejects_stale_customer_after_real_merge(db_session):
+    """The real customer endpoint must wait on the lifecycle gate and fail closed."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"CO-{suffix[:20]}", name="Customer order merge gate race")
+        source = Customer(customer_no=f"COS-{suffix[:27]}")
+        target = Customer(customer_no=f"COT-{suffix[:27]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        store_id, source_id, target_id = int(store.id), int(source.id), int(target.id)
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+
+    def observe_gate_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            gate_waiting.set()
+
+    async with maker() as merge_db, maker() as order_db:
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            result = await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=target_id,
+                source_customer_id=source_id,
+                reason="MySQL merge/customer order create concurrency regression",
+            )
+        assert int(result["source_customer_id"]) == source_id
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            with patch(
+                "app.api.orders.AuditService.log",
+                new_callable=AsyncMock,
+            ):
+                attempt = asyncio.create_task(
+                    create_customer_order(
+                        OrderCreate(
+                            store_id=store_id,
+                            items=[{"product_id": 1, "quantity": 1}],
+                            idempotency_key=f"customer-order-{suffix[:24]}",
+                            dining_type="TAKEAWAY",
+                        ),
+                        request=SimpleNamespace(headers={}),
+                        db=order_db,
+                        customer=SimpleNamespace(id=source_id),
+                    )
+                )
+                await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+                await merge_db.commit()
+                with pytest.raises(AppException) as exc:
+                    await asyncio.wait_for(attempt, timeout=15)
+                assert exc.value.status_code == 401
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            if order_db.in_transaction():
+                await order_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        source_row = await verify.get(Customer, source_id)
+        assert source_row is not None and source_row.account_status == "DISABLED"
+        count = await verify.scalar(
+            select(func.count()).select_from(Order).where(
+                Order.store_id == store_id,
+                Order.customer_id == source_id,
+            )
+        )
+        assert count == 0
+        await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
+        await verify.execute(delete(Store).where(Store.id == store_id))
+        await verify.commit()
