@@ -123,7 +123,7 @@ async def test_flash_sale_verify_commits_before_real_customer_merge_preserves_us
         pytest.skip("requires MySQL 8 / InnoDB")
 
     from decimal import Decimal
-    from sqlalchemy import func, select
+    from sqlalchemy import select
     from app.models import (
         FlashSaleConfig,
         FlashSaleStock,
