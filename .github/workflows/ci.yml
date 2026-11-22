@@ -411,7 +411,8 @@ jobs:
             tests/test_order_lifecycle_mysql_concurrency.py \
             tests/test_recommendation_consent_serialization.py \
             tests/test_flash_sale_customer_lock_mysql.py \
-            tests/test_recharge_payment_customer_ownership.py
+            tests/test_recharge_payment_customer_ownership.py \
+            tests/test_customer_activate_merge_mysql.py
   frontend-build:
     runs-on: ubuntu-latest
     strategy:
