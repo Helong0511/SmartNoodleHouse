@@ -1,5 +1,6 @@
 """Regression contracts for recharge/payment ownership across customer merges."""
 import inspect
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -57,23 +58,14 @@ def test_recharge_callback_and_query_defer_parent_lock_to_settlement():
     query = inspect.getsource(PaymentService._settle_from_query)
     assert "SimpleNamespace(id=int(payment.recharge_order_id))" in callback
     assert "SimpleNamespace(id=int(payment.recharge_order_id))" in query
-    assert ".with_for_update()" not in callback[callback.index("if parsed[\"status\"] == \"PAID\""):callback.index("await cls._settle_recharge_payment")]
+    assert ".with_for_update()" not in callback[callback.index('if parsed["status"] == "PAID"'):callback.index("await cls._settle_recharge_payment")]
     assert ".with_for_update()" not in query[query.index("# 储值充值单"):query.index("await cls._settle_recharge_payment")]
-
 
 
 @pytest.mark.mysql
 @pytest.mark.asyncio
-async def test_mysql_recharge_payment_creation_aborts_when_merge_changes_owner(
-    db_session,
-):
-    """A payment request that observed the old owner must not cross a merge.
-
-    Session A owns both customer gates and simulates the ownership-changing
-    part of merge. Session B observes the source owner, then blocks acquiring
-    that gate. After A commits, B's locking current-read must detect that the
-    recharge now belongs to the target and abort before creating a Payment.
-    """
+async def test_mysql_recharge_payment_creation_aborts_after_real_customer_merge(db_session):
+    """A stale payment request must not create a payment after the real merge moves its recharge."""
     import asyncio
     import uuid
 
@@ -82,7 +74,7 @@ async def test_mysql_recharge_payment_creation_aborts_when_merge_changes_owner(
 
     from app.core.exceptions import AppException
     from app.models import Customer, Payment, RechargeOrder, Store
-    from app.services.customer_write_gate import lock_customer_write_gates
+    from app.services.customer_merge_service import CustomerMergeService
 
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
@@ -124,14 +116,18 @@ async def test_mysql_recharge_payment_creation_aborts_when_merge_changes_owner(
         assert stale_recharge is not None
         assert int(stale_recharge.customer_id) == source_id
 
-        await lock_customer_write_gates(merge_db, [source_id, target_id])
-        source_row = await merge_db.get(Customer, source_id)
-        recharge_row = await merge_db.get(RechargeOrder, recharge_id)
-        assert source_row is not None and recharge_row is not None
-        source_row.status = 0
-        source_row.account_status = "DISABLED"
-        recharge_row.customer_id = target_id
-        await merge_db.flush()
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            result = await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=target_id,
+                source_customer_id=source_id,
+                reason="MySQL merge/recharge payment concurrency regression",
+            )
+        assert int(result["source_customer_id"]) == source_id
+        assert result["stats"]["recharge_orders"] == 1
 
         event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
         try:
