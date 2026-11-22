@@ -642,6 +642,7 @@ async def test_lock_order_then_payment_refreshes_locked_payment_from_database():
     peek_result = MagicMock()
     peek_result.first.return_value = (99, None)
     order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = SimpleNamespace(id=99, customer_id=None)
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
     db = AsyncMock()
@@ -795,7 +796,7 @@ async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     current_recharge = SimpleNamespace(id=121, status="PAID")
     current_payment = SimpleNamespace(id=122, status="PAID")
     recharge_result = MagicMock()
-    recharge_result.scalar_one.return_value = current_recharge
+    recharge_result.scalar_one_or_none.return_value = current_recharge
     payment_result = MagicMock()
     payment_result.scalar_one.return_value = current_payment
     db = AsyncMock()
