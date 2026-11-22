@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_CU, generate_no
 from app.core.exceptions import AppException
 from app.core.response import money, now_local, serialize_dt
+from app.services.customer_write_gate import lock_active_customer_for_write
 from app.models import (
     Customer,
     CustomerAlipayAccount,
@@ -1649,13 +1650,9 @@ class CustomerService:
         幂等开通会员：仅首次 GUEST→MEMBER 返回 newly_activated=True（可发欢迎券等副作用）。
         已是 MEMBER 时只更新可选资料，不重复副作用。
         """
-        # 会员行锁覆盖状态迁移与调用方后续发券所在事务，避免双击并发均认为首次开通。
-        locked = (
-            await db.execute(select(Customer).where(Customer.id == customer.id).with_for_update())
-        ).scalar_one_or_none()
-        if not locked or int(locked.status or 0) != 1:
-            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
-        customer = locked
+        # Lifecycle gate → current Customer read: serialize activation with merge/revocation,
+        # and refresh a possibly stale authenticated ORM instance after waiting for the gate.
+        customer = await lock_active_customer_for_write(db, int(customer.id))
         newly = not CustomerService.is_member(customer)
         if newly:
             customer.member_status = "MEMBER"
