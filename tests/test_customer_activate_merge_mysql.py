@@ -1,8 +1,9 @@
-"""MySQL regression for member activation racing customer merge."""
+"""MySQL regression for the real customer merge racing member activation."""
 from __future__ import annotations
 
 import asyncio
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import delete, event
@@ -10,12 +11,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
 from app.models import Customer
+from app.services.customer_merge_service import CustomerMergeService
 from app.services.customer_service import CustomerService
 
 
 @pytest.mark.mysql
 @pytest.mark.asyncio
-async def test_member_activation_rechecks_customer_after_merge_gate_wait(db_session):
+async def test_member_activation_rechecks_customer_after_real_merge_gate_wait(db_session):
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
 
@@ -23,10 +25,11 @@ async def test_member_activation_rechecks_customer_after_merge_gate_wait(db_sess
     maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
     suffix = uuid.uuid4().hex
     async with maker() as setup:
-        customer = Customer(customer_no=f"ACT-{suffix[:30]}")
-        setup.add(customer)
+        target = Customer(customer_no=f"ACT-T-{suffix[:27]}")
+        source = Customer(customer_no=f"ACT-S-{suffix[:27]}")
+        setup.add_all([target, source])
         await setup.flush()
-        customer_id = int(customer.id)
+        target_id, source_id = int(target.id), int(source.id)
         await setup.commit()
 
     gate_waiting = asyncio.Event()
@@ -37,24 +40,31 @@ async def test_member_activation_rechecks_customer_after_merge_gate_wait(db_sess
             gate_waiting.set()
 
     async with maker() as merge_db, maker() as activation_db:
-        merge_customer = await merge_db.get(Customer, customer_id)
-        stale_customer = await activation_db.get(Customer, customer_id)
-        assert merge_customer is not None and stale_customer is not None
-        assert stale_customer.status == 1
+        stale_customer = await activation_db.get(Customer, source_id)
+        assert stale_customer is not None and stale_customer.status == 1
 
-        # Simulate merge holding the lifecycle gate and disabling the source account.
-        from app.services.customer_write_gate import lock_customer_write_gates
-
-        await lock_customer_write_gates(merge_db, [customer_id])
-        merge_customer.status = 0
-        merge_customer.account_status = "DISABLED"
-        await merge_db.flush()
+        # Exercise the production merge service, not a hand-written owner/status mutation.
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            result = await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=target_id,
+                source_customer_id=source_id,
+                reason="MySQL merge/activation concurrency regression",
+            )
+        assert int(result["source_customer_id"]) == source_id
+        assert result["stats"]["flash_sale_claims_cancelled"] == 0
 
         event.listen(engine.sync_engine, "before_cursor_execute", observe_gate)
         try:
-            task = asyncio.create_task(CustomerService.activate_member(activation_db, stale_customer))
+            task = asyncio.create_task(
+                CustomerService.activate_member(activation_db, stale_customer)
+            )
             await asyncio.wait_for(gate_waiting.wait(), timeout=10)
             await merge_db.commit()
+
             with pytest.raises(AppException) as exc:
                 await asyncio.wait_for(task, timeout=15)
             assert exc.value.status_code == 401
@@ -69,5 +79,5 @@ async def test_member_activation_rechecks_customer_after_merge_gate_wait(db_sess
                 await merge_db.rollback()
 
     async with maker() as cleanup:
-        await cleanup.execute(delete(Customer).where(Customer.id == customer_id))
+        await cleanup.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
         await cleanup.commit()
