@@ -1,6 +1,8 @@
 """Regression contracts for recharge/payment ownership across customer merges."""
 import inspect
 
+import pytest
+
 from app.api import wallet
 from app.services.payment_service import PaymentService
 
