@@ -15,6 +15,56 @@ branch_labels = None
 depends_on = None
 
 
+def _normalize_trigger_sql(value: str) -> str:
+    """Normalize harmless MySQL formatting differences before comparing trigger bodies."""
+    return " ".join(str(value).replace("`", "").strip().rstrip(";").lower().split())
+
+
+def _ensure_mysql_trigger(
+    conn: sa.engine.Connection,
+    *,
+    name: str,
+    table: str,
+    timing: str,
+    event: str,
+    action: str,
+    create_sql: str,
+) -> None:
+    """Create a migration-owned trigger, or verify the exact trigger already exists.
+
+    MySQL has no CREATE TRIGGER IF NOT EXISTS. A failed migration can therefore
+    leave earlier trigger DDL committed while Alembic has not recorded this
+    revision. Checking the existing definition makes a retry safe without
+    silently accepting a same-named trigger with different behavior.
+    """
+    existing = conn.execute(
+        sa.text(
+            "SELECT EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT "
+            "FROM information_schema.TRIGGERS "
+            "WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = :name"
+        ),
+        {"name": name},
+    ).mappings().one_or_none()
+
+    if existing is None:
+        conn.exec_driver_sql(create_sql)
+        return
+
+    actual_metadata = (
+        str(existing["EVENT_OBJECT_TABLE"]).lower(),
+        str(existing["ACTION_TIMING"]).upper(),
+        str(existing["EVENT_MANIPULATION"]).upper(),
+    )
+    expected_metadata = (table.lower(), timing.upper(), event.upper())
+    if actual_metadata != expected_metadata or _normalize_trigger_sql(
+        existing["ACTION_STATEMENT"]
+    ) != _normalize_trigger_sql(action):
+        raise RuntimeError(
+            f"Existing MySQL trigger {name!r} does not match migration 0052; "
+            "inspect and reconcile it before retrying the migration."
+        )
+
+
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
@@ -42,18 +92,37 @@ def upgrade() -> None:
             sa.Column("status_reason", sa.String(length=40), nullable=True),
         )
 
-    # Ensure all future inserts, including SQLAlchemy Core/bulk inserts that
-    # bypass ORM mapper events, receive a gate in the same database transaction.
+    # MySQL commits trigger DDL independently of the Alembic transaction.
+    # Make each installation independently retryable after partial failure.
     if conn.dialect.name == "mysql":
-        op.execute(
-            "CREATE TRIGGER trg_customers_create_write_gate "
-            "AFTER INSERT ON customers FOR EACH ROW "
-            "INSERT IGNORE INTO customer_write_gates (customer_id) VALUES (NEW.id)"
+        _ensure_mysql_trigger(
+            conn,
+            name="trg_customers_create_write_gate",
+            table="customers",
+            timing="AFTER",
+            event="INSERT",
+            action=(
+                "INSERT IGNORE INTO customer_write_gates (customer_id) "
+                "VALUES (NEW.id)"
+            ),
+            create_sql=(
+                "CREATE TRIGGER trg_customers_create_write_gate "
+                "AFTER INSERT ON customers FOR EACH ROW "
+                "INSERT IGNORE INTO customer_write_gates (customer_id) VALUES (NEW.id)"
+            ),
         )
-        op.execute(
-            "CREATE TRIGGER trg_customers_delete_write_gate "
-            "AFTER DELETE ON customers FOR EACH ROW "
-            "DELETE FROM customer_write_gates WHERE customer_id = OLD.id"
+        _ensure_mysql_trigger(
+            conn,
+            name="trg_customers_delete_write_gate",
+            table="customers",
+            timing="AFTER",
+            event="DELETE",
+            action="DELETE FROM customer_write_gates WHERE customer_id = OLD.id",
+            create_sql=(
+                "CREATE TRIGGER trg_customers_delete_write_gate "
+                "AFTER DELETE ON customers FOR EACH ROW "
+                "DELETE FROM customer_write_gates WHERE customer_id = OLD.id"
+            ),
         )
 
     # Idempotent backfill: supports partially provisioned environments and can
