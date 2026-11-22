@@ -166,3 +166,123 @@ async def test_mysql_recharge_payment_creation_aborts_after_real_customer_merge(
         await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
         await verify.execute(delete(Store).where(Store.id == store_id))
         await verify.commit()
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_mysql_recharge_settlement_aborts_after_real_customer_merge(db_session):
+    """A stale provider settlement must not credit a recharge moved by a real merge."""
+    import asyncio
+    import uuid
+
+    from sqlalchemy import delete, event, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.exceptions import AppException
+    from app.models import Customer, Payment, RechargeOrder, Store
+    from app.services.customer_merge_service import CustomerMergeService
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"RS-{suffix[:20]}", name="Recharge settlement gate race")
+        source = Customer(customer_no=f"RSS-{suffix[:27]}")
+        target = Customer(customer_no=f"RST-{suffix[:27]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        recharge = RechargeOrder(
+            recharge_no=f"RSR-{suffix[:29]}",
+            customer_id=source.id,
+            store_id=store.id,
+            pay_amount="10.00",
+            credit_principal="10.00",
+            credit_gift="0.00",
+            status="PENDING",
+            channel="WECHAT",
+        )
+        setup.add(recharge)
+        await setup.flush()
+        payment = Payment(
+            payment_no=f"RSP-{suffix[:29]}",
+            recharge_order_id=recharge.id,
+            customer_id=source.id,
+            provider="WECHAT",
+            channel="MINIPROGRAM",
+            amount="10.00",
+            status="PENDING",
+        )
+        setup.add(payment)
+        await setup.flush()
+        source_id, target_id = int(source.id), int(target.id)
+        recharge_id, payment_id, store_id = int(recharge.id), int(payment.id), int(store.id)
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+
+    def observe_gate_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            gate_waiting.set()
+
+    async with maker() as merge_db, maker() as settlement_db:
+        stale_recharge = await settlement_db.get(RechargeOrder, recharge_id)
+        stale_payment = await settlement_db.get(Payment, payment_id)
+        assert stale_recharge is not None and stale_payment is not None
+        assert int(stale_recharge.customer_id) == source_id
+
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            result = await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=target_id,
+                source_customer_id=source_id,
+                reason="MySQL merge/recharge settlement concurrency regression",
+            )
+        assert int(result["source_customer_id"]) == source_id
+        assert result["stats"]["recharge_orders"] == 1
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            attempt = asyncio.create_task(
+                PaymentService._settle_recharge_payment(
+                    settlement_db,
+                    payment=stale_payment,
+                    recharge=stale_recharge,
+                    provider="WECHAT",
+                    source="MYSQL_MERGE_RACE_TEST",
+                    provider_trade_no=f"trade-{suffix[:24]}",
+                )
+            )
+            await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+            await merge_db.commit()
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(attempt, timeout=15)
+            assert exc.value.code == 40906
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            if settlement_db.in_transaction():
+                await settlement_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        current_recharge = await verify.get(RechargeOrder, recharge_id)
+        current_payment = await verify.get(Payment, payment_id)
+        source_row = await verify.get(Customer, source_id)
+        assert current_recharge is not None
+        assert int(current_recharge.customer_id) == target_id
+        assert current_recharge.status == "PENDING"
+        assert current_payment is not None and current_payment.status == "PENDING"
+        assert source_row is not None and source_row.account_status == "DISABLED"
+        await verify.execute(delete(Payment).where(Payment.id == payment_id))
+        await verify.execute(delete(RechargeOrder).where(RechargeOrder.id == recharge_id))
+        await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
+        await verify.execute(delete(Store).where(Store.id == store_id))
+        await verify.commit()
