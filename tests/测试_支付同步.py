@@ -793,7 +793,7 @@ async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks
 async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     stale_recharge = SimpleNamespace(id=121, status="PENDING")
     stale_payment = SimpleNamespace(id=122, status="PENDING")
-    current_recharge = SimpleNamespace(id=121, status="PAID")
+    current_recharge = SimpleNamespace(id=121, customer_id=1, status="PAID")
     current_payment = SimpleNamespace(id=122, status="PAID")
     recharge_result = MagicMock()
     recharge_result.scalar_one_or_none.return_value = current_recharge
