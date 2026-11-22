@@ -14,9 +14,10 @@ Adding a customer lock after an operation-specific row lock is unsafe: merge can
 
 The implementation uses a dedicated `CustomerWriteGate` table with exactly one durable row per customer:
 
-- `customer_id`: primary key and FK to `customers.id`;
-- optional `created_at` / `updated_at` timestamps;
-- no business state; the row exists solely as a transaction mutex.
+- `customer_id`: unsigned customer identifier and primary key; the table intentionally has no FK to `customers.id`;
+- no timestamp columns or business state; the row exists solely as a transaction mutex.
+
+The lack of an FK is deliberate so test-schema teardown can drop `customers` independently. Production lifecycle integrity is maintained by migration backfill plus same-transaction MySQL `AFTER INSERT` / `AFTER DELETE` triggers; the ORM `after_insert` hook additionally provisions rows for SQLite `create_all()` tests. Because the gate has no FK, operational integrity checks must periodically detect both customers missing gates and orphan gate rows. Orphan rows should be removed only after confirming no customer transaction can still reference the deleted customer.
 
 The gate row must be created in the same transaction as every new customer. A migration must backfill one row for every existing customer before application code depends on it. Do not lazily create missing gate rows in request handlers: concurrent insert-or-lock behavior would make the mutex itself racy.
 
@@ -69,4 +70,4 @@ For every case, assert both sessions finish within timeout, inspect committed ow
 5. Add and run the MySQL 8 two-session matrix above.
 6. Only after all participating paths are converted and MySQL tests pass, treat the gate as an enforced invariant.
 
-This document does not claim the gate exists or that any race is fixed.
+This document records the gate implementation and its intended lock protocol on the PR branch. It does not claim that the full MySQL 8 concurrency matrix has passed: the matrix remains a release gate until each participating path is exercised against the real `CustomerMergeService.merge()` implementation and committed ownership is checked from a third session.
