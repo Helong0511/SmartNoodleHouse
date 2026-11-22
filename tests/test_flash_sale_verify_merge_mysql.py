@@ -243,6 +243,8 @@ async def test_flash_sale_verify_commits_before_real_customer_merge_preserves_us
                 await asyncio.wait_for(merge_waiting.wait(), timeout=10)
                 await verify_db.commit()
                 merged = await asyncio.wait_for(merge_task, timeout=15)
+                # CustomerMergeService.flushes but leaves transaction ownership to caller.
+                await merge_db.commit()
             assert merged["stats"]["flash_sale_claims_cancelled"] == 0
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", observe_merge_gate)
