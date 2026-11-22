@@ -57,3 +57,114 @@ def test_recharge_callback_and_query_defer_parent_lock_to_settlement():
     assert "SimpleNamespace(id=int(payment.recharge_order_id))" in query
     assert ".with_for_update()" not in callback[callback.index("if parsed[\"status\"] == \"PAID\""):callback.index("await cls._settle_recharge_payment")]
     assert ".with_for_update()" not in query[query.index("# 储值充值单"):query.index("await cls._settle_recharge_payment")]
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_mysql_recharge_payment_creation_aborts_when_merge_changes_owner(
+    db_session,
+):
+    """A payment request that observed the old owner must not cross a merge.
+
+    Session A owns both customer gates and simulates the ownership-changing
+    part of merge. Session B observes the source owner, then blocks acquiring
+    that gate. After A commits, B's locking current-read must detect that the
+    recharge now belongs to the target and abort before creating a Payment.
+    """
+    import asyncio
+    import uuid
+
+    from sqlalchemy import delete, event, func, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.exceptions import AppException
+    from app.models import Customer, Payment, RechargeOrder, Store
+    from app.services.customer_write_gate import lock_customer_write_gates
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"RG-{suffix[:20]}", name="Recharge gate race")
+        source = Customer(customer_no=f"RGS-{suffix[:28]}")
+        target = Customer(customer_no=f"RGT-{suffix[:28]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        recharge = RechargeOrder(
+            recharge_no=f"RGR-{suffix[:30]}",
+            customer_id=source.id,
+            store_id=store.id,
+            pay_amount="10.00",
+            credit_principal="10.00",
+            credit_gift="0.00",
+            status="PENDING",
+            channel="WECHAT",
+        )
+        setup.add(recharge)
+        await setup.flush()
+        source_id, target_id = int(source.id), int(target.id)
+        recharge_id, store_id = int(recharge.id), int(store.id)
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+
+    def observe_gate_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            gate_waiting.set()
+
+    async with maker() as merge_db, maker() as payment_db:
+        stale_recharge = await payment_db.get(RechargeOrder, recharge_id)
+        assert stale_recharge is not None
+        assert int(stale_recharge.customer_id) == source_id
+
+        await lock_customer_write_gates(merge_db, [source_id, target_id])
+        source_row = await merge_db.get(Customer, source_id)
+        recharge_row = await merge_db.get(RechargeOrder, recharge_id)
+        assert source_row is not None and recharge_row is not None
+        source_row.status = 0
+        source_row.account_status = "DISABLED"
+        recharge_row.customer_id = target_id
+        await merge_db.flush()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            attempt = asyncio.create_task(
+                PaymentService.create_recharge_payment(
+                    payment_db,
+                    recharge=stale_recharge,
+                    provider="WECHAT",
+                    customer_id=source_id,
+                )
+            )
+            await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+            await merge_db.commit()
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(attempt, timeout=15)
+            assert exc.value.code == 40906
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            if payment_db.in_transaction():
+                await payment_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        current = await verify.get(RechargeOrder, recharge_id)
+        source_row = await verify.get(Customer, source_id)
+        assert current is not None and int(current.customer_id) == target_id
+        assert source_row is not None and source_row.account_status == "DISABLED"
+        count = await verify.scalar(
+            select(func.count()).select_from(Payment).where(
+                Payment.recharge_order_id == recharge_id
+            )
+        )
+        assert count == 0
+        await verify.execute(delete(RechargeOrder).where(RechargeOrder.id == recharge_id))
+        await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
+        await verify.execute(delete(Store).where(Store.id == store_id))
+        await verify.commit()
