@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -14,6 +14,7 @@ from app.core.exceptions import AppException
 from app.models import Customer, FlashSaleClaim, MarketingCampaign, Store
 from app.services.customer_merge_service import CustomerMergeService
 from app.services.flash_sale_service import FlashSaleService
+from app.core.response import naive_local_now
 
 
 @pytest.mark.mysql
@@ -51,8 +52,8 @@ async def test_flash_sale_verify_observes_claim_cancelled_by_real_merge(db_sessi
             unit_no=1,
             claim_no=f"FSM{suffix[:24]}",
             status="CLAIMED",
-            claimed_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=1),
+            claimed_at=naive_local_now(),
+            expires_at=naive_local_now() + timedelta(hours=1),
         )
         setup.add(claim)
         await setup.flush()
@@ -97,8 +98,10 @@ async def test_flash_sale_verify_observes_claim_cancelled_by_real_merge(db_sessi
 
             with pytest.raises(AppException) as exc:
                 await asyncio.wait_for(verify_task, timeout=15)
-            assert exc.value.status_code == 400
-            assert "已取消" in str(exc.value.message if hasattr(exc.value, "message") else exc.value)
+            # Merge disables the source customer; verify fails closed at the customer gate
+            # before it can expose the claim cancellation state to a stale identity.
+            assert exc.value.status_code == 401
+            assert "顾客不存在或已禁用" in str(exc.value.message if hasattr(exc.value, "message") else exc.value)
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", observe_gate)
             if verify_db.in_transaction():
@@ -195,8 +198,8 @@ async def test_flash_sale_verify_commits_before_real_customer_merge_preserves_us
             unit_no=1,
             claim_no=f"FSW{suffix[:24]}",
             status="CLAIMED",
-            claimed_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=1),
+            claimed_at=naive_local_now(),
+            expires_at=naive_local_now() + timedelta(hours=1),
         )
         setup.add_all([config, stock, claim])
         await setup.flush()
