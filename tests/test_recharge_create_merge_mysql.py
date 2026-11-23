@@ -94,7 +94,7 @@ async def test_mysql_recharge_create_endpoint_rejects_customer_after_real_merge(
                             channel_type="native",
                             idempotency_key=f"recharge-{suffix[:24]}",
                         ),
-                        request=SimpleNamespace(),
+                        request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
                         db=recharge_db,
                         customer=SimpleNamespace(id=source_id),
                     )
