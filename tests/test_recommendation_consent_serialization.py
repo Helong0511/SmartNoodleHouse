@@ -137,6 +137,47 @@ async def test_profile_learning_rejects_order_owner_changed_while_waiting_for_ga
 
 
 @pytest.mark.asyncio
+async def test_profile_learning_lock_order_is_gate_order_customer(monkeypatch):
+    order = Order(id=941, customer_id=95, payment_status="PAID")
+    customer = Customer(id=95, customer_no="LOCK-95", recommend_opt_in=1)
+    entities = []
+    gate_calls = []
+
+    class Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class Session:
+        async def get(self, model, order_id):
+            assert model is Order
+            assert order_id == 941
+            return order
+
+        async def execute(self, statement):
+            entity = statement.column_descriptions[0]["entity"]
+            entities.append(entity)
+            return Result(order if entity is Order else customer)
+
+    async def lock_gates(_db, customer_ids):
+        gate_calls.append(list(customer_ids))
+
+    from app.services import customer_write_gate
+
+    monkeypatch.setattr(customer_write_gate, "lock_customer_write_gates", lock_gates)
+    locked_order, locked_customer = await TasteLearningService._lock_order_customer_for_learning(
+        Session(), 941
+    )
+
+    assert locked_order is order
+    assert locked_customer is customer
+    assert gate_calls == [[95]]
+    assert entities == [Order, Customer]
+
+
+@pytest.mark.asyncio
 @pytest.mark.mysql
 @pytest.mark.parametrize("revoke_first", [False, True])
 async def test_mysql_consent_revocation_and_event_ingestion_are_serialized(
