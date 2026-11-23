@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.exceptions import AppException
 from app.models import Customer, Order, Store
 from app.schemas.order import OrderCreate
+from app.services import customer_merge_service as customer_merge_service_module
 from app.services.customer_merge_service import CustomerMergeService
 from app.api.orders import create_order as create_customer_order
 
@@ -198,3 +199,94 @@ async def test_customer_order_create_commits_before_real_merge(db_session):
         )
         assert order is not None
         assert int(order.customer_id) == target_id
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_opposite_direction_customer_merges_serialize_and_reject_disabled_target(db_session):
+    """Opposite-direction merges lock gates in one order; the loser cannot target a disabled account."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        lower = Customer(customer_no=f"MGLO-{suffix[:27]}")
+        higher = Customer(customer_no=f"MGHI-{suffix[:27]}")
+        setup.add_all([lower, higher])
+        await setup.flush()
+        lower_id, higher_id = int(lower.id), int(higher.id)
+        assert lower_id < higher_id
+        await setup.commit()
+
+    first_gate_acquired = asyncio.Event()
+    release_first_merge = asyncio.Event()
+    second_merge_waiting = asyncio.Event()
+
+    async with maker() as merge_a_db, maker() as merge_b_db:
+        connection_a = (await merge_a_db.connection()).sync_connection
+        original_lock = customer_merge_service_module.lock_customer_write_gates
+
+        async def pause_first_after_gates(db, customer_ids):
+            locked_ids = await original_lock(db, customer_ids)
+            if db is merge_a_db:
+                first_gate_acquired.set()
+                await asyncio.wait_for(release_first_merge.wait(), timeout=20)
+            return locked_ids
+
+        def observe_second_gate_wait(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if conn is not connection_a and "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+                second_merge_waiting.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_second_gate_wait)
+        try:
+            with patch.object(
+                customer_merge_service_module,
+                "lock_customer_write_gates",
+                new=pause_first_after_gates,
+            ), patch(
+                "app.services.customer_merge_service.AuditService.log",
+                new_callable=AsyncMock,
+            ):
+                async def run_merge(db, target_id, source_id):
+                    result = await CustomerMergeService.merge(
+                        db,
+                        target_customer_id=target_id,
+                        source_customer_id=source_id,
+                        reason="MySQL opposite-direction merge serialization regression",
+                    )
+                    await db.commit()
+                    return result
+
+                first_task = asyncio.create_task(run_merge(merge_a_db, lower_id, higher_id))
+                await asyncio.wait_for(first_gate_acquired.wait(), timeout=10)
+                second_task = asyncio.create_task(run_merge(merge_b_db, higher_id, lower_id))
+                await asyncio.wait_for(second_merge_waiting.wait(), timeout=10)
+                release_first_merge.set()
+                first_result, second_result = await asyncio.wait_for(
+                    asyncio.gather(first_task, second_task, return_exceptions=True),
+                    timeout=30,
+                )
+                assert isinstance(first_result, dict)
+                assert isinstance(second_result, AppException)
+                assert second_result.status_code == 40062
+        finally:
+            release_first_merge.set()
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_second_gate_wait)
+            for task in (locals().get("first_task"), locals().get("second_task")):
+                if task is not None and not task.done():
+                    task.cancel()
+            if merge_a_db.in_transaction():
+                await merge_a_db.rollback()
+            if merge_b_db.in_transaction():
+                await merge_b_db.rollback()
+
+    async with maker() as verify:
+        lower_row = await verify.get(Customer, lower_id)
+        higher_row = await verify.get(Customer, higher_id)
+        assert lower_row is not None and lower_row.status == 1
+        assert lower_row.account_status == "ACTIVE"
+        assert higher_row is not None and higher_row.status == 0
+        assert higher_row.account_status == "DISABLED"
