@@ -1580,6 +1580,14 @@ class PaymentService:
         order_id = int(refund.order_id) if refund.order_id is not None else 0
         if order_id <= 0:
             raise AppException(40302, "退款记录缺少有效订单关联")
+        # Match merge/payment settlement lock order: Customer Gate → Order → Payment.
+        # A plain owner peek chooses the gate without taking the parent lock; the
+        # subsequent current read detects a merge/rebind that won the race.
+        observed_owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == order_id)
+        )
+        if observed_owner_id is not None:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
         order = (
             await db.execute(
                 select(Order)
@@ -1590,6 +1598,10 @@ class PaymentService:
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "退款关联订单不存在")
+        locked_owner_id = int(order.customer_id) if order.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "退款订单顾客归属在加锁期间发生变化，请重试", status_code=409)
         payment = (
             await db.execute(
                 select(Payment)
