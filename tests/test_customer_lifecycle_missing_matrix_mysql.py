@@ -1,0 +1,441 @@
+"""Missing MySQL 8 lifecycle-gate race coverage for POS binding and flash claims."""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from decimal import Decimal
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy import delete, event, func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.core.exceptions import AppException
+from app.core.response import naive_local_now
+from app.models import (
+    Customer,
+    CustomerWriteGate,
+    FlashSaleClaim,
+    FlashSaleConfig,
+    FlashSaleStock,
+    MarketingCampaign,
+    Order,
+    Product,
+    ProductCategory,
+    Store,
+)
+from app.services.customer_merge_service import CustomerMergeService
+from app.services.flash_sale_service import FlashSaleService
+from app.services.customer_write_gate import lock_customer_write_gates
+
+
+async def _seed_flash_claim_race(maker, suffix: str):
+    now = naive_local_now()
+    async with maker() as setup:
+        store = Store(
+            store_no=f"FCR-{suffix[:18]}",
+            name="Flash claim lifecycle gate race",
+            status=1,
+        )
+        source = Customer(customer_no=f"FCRS-{suffix[:26]}")
+        target = Customer(customer_no=f"FCRT-{suffix[:26]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        category = ProductCategory(
+            store_id=int(store.id),
+            category_no=f"FCRC-{suffix[:16]}",
+            name="Flash claim concurrency",
+            status=1,
+        )
+        setup.add(category)
+        await setup.flush()
+        product = Product(
+            store_id=int(store.id),
+            category_id=int(category.id),
+            product_no=f"FCRP-{suffix[:16]}",
+            name="Flash claim test product",
+            price=Decimal("0.00"),
+            stock=5,
+            status="ON_SALE",
+        )
+        setup.add(product)
+        await setup.flush()
+        campaign = MarketingCampaign(
+            store_id=int(store.id),
+            code=f"FCR-{suffix[:18]}",
+            code_key=f"{int(store.id)}:FCR-{suffix[:18]}",
+            name="Flash claim lifecycle gate race",
+            campaign_type="FLASH_SALE",
+            status="RUNNING",
+            start_at=now.replace(hour=0, minute=0, second=0, microsecond=0),
+            end_at=now.replace(hour=0, minute=0, second=0, microsecond=0)
+            + __import__("datetime").timedelta(days=2),
+        )
+        setup.add(campaign)
+        await setup.flush()
+        config = FlashSaleConfig(
+            campaign_id=int(campaign.id),
+            product_id=int(product.id),
+            per_customer_limit=1,
+            claim_valid_minutes=30,
+        )
+        stock = FlashSaleStock(
+            campaign_id=int(campaign.id),
+            store_id=int(store.id),
+            product_id=int(product.id),
+            total_quantity=1,
+            remaining_quantity=1,
+        )
+        setup.add_all([config, stock])
+        await setup.flush()
+        ids = {
+            "store_id": int(store.id),
+            "source_id": int(source.id),
+            "target_id": int(target.id),
+            "campaign_id": int(campaign.id),
+            "category_id": int(category.id),
+            "product_id": int(product.id),
+        }
+        await setup.commit()
+    return ids
+
+
+async def _cleanup_flash_claim_race(maker, ids):
+    async with maker() as cleanup:
+        await cleanup.execute(
+            delete(FlashSaleClaim).where(
+                FlashSaleClaim.campaign_id == ids["campaign_id"]
+            )
+        )
+        await cleanup.execute(
+            delete(FlashSaleStock).where(
+                FlashSaleStock.campaign_id == ids["campaign_id"]
+            )
+        )
+        await cleanup.execute(
+            delete(FlashSaleConfig).where(
+                FlashSaleConfig.campaign_id == ids["campaign_id"]
+            )
+        )
+        await cleanup.execute(
+            delete(MarketingCampaign).where(
+                MarketingCampaign.id == ids["campaign_id"]
+            )
+        )
+        await cleanup.execute(delete(Product).where(Product.id == ids["product_id"]))
+        await cleanup.execute(
+            delete(ProductCategory).where(ProductCategory.id == ids["category_id"])
+        )
+        await cleanup.execute(
+            delete(Customer).where(
+                Customer.id.in_([ids["source_id"], ids["target_id"]])
+            )
+        )
+        await cleanup.execute(delete(Store).where(Store.id == ids["store_id"]))
+        await cleanup.commit()
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_pos_bind_rejects_customer_after_real_merge_commits(db_session):
+    """A bind request queued behind merge must re-read and reject the disabled customer."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"PBR-{suffix[:18]}", name="POS bind merge race", status=1)
+        source = Customer(customer_no=f"PBRS-{suffix[:25]}")
+        target = Customer(customer_no=f"PBRT-{suffix[:25]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        order = Order(
+            order_no=f"PBR-{suffix[:24]}",
+            store_id=int(store.id),
+            customer_id=None,
+            status="PENDING_PAYMENT",
+            payment_status="UNPAID",
+            channel="POS",
+            dining_type="TAKEAWAY",
+            subtotal=Decimal("10.00"),
+            discount_amount=Decimal("0.00"),
+            coupon_discount=Decimal("0.00"),
+            voucher_discount=Decimal("0.00"),
+            packing_fee=Decimal("0.00"),
+            total_amount=Decimal("10.00"),
+        )
+        setup.add(order)
+        await setup.flush()
+        ids = {
+            "store_id": int(store.id),
+            "source_id": int(source.id),
+            "target_id": int(target.id),
+            "order_id": int(order.id),
+        }
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+
+    def observe_gate_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            gate_waiting.set()
+
+    from app.api import orders_pos
+
+    async with maker() as merge_db, maker() as bind_db:
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=ids["target_id"],
+                source_customer_id=ids["source_id"],
+                reason="MySQL POS bind wins-after-merge lifecycle regression",
+            )
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            with (
+                patch.object(orders_pos, "assert_order_store_access", lambda *_: None),
+                patch.object(
+                    orders_pos,
+                    "_recompute_pos_amounts_for_customer",
+                    new_callable=AsyncMock,
+                ),
+                patch.object(
+                    orders_pos.AuditService,
+                    "log_staff",
+                    new_callable=AsyncMock,
+                ),
+            ):
+                bind_task = asyncio.create_task(
+                    orders_pos.bind_pos_customer(
+                        order_id=ids["order_id"],
+                        data=type("BindData", (), {"customer_id": ids["source_id"]})(),
+                        request=type("Request", (), {})(),
+                        db=bind_db,
+                        user=type(
+                            "User",
+                            (),
+                            {"id": 1, "store_id": ids["store_id"]},
+                        )(),
+                    )
+                )
+                await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+                await merge_db.commit()
+                with pytest.raises(AppException) as exc:
+                    await asyncio.wait_for(bind_task, timeout=15)
+                assert exc.value.status_code == 404
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            if bind_db.in_transaction():
+                await bind_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        source = await verify.get(Customer, ids["source_id"])
+        order = await verify.get(Order, ids["order_id"])
+        assert source is not None and source.account_status == "DISABLED"
+        assert order is not None and order.customer_id is None
+        await verify.execute(delete(Order).where(Order.id == ids["order_id"]))
+        await verify.execute(
+            delete(Customer).where(
+                Customer.id.in_([ids["source_id"], ids["target_id"]])
+            )
+        )
+        await verify.execute(delete(Store).where(Store.id == ids["store_id"]))
+        await verify.commit()
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_flash_sale_claim_rejects_customer_after_real_merge_commits(db_session):
+    """The real claim service must wait behind merge and leave stock/claims unchanged."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    from app.services.flash_sale_service import MarketingService
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    ids = await _seed_flash_claim_race(maker, uuid.uuid4().hex)
+    gate_waiting = asyncio.Event()
+
+    def observe_gate_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            gate_waiting.set()
+
+    async with maker() as merge_db, maker() as claim_db:
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=ids["target_id"],
+                source_customer_id=ids["source_id"],
+                reason="MySQL flash claim after-merge lifecycle regression",
+            )
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            with (
+                patch.object(MarketingService, "is_enabled", new=AsyncMock(return_value=True)),
+                patch.object(
+                    MarketingService,
+                    "is_store_participating",
+                    new=AsyncMock(return_value=True),
+                ),
+            ):
+                claim_task = asyncio.create_task(
+                    FlashSaleService.claim(
+                        claim_db,
+                        campaign_id=ids["campaign_id"],
+                        store_id=ids["store_id"],
+                        customer_id=ids["source_id"],
+                        client_request_id=f"fclaim-{uuid.uuid4().hex[:24]}",
+                    )
+                )
+                await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+                await merge_db.commit()
+                with pytest.raises(AppException) as exc:
+                    await asyncio.wait_for(claim_task, timeout=15)
+                assert exc.value.status_code == 401
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            if claim_db.in_transaction():
+                await claim_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        source = await verify.get(Customer, ids["source_id"])
+        stock = await verify.scalar(
+            select(FlashSaleStock).where(
+                FlashSaleStock.campaign_id == ids["campaign_id"],
+                FlashSaleStock.store_id == ids["store_id"],
+            )
+        )
+        claim_count = await verify.scalar(
+            select(func.count()).select_from(FlashSaleClaim).where(
+                FlashSaleClaim.campaign_id == ids["campaign_id"]
+            )
+        )
+        assert source is not None and source.account_status == "DISABLED"
+        assert stock is not None and stock.remaining_quantity == 1
+        assert claim_count == 0
+    await _cleanup_flash_claim_race(maker, ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_flash_sale_claim_commits_before_real_merge_cancels_entitlement(db_session):
+    """A claim that owns the gate first must commit before merge cancels it."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    from app.services.flash_sale_service import MarketingService
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    ids = await _seed_flash_claim_race(maker, uuid.uuid4().hex)
+    merge_waiting = asyncio.Event()
+
+    def observe_merge_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            merge_waiting.set()
+
+    async with maker() as claim_db, maker() as merge_db:
+        with (
+            patch.object(MarketingService, "is_enabled", new=AsyncMock(return_value=True)),
+            patch.object(
+                MarketingService,
+                "is_store_participating",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            claimed = await FlashSaleService.claim(
+                claim_db,
+                campaign_id=ids["campaign_id"],
+                store_id=ids["store_id"],
+                customer_id=ids["source_id"],
+                client_request_id=f"fclaim-{uuid.uuid4().hex[:24]}",
+            )
+        claim_id = int(claimed["claim_id"])
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_merge_wait)
+        try:
+            with patch(
+                "app.services.customer_merge_service.AuditService.log",
+                new_callable=AsyncMock,
+            ):
+                merge_task = asyncio.create_task(
+                    CustomerMergeService.merge(
+                        merge_db,
+                        target_customer_id=ids["target_id"],
+                        source_customer_id=ids["source_id"],
+                        reason="MySQL flash claim wins lifecycle gate regression",
+                    )
+                )
+                await asyncio.wait_for(merge_waiting.wait(), timeout=10)
+                await claim_db.commit()
+                await asyncio.wait_for(merge_task, timeout=20)
+                await merge_db.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_merge_wait)
+            if claim_db.in_transaction():
+                await claim_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        claim = await verify.get(FlashSaleClaim, claim_id)
+        source = await verify.get(Customer, ids["source_id"])
+        target = await verify.get(Customer, ids["target_id"])
+        stock = await verify.scalar(
+            select(FlashSaleStock).where(
+                FlashSaleStock.campaign_id == ids["campaign_id"],
+                FlashSaleStock.store_id == ids["store_id"],
+            )
+        )
+        assert claim is not None and claim.status == "CANCELLED"
+        assert claim.status_reason == "CUSTOMER_MERGED"
+        assert int(claim.customer_id) == ids["source_id"]
+        assert source is not None and source.account_status == "DISABLED"
+        assert target is not None and target.account_status == "ACTIVE"
+        assert stock is not None and stock.remaining_quantity == 0
+    await _cleanup_flash_claim_race(maker, ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_missing_customer_write_gate_fails_closed_on_mysql(db_session):
+    """A missing mutex row must not be silently recreated by a write request."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    suffix = uuid.uuid4().hex
+    customer = Customer(
+        customer_no=f"GMY-{suffix[:28]}",
+        status=1,
+        account_status="ACTIVE",
+    )
+    db_session.add(customer)
+    await db_session.flush()
+    customer_id = int(customer.id)
+    gate = await db_session.get(CustomerWriteGate, customer_id)
+    assert gate is not None
+    await db_session.delete(gate)
+    await db_session.flush()
+
+    with pytest.raises(AppException) as exc:
+        await lock_customer_write_gates(db_session, [customer_id])
+    assert exc.value.code == 50021
+    assert exc.value.status_code == 500
