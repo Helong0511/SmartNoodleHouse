@@ -292,6 +292,10 @@ async def submit_order_feedback(
         result = await FeedbackService.submit_order_feedback(
             db, order, [it.model_dump() for it in data.items]
         )
+    except RuntimeError as e:
+        if "order customer changed" not in str(e):
+            raise
+        raise AppException(40901, "订单归属已变更，请刷新后重试", status_code=409) from e
     except ValueError as e:
         raise AppException(40060, str(e)) from e
     return success(result, request=request)
