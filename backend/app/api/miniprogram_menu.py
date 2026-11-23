@@ -187,6 +187,44 @@ async def get_recommendations(
     cid = customer.id if customer else None
 
     if cid is not None:
+        # Cache hits are recommendation reads too: serialize them with consent
+        # revocation, otherwise a request can return an old-generation profile
+        # payload in the interval between the DB commit and Redis invalidation.
+        from app.services.privacy_service import PrivacyService
+
+        locked_customer = await PrivacyService.lock_customer_for_recommendation(
+            db, int(cid)
+        )
+        if (
+            locked_customer is None
+            or int(getattr(locked_customer, "status", 1) or 0) != 1
+            or str(getattr(locked_customer, "account_status", "ACTIVE") or "ACTIVE").upper()
+            != "ACTIVE"
+        ):
+            # The optional-auth object may have become disabled/merged while this
+            # request was starting. Do not use its customer-scoped cache identity.
+            cid = None
+            customer = None
+        else:
+            customer = locked_customer
+            if not int(getattr(locked_customer, "recommend_opt_in", 0) or 0):
+                # Never consult a customer-scoped cache after opt-out. Its
+                # generation bump is durable via Outbox but intentionally happens
+                # after commit; this cold path closes that short invalidation gap.
+                ranked, state, meta = await RecommendationService.recommend(
+                    db,
+                    store_id,
+                    customer_id=int(cid),
+                    scene=scene,
+                    limit=limit,
+                    exclude_ids=exclude_ids,
+                    weight_override=None,
+                )
+                payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
+                payload["cache_hit"] = False
+                return success(payload, request=request)
+
+    if cid is not None:
         ab_bucket, ab_params, ab_exp = await AbService.assign(db, cid, DEFAULT_EXPERIMENT_KEY)
         if ab_exp is not None:
             ab_status = ab_exp.status
