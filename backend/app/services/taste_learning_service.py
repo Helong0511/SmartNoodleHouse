@@ -441,7 +441,9 @@ class TasteLearningService:
         if new_events:
             db.add_all(new_events)
             await db.flush()
-        return await TasteLearningService.learn_from_events(db, int(order.customer_id))
+        return await TasteLearningService.learn_from_events(
+            db, int(order.customer_id), locked_customer=customer
+        )
 
     # ---------- scheduler 兜底 ----------
 
