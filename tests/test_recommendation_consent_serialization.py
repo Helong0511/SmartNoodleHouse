@@ -928,3 +928,70 @@ async def test_mysql_recommendation_profile_read_uses_current_view_after_reconse
         await stale_reader.close()
         await revoker.close()
         await reconsenter.close()
+
+
+@pytest.mark.asyncio
+async def test_ab_assignment_integrity_race_keeps_outer_customer_gate_transaction():
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import AbAssignment, AbExperiment
+    from app.services.ab_service import AbService
+
+    experiment = AbExperiment(
+        experiment_key="reco_algo",
+        status="RUNNING",
+        traffic_percent=100,
+        default_bucket="v1",
+        buckets=[
+            {"code": "v1", "traffic": 50, "params": {}},
+            {"code": "v2", "traffic": 50, "params": {}},
+        ],
+    )
+    existing = AbAssignment(
+        experiment_key="reco_algo", customer_id=987654, bucket="v2"
+    )
+
+    class Savepoint:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            # SQLAlchemy's nested transaction rolls back only this savepoint.
+            return exc_type is IntegrityError
+
+    class Session:
+        transaction_active = True
+        flush_calls = 0
+        added = None
+
+        async def scalar(self, statement):
+            if "ab_experiments" in str(statement):
+                return experiment
+            if self.flush_calls == 0:
+                return None
+            return existing
+
+        def begin_nested(self):
+            return Savepoint()
+
+        def add(self, value):
+            self.added = value
+
+        async def flush(self):
+            self.flush_calls += 1
+            raise IntegrityError("INSERT", {}, Exception("duplicate assignment"))
+
+        async def rollback(self):
+            self.transaction_active = False
+            raise AssertionError("A/B race must not roll back the outer transaction")
+
+    session = Session()
+    bucket, params, returned_experiment = await AbService.assign(
+        session, 987654, "reco_algo"
+    )
+
+    assert bucket == "v2"
+    assert params == {}
+    assert returned_experiment is experiment
+    assert session.transaction_active is True
+    assert isinstance(session.added, AbAssignment)
