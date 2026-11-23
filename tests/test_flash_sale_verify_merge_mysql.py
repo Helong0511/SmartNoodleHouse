@@ -7,11 +7,11 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import delete, event
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
-from app.models import Customer, FlashSaleClaim, MarketingCampaign, Store
+from app.models import Customer, FlashSaleClaim, MarketingCampaign, Order, Store
 from app.services.customer_merge_service import CustomerMergeService
 from app.services.flash_sale_service import FlashSaleService
 from app.core.response import naive_local_now
@@ -108,6 +108,23 @@ async def test_flash_sale_verify_observes_claim_cancelled_by_real_merge(db_sessi
                 await verify_db.rollback()
             if merge_db.in_transaction():
                 await merge_db.rollback()
+
+    # Verify committed state from a third, independent session rather than relying
+    # only on the merge result or the verifier's rejected request.
+    async with maker() as verify:
+        source_row = await verify.get(Customer, source_id)
+        target_row = await verify.get(Customer, target_id)
+        persisted_claim = await verify.get(FlashSaleClaim, claim_id)
+        assert source_row is not None and source_row.account_status == "DISABLED"
+        assert target_row is not None and target_row.account_status == "ACTIVE"
+        assert persisted_claim is not None
+        assert persisted_claim.status == "CANCELLED"
+        assert persisted_claim.status_reason == "CUSTOMER_MERGED"
+        assert int(persisted_claim.customer_id) == source_id
+        order_count = await verify.scalar(
+            select(func.count()).select_from(Order).where(Order.flash_claim_id == claim_id)
+        )
+        assert order_count == 0
 
     async with maker() as cleanup:
         await cleanup.execute(delete(FlashSaleClaim).where(FlashSaleClaim.id == claim_id))
