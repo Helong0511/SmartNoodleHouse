@@ -982,7 +982,7 @@ async def test_wechat_refund_query_uses_official_out_refund_no_path(monkeypatch)
 @pytest.mark.asyncio
 async def test_refund_finalization_locks_order_before_payment():
     """退款成功入账的锁顺序必须与支付回调一致：Order → Payment。"""
-    order = SimpleNamespace(id=11)
+    order = SimpleNamespace(id=11, customer_id=None)
     payment = SimpleNamespace(id=22, order_id=11)
     statements = []
 
@@ -994,6 +994,9 @@ async def test_refund_finalization_locks_order_before_payment():
             return self.value
 
     class _DB:
+        async def scalar(self, statement):
+            return None
+
         async def execute(self, statement):
             sql = str(statement).lower()
             statements.append(sql)
@@ -1015,7 +1018,7 @@ async def test_refund_finalization_locks_order_before_payment():
 
 @pytest.mark.asyncio
 async def test_refund_finalization_rejects_cross_order_payment_binding():
-    order = SimpleNamespace(id=11)
+    order = SimpleNamespace(id=11, customer_id=None)
     payment = SimpleNamespace(id=22, order_id=12)
 
     class _Result:
@@ -1026,6 +1029,9 @@ async def test_refund_finalization_rejects_cross_order_payment_binding():
             return self.value
 
     class _DB:
+        async def scalar(self, statement):
+            return None
+
         async def execute(self, statement):
             sql = str(statement).lower()
             if "from orders" in sql:
