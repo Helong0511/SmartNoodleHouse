@@ -237,10 +237,16 @@ class TasteLearningService:
     # ---------- 主入口 ----------
 
     @staticmethod
-    async def learn_from_events(db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT) -> int:
+    async def learn_from_events(
+        db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT, locked_customer=None
+    ) -> int:
         """仅对明确同意个性化推荐的顾客增量 fold 行为事件。"""
-        from app.services.privacy_service import PrivacyService
-        customer = await PrivacyService.lock_customer_for_recommendation(db, customer_id)
+        if locked_customer is None:
+            from app.services.privacy_service import PrivacyService
+
+            customer = await PrivacyService.lock_customer_for_recommendation(db, customer_id)
+        else:
+            customer = locked_customer
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         rows = await TasteLearningService._load_rows(db, customer_id)
@@ -278,12 +284,18 @@ class TasteLearningService:
         return len(events)
 
     @staticmethod
-    async def learn_from_feedback(db, feedback) -> None:
+    async def learn_from_feedback(db, feedback, *, locked_customer=None) -> None:
         """轻量评价直接 fold（评价明细已独立入库；此处分流口味信号）。"""
         from datetime import timezone
 
-        from app.services.privacy_service import PrivacyService
-        customer = await PrivacyService.lock_customer_for_recommendation(db, int(feedback.customer_id))
+        if locked_customer is None:
+            from app.services.privacy_service import PrivacyService
+
+            customer = await PrivacyService.lock_customer_for_recommendation(
+                db, int(feedback.customer_id)
+            )
+        else:
+            customer = locked_customer
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return
         sentiment = (feedback.sentiment or "NEUTRAL").upper()
@@ -367,7 +379,9 @@ class TasteLearningService:
         if new_events:
             db.add_all(new_events)
             await db.flush()
-        return await TasteLearningService.learn_from_events(db, int(order.customer_id))
+        return await TasteLearningService.learn_from_events(
+            db, int(order.customer_id), locked_customer=customer
+        )
 
     # ---------- 支付 outbox 挂接 ----------
 
