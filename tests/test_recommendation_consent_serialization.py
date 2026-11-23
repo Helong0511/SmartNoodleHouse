@@ -798,3 +798,28 @@ async def test_record_consent_schedules_cache_invalidation_when_reenabling(monke
 
     assert result["recommend_opt_in"] == 1
     assert calls == [(session, 963)]
+
+
+
+@pytest.mark.asyncio
+async def test_recommendation_cache_epoch_uses_current_locked_outbox_read():
+    class Result:
+        def scalar_one_or_none(self):
+            return 321
+
+    class Session:
+        statement = None
+
+        async def execute(self, statement):
+            self.statement = statement
+            return Result()
+
+    session = Session()
+    epoch = await miniprogram_menu._latest_reco_cache_epoch(session, 964)
+
+    sql = str(session.statement.compile(dialect=mysql.dialect())).lower()
+    assert epoch == 321
+    assert "from outbox_events" in sql
+    assert "aggregate_type" in sql and "aggregate_id" in sql
+    assert "order by outbox_events.id desc" in sql
+    assert "limit" in sql and "for update" in sql
