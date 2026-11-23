@@ -118,12 +118,14 @@ async def test_customer_order_create_commits_before_real_merge(db_session):
         store = Store(store_no=f"COW-{suffix[:20]}", name="Order create wins merge gate race")
         source = Customer(customer_no=f"COWS-{suffix[:27]}")
         target = Customer(customer_no=f"COWT-{suffix[:27]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
         category = ProductCategory(
             store_id=store.id,
             category_no=f"COWC-{suffix[:16]}",
             name="Concurrency test category",
         )
-        setup.add_all([store, source, target, category])
+        setup.add(category)
         await setup.flush()
         product = Product(
             store_id=store.id,
