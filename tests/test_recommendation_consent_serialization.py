@@ -626,7 +626,10 @@ async def test_feedback_submit_aborts_when_order_owner_changes_while_locking(mon
 @pytest.mark.asyncio
 async def test_opted_out_recommendation_never_reads_customer_scoped_cache(monkeypatch):
     stale_customer = Customer(id=960, customer_no="LOCK-960", recommend_opt_in=1)
-    locked_customer = Customer(\n        id=960, customer_no="LOCK-960", recommend_opt_in=0,\n        status=1, account_status="ACTIVE",\n    )
+    locked_customer = Customer(
+        id=960, customer_no="LOCK-960", recommend_opt_in=0,
+        status=1, account_status="ACTIVE",
+    )
     gate_calls = []
     recommend_calls = []
 
