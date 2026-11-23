@@ -382,6 +382,7 @@ async def test_mysql_refund_parent_lock_waits_for_merge_gate_without_order_gate_
         await setup.flush()
         source_id, target_id = int(source.id), int(target.id)
         order_id, payment_id, store_id = int(order.id), int(payment.id), int(store.id)
+        product_id, category_id = int(product.id), int(category.id)
         await setup.commit()
 
     gate_waiting = asyncio.Event()
@@ -431,6 +432,8 @@ async def test_mysql_refund_parent_lock_waits_for_merge_gate_without_order_gate_
         assert persisted_payment is not None and int(persisted_payment.customer_id) == target_id
         await verify.execute(delete(Payment).where(Payment.id == payment_id))
         await verify.execute(delete(Order).where(Order.id == order_id))
+        await verify.execute(delete(Product).where(Product.id == product_id))
+        await verify.execute(delete(ProductCategory).where(ProductCategory.id == category_id))
         await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
         await verify.execute(delete(Store).where(Store.id == store_id))
         await verify.commit()
