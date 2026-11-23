@@ -539,8 +539,6 @@ class FlashSaleService:
             raise AppException(40404, "抢购资格不存在")
         if int(claim.customer_id) != int(owner_id):
             raise AppException(40906, "抢购资格归属已变化，请重试", status_code=409)
-        # Customer is current-read only after its gate has been acquired.
-        await lock_active_customer_for_write(db, int(owner_id))
         # store_id 由后端门店范围决定（非超管强制本店），不接受前端指定他店
         if store_id is not None and int(claim.store_id) != int(store_id):
             raise AppException(40300, "无权核销其他门店的抢购资格", status_code=403)
@@ -581,6 +579,9 @@ class FlashSaleService:
             raise AppException(40013, "该资格已取消")
         if claim.status != STATUS_CLAIMED:
             raise AppException(40012, "该资格已失效")
+        # Terminal entitlements remain auditable/idempotent after their owner is merged.
+        # Only a still-CLAIMED entitlement needs an active customer to proceed.
+        await lock_active_customer_for_write(db, int(owner_id))
         if claim.expires_at and claim.expires_at <= now:
             # 核销时发现超时：落库失效（名额不返还），再返回失败
             claim.status = STATUS_EXPIRED
