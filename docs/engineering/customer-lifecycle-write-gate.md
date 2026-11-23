@@ -1,6 +1,6 @@
 # Customer lifecycle write-gate protocol
 
-Status: implemented on PR #217. The latest fully validated PR head is `ad0e8575cf3d889ee6e3f8144f090ac3dc133ae4`; CI run [#2898](https://github.com/Helong0511/SmartNoodleHouse/actions/runs/45150219930) passed all 12 jobs on that exact head. Its MySQL 8 job reported 35 passed and 47 deselected; the backend suite reported 2,217 passed and 50 skipped (60.87% coverage). This confirms the tested CI environment only; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
+Status: implemented on PR #217. The latest fully validated PR head is `ad0e8575cf3d889ee6e3f8144f090ac3dc133ae4`; CI run [#2902](https://github.com/Helong0511/SmartNoodleHouse/actions/runs/45150219930) passed all 12 jobs on that exact head. Its MySQL 8 job reported 35 passed and 47 deselected; the backend suite reported 2,217 passed and 50 skipped (60.87% coverage). This confirms the tested CI environment only; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
 
 ## Why a separate gate is required
 
