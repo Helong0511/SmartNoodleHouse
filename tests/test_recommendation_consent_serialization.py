@@ -93,35 +93,47 @@ async def test_profile_learning_uses_locked_consent_state(monkeypatch):
 async def test_profile_learning_rejects_order_owner_changed_while_waiting_for_gate(monkeypatch):
     stale_order = Order(id=940, customer_id=93, payment_status="PAID")
     current_order = Order(id=940, customer_id=94, payment_status="PAID")
+    statements = []
 
     class Result:
+        def __init__(self, value):
+            self.value = value
+
         def scalar_one_or_none(self):
-            return current_order
+            return self.value
 
     class Session:
-        statement = None
-
         async def get(self, model, order_id):
             assert model is Order
             assert order_id == 940
             return stale_order
 
         async def execute(self, statement):
-            self.statement = statement
-            return Result()
+            statements.append(statement)
+            entity = statement.column_descriptions[0]["entity"]
+            if entity is Order:
+                return Result(current_order)
+            if entity is Customer:
+                return Result(Customer(id=93, customer_no="LOCK-93", recommend_opt_in=1))
+            raise AssertionError(f"unexpected locked entity: {entity}")
 
-    async def locked(_db, customer_id):
-        assert customer_id == 93
-        return Customer(id=93, customer_no="LOCK-93", recommend_opt_in=1)
+    gate_calls = []
 
-    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+    async def lock_gates(_db, customer_ids):
+        gate_calls.append(list(customer_ids))
+
+    from app.services import customer_write_gate
+
+    monkeypatch.setattr(customer_write_gate, "lock_customer_write_gates", lock_gates)
     session = Session()
 
     with pytest.raises(RuntimeError, match="order customer changed"):
         await TasteLearningService._lock_order_customer_for_learning(session, 940)
 
-    assert session.statement._for_update_arg is not None
-    assert session.statement.get_execution_options()["populate_existing"] is True
+    assert gate_calls == [[93]]
+    assert len(statements) == 1
+    assert statements[0]._for_update_arg is not None
+    assert statements[0].get_execution_options()["populate_existing"] is True
 
 
 @pytest.mark.asyncio
