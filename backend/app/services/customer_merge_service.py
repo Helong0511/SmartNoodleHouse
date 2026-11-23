@@ -147,6 +147,10 @@ class CustomerMergeService:
         source = by_id.get(int(source_customer_id))
         if not target or not source:
             raise AppException(40461, "顾客不存在", status_code=404)
+        if int(target.status or 0) == 0 or str(
+            getattr(target, "account_status", "ACTIVE") or "ACTIVE"
+        ).upper() != "ACTIVE":
+            raise AppException(40062, "目标顾客已禁用/已合并")
         if int(source.status or 0) == 0:
             raise AppException(40062, "源顾客已禁用/已合并")
         if actor_store_id is not None:
