@@ -314,3 +314,124 @@ def test_refund_success_acquires_customer_gate_before_order_and_payment_locks():
     assert gate < order_lock < payment_lock
     assert order_lock < owner_revalidation < payment_lock
 
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_mysql_refund_parent_lock_waits_for_merge_gate_without_order_gate_deadlock(db_session):
+    """Refund parent locking must join the gate-first protocol used by customer merge."""
+    import asyncio
+    import uuid
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from sqlalchemy import delete, event, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.exceptions import AppException
+    from app.models import Customer, Order, Payment, Product, ProductCategory, Store
+    from app.services.customer_merge_service import CustomerMergeService
+    from app.services.order_create_service import OrderCreateService
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"RF-{suffix[:20]}", name="Refund merge gate race")
+        source = Customer(customer_no=f"RFS-{suffix[:27]}")
+        target = Customer(customer_no=f"RFT-{suffix[:27]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        category = ProductCategory(
+            store_id=store.id,
+            category_no=f"RFC-{suffix[:16]}",
+            name="Refund merge race category",
+        )
+        setup.add(category)
+        await setup.flush()
+        product = Product(
+            store_id=store.id,
+            category_id=category.id,
+            product_no=f"RFP-{suffix[:16]}",
+            name="Refund merge race product",
+            price=Decimal("10.00"),
+            status="ON_SALE",
+        )
+        setup.add(product)
+        await setup.flush()
+        order = await OrderCreateService.create_order(
+            setup,
+            store_id=int(store.id),
+            table_token=None,
+            customer_id=int(source.id),
+            items=[{"product_id": int(product.id), "quantity": 1}],
+            channel="POS",
+            dining_type="TAKEAWAY",
+        )
+        payment = Payment(
+            payment_no=f"RFPAY-{suffix[:24]}",
+            order_id=order.id,
+            customer_id=source.id,
+            provider="BALANCE",
+            channel="BALANCE",
+            amount=Decimal("10.00"),
+            status="PAID",
+        )
+        setup.add(payment)
+        await setup.flush()
+        source_id, target_id = int(source.id), int(target.id)
+        order_id, payment_id, store_id = int(order.id), int(payment.id), int(store.id)
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+
+    def observe_gate_wait(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = statement.upper()
+        if "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+            gate_waiting.set()
+
+    async with maker() as merge_db, maker() as refund_db:
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            result = await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=target_id,
+                source_customer_id=source_id,
+                reason="MySQL merge/refund lock-order regression",
+            )
+        assert int(result["source_customer_id"]) == source_id
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            attempt = asyncio.create_task(
+                PaymentService._lock_order_then_payment_for_refund(
+                    refund_db,
+                    SimpleNamespace(order_id=order_id, payment_id=payment_id),
+                )
+            )
+            await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+            await merge_db.commit()
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(attempt, timeout=15)
+            assert exc.value.code == 40906
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            if refund_db.in_transaction():
+                await refund_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        persisted_order = await verify.get(Order, order_id)
+        persisted_payment = await verify.get(Payment, payment_id)
+        assert persisted_order is not None and int(persisted_order.customer_id) == target_id
+        assert persisted_payment is not None and int(persisted_payment.customer_id) == target_id
+        await verify.execute(delete(Payment).where(Payment.id == payment_id))
+        await verify.execute(delete(Order).where(Order.id == order_id))
+        await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
+        await verify.execute(delete(Store).where(Store.id == store_id))
+        await verify.commit()
+
