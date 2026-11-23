@@ -103,13 +103,18 @@ async def test_create_payment_rejects_amount_over_remaining():
     order.status = "PENDING_PAYMENT"
     order.payment_status = "PARTIAL_PAID"
     order.total_amount = Decimal("21.00")
+    order.customer_id = 1
 
     db = AsyncMock()
+    db.scalar = AsyncMock(return_value=1)
     exec_result = MagicMock()
     exec_result.scalar_one_or_none.return_value = order
     db.execute = AsyncMock(return_value=exec_result)
 
-    with patch.object(
+    with patch(
+        "app.services.payment_service.lock_customer_write_gates",
+        new_callable=AsyncMock,
+    ), patch.object(
         PaymentService, "remaining_amount", new_callable=AsyncMock, return_value=money("6.00")
     ):
         with pytest.raises(AppException) as exc:
