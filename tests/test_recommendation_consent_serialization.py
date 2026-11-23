@@ -689,18 +689,23 @@ async def test_customer_recommendation_cache_hit_is_checked_only_after_consent_g
         calls.append(("ab", customer_id))
         return "v1", {}, None
 
+    async def epoch(_db, customer_id):
+        calls.append(("epoch", customer_id))
+        return 123
+
     async def generation(customer_id):
         calls.append(("generation", customer_id))
         return 7
 
     async def cached(customer_id, store_id, scene, bucket, fingerprint, *, generation):
-        calls.append(("cache", customer_id, generation))
+        calls.append(("cache", customer_id, generation, fingerprint))
         return {"state": "HOT", "items": [], "meta": {}, "ab": {}}
 
     monkeypatch.setattr(
         PrivacyService, "lock_customer_for_recommendation", staticmethod(lock_current)
     )
     monkeypatch.setattr(miniprogram_menu.AbService, "assign", staticmethod(assign))
+    monkeypatch.setattr(miniprogram_menu, "_latest_reco_cache_epoch", epoch)
     monkeypatch.setattr(miniprogram_menu, "get_reco_generation", generation)
     monkeypatch.setattr(miniprogram_menu, "get_cached_reco", cached)
 
@@ -712,8 +717,11 @@ async def test_customer_recommendation_cache_hit_is_checked_only_after_consent_g
     )
 
     assert response["data"]["state"] == "HOT"
-    assert [item[0] for item in calls] == ["gate", "ab", "generation", "cache"]
-    assert calls[-1] == ("cache", 961, 7)
+    assert [item[0] for item in calls] == [
+        "gate", "epoch", "ab", "generation", "cache"
+    ]
+    assert calls[-1][:3] == ("cache", 961, 7)
+    assert "epoch=123" in calls[-1][3]
 
 
 
