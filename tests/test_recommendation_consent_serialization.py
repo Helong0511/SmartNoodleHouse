@@ -19,6 +19,7 @@ from app.services.preference_service import PreferenceService
 from app.services.feedback_service import FeedbackService
 from app.services.customer_merge_service import CustomerMergeService, _lock_merge_scope
 from reco_factories import make_customer
+from app.api import miniprogram_menu
 
 
 @pytest.mark.asyncio
@@ -619,3 +620,48 @@ async def test_feedback_submit_aborts_when_order_owner_changes_while_locking(mon
 
     assert calls == [951]
 
+
+
+
+@pytest.mark.asyncio
+async def test_opted_out_recommendation_never_reads_customer_scoped_cache(monkeypatch):
+    stale_customer = Customer(id=960, customer_no="LOCK-960", recommend_opt_in=1)
+    locked_customer = Customer(id=960, customer_no="LOCK-960", recommend_opt_in=0)
+    gate_calls = []
+    recommend_calls = []
+
+    async def lock_current(_db, customer_id):
+        gate_calls.append(customer_id)
+        return locked_customer
+
+    async def recommend(
+        _db, store_id, *, customer_id=None, scene="recommend_menu",
+        limit=10, exclude_ids=None, use_cache=True, weight_override=None,
+    ):
+        recommend_calls.append((customer_id, scene, limit, weight_override))
+        return [], "COLD", {"pool_size": 0}
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("opted-out recommendation must not access customer cache")
+
+    monkeypatch.setattr(
+        PrivacyService, "lock_customer_for_recommendation", staticmethod(lock_current)
+    )
+    monkeypatch.setattr(
+        miniprogram_menu.RecommendationService, "recommend", staticmethod(recommend)
+    )
+    monkeypatch.setattr(miniprogram_menu, "get_reco_generation", forbidden)
+    monkeypatch.setattr(miniprogram_menu, "get_cached_reco", forbidden)
+    monkeypatch.setattr(miniprogram_menu.AbService, "assign", staticmethod(forbidden))
+
+    response = await miniprogram_menu.get_recommendations(
+        request=None,
+        db=object(),
+        customer=stale_customer,
+        store_id=1,
+    )
+
+    assert gate_calls == [960]
+    assert recommend_calls == [(960, "recommend_menu", 10, None)]
+    assert response["data"]["state"] == "COLD"
+    assert response["data"]["cache_hit"] is False
