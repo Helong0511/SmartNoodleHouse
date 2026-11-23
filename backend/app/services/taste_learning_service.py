@@ -69,7 +69,7 @@ class TasteLearningService:
 
     @staticmethod
     async def _lock_order_customer_for_learning(db, order_id: int):
-        """按 Gate → Customer → Order 锁序读取订单的当前顾客归属。
+        """按 Gate → Order → Customer 锁序读取订单的当前顾客归属。
 
         Outbox 任务可能在订单被合并迁移后才执行；不能把任务开始时缓存的
         Order.customer_id 当作权威归属。归属在等待 Gate 期间变化时抛错，
