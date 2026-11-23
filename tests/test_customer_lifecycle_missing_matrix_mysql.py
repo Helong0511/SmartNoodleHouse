@@ -690,6 +690,14 @@ async def test_flash_sale_verify_commits_before_real_merge_preserves_used_entitl
         assert order is not None and order.customer_id == ids["target_id"]
         assert source is not None and source.account_status == "DISABLED"
         assert target is not None and target.status == 1
+        replay = await FlashSaleService.verify(
+            check,
+            claim_no=claimed["claim_no"],
+            store_id=ids["store_id"],
+            operator_id=None,
+        )
+        assert replay["already_verified"] is True
+        assert replay["order_id"] == order_id
 
     async with maker() as cleanup:
         await cleanup.execute(
