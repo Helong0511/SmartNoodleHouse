@@ -189,7 +189,7 @@ async def test_mysql_recharge_create_commits_before_real_merge(db_session):
                         channel_type="native",
                         idempotency_key=f"recharge-wins-{suffix[:18]}",
                     ),
-                    request=SimpleNamespace(),
+                    request=SimpleNamespace(state=SimpleNamespace(request_id=None)),
                     db=recharge_db,
                     customer=SimpleNamespace(id=source_id),
                 )
