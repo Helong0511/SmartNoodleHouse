@@ -66,6 +66,43 @@ def _quantize(v: float) -> float:
 class TasteLearningService:
     """全部为无状态类方法；db 会话由调用方管理（API/ outbox / scheduler 统一提交）。"""
 
+    @staticmethod
+    async def _lock_order_customer_for_learning(db, order_id: int):
+        """按 Gate → Customer → Order 锁序读取订单的当前顾客归属。
+
+        Outbox 任务可能在订单被合并迁移后才执行；不能把任务开始时缓存的
+        Order.customer_id 当作权威归属。归属在等待 Gate 期间变化时抛错，
+        让事务回滚并由 Outbox 使用新归属重试。
+        """
+        order_snapshot = await db.get(Order, int(order_id))
+        if order_snapshot is None or order_snapshot.customer_id is None:
+            return None, None
+        observed_customer_id = int(order_snapshot.customer_id)
+
+        from app.services.privacy_service import PrivacyService
+
+        customer = await PrivacyService.lock_customer_for_recommendation(
+            db, observed_customer_id
+        )
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            return None, None
+        current_customer_id = (
+            int(order.customer_id) if order.customer_id is not None else None
+        )
+        if current_customer_id != observed_customer_id:
+            raise RuntimeError(
+                "order customer changed while acquiring recommendation gate; retry outbox"
+            )
+        return order, customer
+
     # ---------- 信号键展开 ----------
 
     @staticmethod
@@ -274,12 +311,16 @@ class TasteLearningService:
         以事件表 event_id 幂等 + 水位增量 fold，outbox 重试安全；部分退款不在此处理
         （既有 PreferenceService.PARTIAL_REFUND_WEIGHT 已覆盖规格偏好降权）。
         """
-        order = await db.get(Order, order_id)
-        if not order or not order.customer_id or (order.payment_status or "") != "REFUNDED":
-            return 0
-        from app.services.privacy_service import PrivacyService
-        customer = await PrivacyService.lock_customer_for_recommendation(db, int(order.customer_id))
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        order, customer = await TasteLearningService._lock_order_customer_for_learning(
+            db, int(order_id)
+        )
+        if (
+            not order
+            or not order.customer_id
+            or (order.payment_status or "") != "REFUNDED"
+            or not customer
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
@@ -327,13 +368,15 @@ class TasteLearningService:
         由 paid_side_effects 的 taste_learning handler 调用；outbox 重试安全：
         重复事件被唯一约束去重，学习以水位增量 fold。
         """
-        from app.services.privacy_service import PrivacyService
-
-        order = await db.get(Order, order_id)
-        if not order or not order.customer_id:
-            return 0
-        customer = await PrivacyService.lock_customer_for_recommendation(db, int(order.customer_id))
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        order, customer = await TasteLearningService._lock_order_customer_for_learning(
+            db, int(order_id)
+        )
+        if (
+            not order
+            or not order.customer_id
+            or not customer
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
