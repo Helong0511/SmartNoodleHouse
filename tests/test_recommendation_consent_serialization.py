@@ -665,3 +665,49 @@ async def test_opted_out_recommendation_never_reads_customer_scoped_cache(monkey
     assert recommend_calls == [(960, "recommend_menu", 10, None)]
     assert response["data"]["state"] == "COLD"
     assert response["data"]["cache_hit"] is False
+
+
+
+@pytest.mark.asyncio
+async def test_customer_recommendation_cache_hit_is_checked_only_after_consent_gate(
+    monkeypatch,
+):
+    customer = Customer(
+        id=961, customer_no="LOCK-961", recommend_opt_in=1,
+        status=1, account_status="ACTIVE",
+    )
+    calls = []
+
+    async def lock_current(_db, customer_id):
+        calls.append(("gate", customer_id))
+        return customer
+
+    async def assign(_db, customer_id, experiment_key):
+        calls.append(("ab", customer_id))
+        return "v1", {}, None
+
+    async def generation(customer_id):
+        calls.append(("generation", customer_id))
+        return 7
+
+    async def cached(customer_id, store_id, scene, bucket, fingerprint, *, generation):
+        calls.append(("cache", customer_id, generation))
+        return {"state": "HOT", "items": [], "meta": {}, "ab": {}}
+
+    monkeypatch.setattr(
+        PrivacyService, "lock_customer_for_recommendation", staticmethod(lock_current)
+    )
+    monkeypatch.setattr(miniprogram_menu.AbService, "assign", staticmethod(assign))
+    monkeypatch.setattr(miniprogram_menu, "get_reco_generation", generation)
+    monkeypatch.setattr(miniprogram_menu, "get_cached_reco", cached)
+
+    response = await miniprogram_menu.get_recommendations(
+        request=None,
+        db=object(),
+        customer=customer,
+        store_id=1,
+    )
+
+    assert response["data"]["state"] == "HOT"
+    assert [item[0] for item in calls] == ["gate", "ab", "generation", "cache"]
+    assert calls[-1] == ("cache", 961, 7)
