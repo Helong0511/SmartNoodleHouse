@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
@@ -14,6 +16,7 @@ from app.services.privacy_service import PrivacyService
 from app.services import reco_cache
 from app.services.taste_learning_service import TasteLearningService
 from app.services.preference_service import PreferenceService
+from app.services.feedback_service import FeedbackService
 from app.services.customer_merge_service import CustomerMergeService, _lock_merge_scope
 from reco_factories import make_customer
 
@@ -498,3 +501,67 @@ async def test_customer_merge_locks_orders_and_recharges_before_customers():
     assert "order by marketing_flash_sale_claims.id" in sql[2]
     assert "from customers" in sql[3] and "for update" in sql[3]
     assert "order by customers.id" in sql[3]
+
+@pytest.mark.asyncio
+async def test_preference_update_uses_current_locked_order_owner(monkeypatch):
+    current_order = Order(id=950, customer_id=94, status="PAID")
+    current_customer = Customer(id=94, customer_no="LOCK-94", recommend_opt_in=1)
+    calls = []
+
+    async def locked(_db, order_id):
+        calls.append(("lock", order_id))
+        return current_order, current_customer
+
+    async def recompute(_db, customer_id):
+        calls.append(("recompute", customer_id))
+
+    async def promote(_db, customer_id):
+        calls.append(("promote", customer_id))
+
+    monkeypatch.setattr(
+        TasteLearningService,
+        "_lock_order_customer_for_learning",
+        staticmethod(locked),
+    )
+    monkeypatch.setattr(
+        PreferenceService, "recompute_for_customer", staticmethod(recompute)
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "app.services.face_service",
+        SimpleNamespace(face_embedding_cache=SimpleNamespace(promote=promote)),
+    )
+
+    await PreferenceService.update_from_order(object(), 950)
+
+    assert [call[:2] for call in calls] == [
+        ("lock", 950),
+        ("recompute", 94),
+        ("promote", 94),
+    ]
+    assert current_customer.last_order_at is not None
+
+
+@pytest.mark.asyncio
+async def test_feedback_submit_aborts_when_order_owner_changes_while_locking(monkeypatch):
+    calls = []
+
+    async def changed(_db, order_id):
+        calls.append(order_id)
+        raise RuntimeError("order customer changed while acquiring recommendation gate; retry outbox")
+
+    monkeypatch.setattr(
+        TasteLearningService,
+        "_lock_order_customer_for_learning",
+        staticmethod(changed),
+    )
+
+    with pytest.raises(RuntimeError, match="order customer changed"):
+        await FeedbackService.submit_order_feedback(
+            object(),
+            Order(id=951, customer_id=93, status="PAID"),
+            [],
+        )
+
+    assert calls == [951]
+
