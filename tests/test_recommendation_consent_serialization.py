@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects import mysql
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Customer, CustomerBehaviorEvent, CustomerPreference, Order
+from app.models import Customer, CustomerBehaviorEvent, CustomerPreference, CustomerTasteProfile, Order
 from app.services import behavior_event_service
 from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
@@ -823,3 +823,33 @@ async def test_recommendation_cache_epoch_uses_current_locked_outbox_read():
     assert "aggregate_type" in sql and "aggregate_id" in sql
     assert "order by outbox_events.id desc" in sql
     assert "limit" in sql and "for update" in sql
+
+
+
+@pytest.mark.asyncio
+async def test_recommendation_profile_read_uses_current_locking_read():
+    class Rows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class Session:
+        statement = None
+
+        async def execute(self, statement):
+            self.statement = statement
+            return Rows()
+
+    session = Session()
+    profiles, total_events = await miniprogram_menu.RecommendationService.load_profiles(
+        session, 965
+    )
+
+    sql = str(session.statement.compile(dialect=mysql.dialect())).lower()
+    assert profiles == {}
+    assert total_events == 0
+    assert "from customer_taste_profiles" in sql
+    assert "customer_id = 965" in sql
+    assert "for update" in sql
