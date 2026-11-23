@@ -440,3 +440,140 @@ async def test_missing_customer_write_gate_fails_closed_on_mysql(db_session):
         await lock_customer_write_gates(db_session, [customer_id])
     assert exc.value.code == 50021
     assert exc.value.status_code == 500
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_pos_bind_rejects_stale_old_owner_after_real_merge_commits(db_session):
+    """A bind using both old/new gates must reject when merge migrates the old owner."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"PBO-{suffix[:18]}", name="POS bind old-owner merge race", status=1)
+        source = Customer(customer_no=f"PBOS-{suffix[:25]}")
+        target = Customer(customer_no=f"PBOT-{suffix[:25]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        order = Order(
+            order_no=f"PBO-{suffix[:24]}",
+            store_id=int(store.id),
+            customer_id=int(source.id),
+            status="PENDING_PAYMENT",
+            payment_status="UNPAID",
+            channel="POS",
+            dining_type="TAKEAWAY",
+            subtotal=Decimal("10.00"),
+            discount_amount=Decimal("0.00"),
+            coupon_discount=Decimal("0.00"),
+            voucher_discount=Decimal("0.00"),
+            packing_fee=Decimal("0.00"),
+            total_amount=Decimal("10.00"),
+        )
+        setup.add(order)
+        await setup.flush()
+        ids = {
+            "store_id": int(store.id),
+            "source_id": int(source.id),
+            "target_id": int(target.id),
+            "order_id": int(order.id),
+        }
+        await setup.commit()
+
+    merge_gate_acquired = asyncio.Event()
+    allow_merge_to_continue = asyncio.Event()
+    bind_gate_waiting = asyncio.Event()
+    bind_gate_ids = []
+    merge_connection = None
+
+    from app.api import orders_pos
+    import app.services.customer_merge_service as merge_module
+
+    original_merge_lock = merge_module.lock_customer_write_gates
+    original_bind_lock = orders_pos.lock_customer_write_gates
+
+    async def pause_merge_after_gates(db, customer_ids):
+        locked = await original_merge_lock(db, customer_ids)
+        if db is merge_db:
+            merge_gate_acquired.set()
+            await asyncio.wait_for(allow_merge_to_continue.wait(), timeout=20)
+        return locked
+
+    async def observe_bind_gate_lock(db, customer_ids):
+        bind_gate_ids.append(list(customer_ids))
+        return await original_bind_lock(db, customer_ids)
+
+    async with maker() as merge_db, maker() as bind_db:
+        merge_connection = (await merge_db.connection()).sync_connection
+
+        def observe_bind_wait(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if (
+                conn is not merge_connection
+                and "CUSTOMER_WRITE_GATES" in normalized
+                and "FOR UPDATE" in normalized
+            ):
+                bind_gate_waiting.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_bind_wait)
+        try:
+            with (
+                patch.object(merge_module, "lock_customer_write_gates", new=pause_merge_after_gates),
+                patch.object(orders_pos, "lock_customer_write_gates", new=observe_bind_gate_lock),
+                patch.object(orders_pos, "assert_order_store_access", lambda *_: None),
+                patch.object(orders_pos, "_recompute_pos_amounts_for_customer", new_callable=AsyncMock),
+                patch.object(orders_pos.AuditService, "log_staff", new_callable=AsyncMock),
+                patch("app.services.customer_merge_service.AuditService.log", new_callable=AsyncMock),
+            ):
+                merge_task = asyncio.create_task(
+                    CustomerMergeService.merge(
+                        merge_db,
+                        target_customer_id=ids["target_id"],
+                        source_customer_id=ids["source_id"],
+                        reason="MySQL POS bind old-owner lifecycle regression",
+                    )
+                )
+                await asyncio.wait_for(merge_gate_acquired.wait(), timeout=10)
+
+                bind_task = asyncio.create_task(
+                    orders_pos.bind_pos_customer(
+                        order_id=ids["order_id"],
+                        data=type("BindData", (), {"customer_id": ids["target_id"]})(),
+                        request=type("Request", (), {})(),
+                        db=bind_db,
+                        user=type("User", (), {"id": 1, "store_id": ids["store_id"]})(),
+                    )
+                )
+                await asyncio.wait_for(bind_gate_waiting.wait(), timeout=10)
+                allow_merge_to_continue.set()
+                await asyncio.wait_for(merge_task, timeout=20)
+                await merge_db.commit()
+                with pytest.raises(AppException) as exc:
+                    await asyncio.wait_for(bind_task, timeout=15)
+                assert exc.value.status_code == 409
+                assert exc.value.code == 40906
+                assert bind_gate_ids == [[ids["source_id"], ids["target_id"]]]
+        finally:
+            allow_merge_to_continue.set()
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_bind_wait)
+            if bind_db.in_transaction():
+                await bind_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        source = await verify.get(Customer, ids["source_id"])
+        target = await verify.get(Customer, ids["target_id"])
+        order = await verify.get(Order, ids["order_id"])
+        assert source is not None and source.account_status == "DISABLED"
+        assert target is not None and target.account_status == "ACTIVE"
+        assert order is not None and order.customer_id == ids["target_id"]
+        await verify.execute(delete(Order).where(Order.id == ids["order_id"]))
+        await verify.execute(
+            delete(Customer).where(Customer.id.in_([ids["source_id"], ids["target_id"]]))
+        )
+        await verify.execute(delete(Store).where(Store.id == ids["store_id"]))
+        await verify.commit()
