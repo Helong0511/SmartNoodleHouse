@@ -17,6 +17,7 @@ from app.schemas.order import OrderCreate
 from app.services import customer_merge_service as customer_merge_service_module
 from app.services.customer_merge_service import CustomerMergeService
 from app.api.orders import create_order as create_customer_order
+from app.services.order_create_service import OrderCreateService
 
 
 @pytest.mark.mysql
@@ -214,8 +215,15 @@ async def test_customer_order_create_commits_before_real_merge(db_session):
         target_row = await verify.get(Customer, target_id)
         assert source_row is not None and source_row.account_status == "DISABLED"
         assert target_row is not None and target_row.account_status == "ACTIVE"
+        scoped_key = OrderCreateService._scoped_idempotency_key(
+            f"customer-order-wins-{suffix[:18]}",
+            channel="H5",
+            customer_id=source_id,
+            store_id=store_id,
+            operator_id=None,
+        )
         order = await verify.scalar(
-            select(Order).where(Order.idempotency_key == f"customer-order-wins-{suffix[:18]}")
+            select(Order).where(Order.idempotency_key == scoped_key)
         )
         assert order is not None
         assert int(order.customer_id) == target_id
