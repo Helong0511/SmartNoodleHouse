@@ -369,9 +369,13 @@ async def test_create_payment_blocks_second_pending_channel():
         return pending_result
 
     db = AsyncMock()
+    db.scalar = AsyncMock(return_value=9)
     db.execute = execute
 
-    with patch.object(
+    with patch(
+        "app.services.payment_service.lock_customer_write_gates",
+        new_callable=AsyncMock,
+    ), patch.object(
         PaymentService, "remaining_amount", new_callable=AsyncMock, return_value=Decimal("20.00")
     ):
         with pytest.raises(AppException) as ei:
