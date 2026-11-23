@@ -423,6 +423,7 @@ jobs:
             tests/test_flash_sale_verify_merge_mysql.py \
             tests/test_flash_sale_expired_claim_transaction.py \
             tests/test_pos_create_merge_mysql.py \
+            tests/test_customer_lifecycle_missing_matrix_mysql.py \
             tests/test_customer_order_create_merge_mysql.py \
             tests/test_recharge_create_merge_mysql.py \
             tests/test_customer_write_gate_migration.py \
