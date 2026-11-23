@@ -304,3 +304,13 @@ def test_order_payment_revalidates_request_owner_after_locked_order_refresh():
     locked_refresh = source.index(".execution_options(populate_existing=True)")
     owner_check = source.index("if customer_id is not None and int(customer_id) != locked_owner_id")
     assert locked_refresh < owner_check
+
+def test_refund_success_acquires_customer_gate_before_order_and_payment_locks():
+    source = inspect.getsource(PaymentService._lock_order_then_payment_for_refund)
+    gate = source.index("await lock_customer_write_gates(db, [int(observed_owner_id)])")
+    order_lock = source.index(".with_for_update()")
+    payment_lock = source.index("select(Payment)")
+    owner_revalidation = source.index("if locked_owner_id != observed_owner_id")
+    assert gate < order_lock < payment_lock
+    assert order_lock < owner_revalidation < payment_lock
+
