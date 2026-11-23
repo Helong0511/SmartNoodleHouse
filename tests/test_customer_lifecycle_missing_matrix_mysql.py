@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -69,7 +70,7 @@ async def _seed_flash_claim_race(maker, suffix: str):
             status="RUNNING",
             start_at=now.replace(hour=0, minute=0, second=0, microsecond=0),
             end_at=now.replace(hour=0, minute=0, second=0, microsecond=0)
-            + __import__("datetime").timedelta(days=2),
+            + timedelta(days=2),
         )
         setup.add(campaign)
         await setup.flush()
