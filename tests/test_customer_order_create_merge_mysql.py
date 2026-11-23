@@ -100,3 +100,101 @@ async def test_customer_order_create_rejects_stale_customer_after_real_merge(db_
         await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
         await verify.execute(delete(Store).where(Store.id == store_id))
         await verify.commit()
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_customer_order_create_commits_before_real_merge(db_session):
+    """If create owns the gate first, its committed order must be migrated by merge."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"COW-{suffix[:20]}", name="Order create wins merge gate race")
+        source = Customer(customer_no=f"COWS-{suffix[:27]}")
+        target = Customer(customer_no=f"COWT-{suffix[:27]}")
+        setup.add_all([store, source, target])
+        await setup.flush()
+        store_id, source_id, target_id = int(store.id), int(source.id), int(target.id)
+        await setup.commit()
+
+    create_at_commit = asyncio.Event()
+    allow_create_commit = asyncio.Event()
+    merge_waiting_for_gate = asyncio.Event()
+
+    async with maker() as merge_db, maker() as order_db:
+        original_commit = order_db.commit
+        async def pause_create_commit():
+            create_at_commit.set()
+            await asyncio.wait_for(allow_create_commit.wait(), timeout=15)
+            await original_commit()
+        order_db.commit = pause_create_commit
+        order_connection = (await order_db.connection()).sync_connection
+
+        def observe_merge_gate_wait(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if conn is not order_connection and "CUSTOMER_WRITE_GATES" in normalized and "FOR UPDATE" in normalized:
+                merge_waiting_for_gate.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_merge_gate_wait)
+        try:
+            with patch("app.api.orders.AuditService.log", new_callable=AsyncMock):
+                create_task = asyncio.create_task(
+                    create_customer_order(
+                        OrderCreate(
+                            store_id=store_id,
+                            items=[{"product_id": 1, "quantity": 1}],
+                            idempotency_key=f"customer-order-wins-{suffix[:18]}",
+                            dining_type="TAKEAWAY",
+                        ),
+                        request=SimpleNamespace(headers={}),
+                        db=order_db,
+                        customer=SimpleNamespace(id=source_id),
+                    )
+                )
+                await asyncio.wait_for(create_at_commit.wait(), timeout=15)
+
+                async def merge_after_create_gate():
+                    with patch(
+                        "app.services.customer_merge_service.AuditService.log",
+                        new_callable=AsyncMock,
+                    ):
+                        result = await CustomerMergeService.merge(
+                            merge_db,
+                            target_customer_id=target_id,
+                            source_customer_id=source_id,
+                            reason="MySQL order-create-wins lifecycle gate regression",
+                        )
+                    await merge_db.commit()
+                    return result
+
+                merge_task = asyncio.create_task(merge_after_create_gate())
+                await asyncio.wait_for(merge_waiting_for_gate.wait(), timeout=10)
+                allow_create_commit.set()
+                await asyncio.wait_for(create_task, timeout=30)
+                result = await asyncio.wait_for(merge_task, timeout=30)
+                assert int(result["source_customer_id"]) == source_id
+        finally:
+            allow_create_commit.set()
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_merge_gate_wait)
+            for task in (locals().get("create_task"), locals().get("merge_task")):
+                if task is not None and not task.done():
+                    task.cancel()
+            if order_db.in_transaction():
+                await order_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        source_row = await verify.get(Customer, source_id)
+        target_row = await verify.get(Customer, target_id)
+        assert source_row is not None and source_row.account_status == "DISABLED"
+        assert target_row is not None and target_row.account_status == "ACTIVE"
+        order = await verify.scalar(
+            select(Order).where(Order.idempotency_key == f"customer-order-wins-{suffix[:18]}")
+        )
+        assert order is not None
+        assert int(order.customer_id) == target_id
