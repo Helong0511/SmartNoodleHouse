@@ -72,7 +72,7 @@ async def test_customer_order_create_rejects_stale_customer_after_real_merge(db_
                             idempotency_key=f"customer-order-{suffix[:24]}",
                             dining_type="TAKEAWAY",
                         ),
-                        request=SimpleNamespace(headers={}),
+                        request=SimpleNamespace(headers={}, state=SimpleNamespace(request_id=None)),
                         db=order_db,
                         customer=SimpleNamespace(id=source_id),
                     )
@@ -169,7 +169,7 @@ async def test_customer_order_create_commits_before_real_merge(db_session):
                             idempotency_key=f"customer-order-wins-{suffix[:18]}",
                             dining_type="TAKEAWAY",
                         ),
-                        request=SimpleNamespace(headers={}),
+                        request=SimpleNamespace(headers={}, state=SimpleNamespace(request_id=None)),
                         db=order_db,
                         customer=SimpleNamespace(id=source_id),
                     )
