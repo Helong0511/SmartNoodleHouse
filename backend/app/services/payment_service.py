@@ -1105,7 +1105,7 @@ class PaymentService:
                 payment = Payment(
                     payment_no=generate_no(payment_biz(provider_u), sno, t_no, table_placeholder=t_ph),
                     order_id=order.id,
-                    customer_id=customer_id or order.customer_id,
+                    customer_id=order.customer_id,
                     operator_id=operator_id,
                     provider=provider_u,
                     channel=channel,
