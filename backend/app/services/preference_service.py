@@ -76,7 +76,7 @@ class PreferenceService:
         if not order or not order.customer_id or order.status != "PAID" or not customer:
             return
         customer_id = int(order.customer_id)
-        await PreferenceService.recompute_for_customer(db, customer_id)
+        await PreferenceService.recompute_for_customer(db, customer_id, locked_customer=customer)
         customer.last_order_at = now_local()
         # 刚消费过的授权会员优先进人人脸热集，避免被定容踢出后进店认不出
         try:
@@ -91,13 +91,18 @@ class PreferenceService:
             )
 
     @staticmethod
-    async def recompute_for_customer(db: AsyncSession, customer_id: int) -> None:
+    async def recompute_for_customer(
+        db: AsyncSession, customer_id: int, *, locked_customer=None
+    ) -> None:
         """根据顾客近期已付订单重算全部口味偏好（分析 + 修正）。"""
         if not customer_id:
             return
-        from app.services.privacy_service import PrivacyService
+        if locked_customer is None:
+            from app.services.privacy_service import PrivacyService
 
-        customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
+            customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
+        else:
+            customer = locked_customer
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             # 未明确同意：不构建画像，并清除可能残留的规格偏好。
             stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update())).scalars().all()
