@@ -11,7 +11,7 @@ from sqlalchemy import delete, event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
-from app.models import Customer, Order, Store
+from app.models import Customer, Order, Product, ProductCategory, Store
 from app.schemas.order import OrderCreate
 from app.services import customer_merge_service as customer_merge_service_module
 from app.services.customer_merge_service import CustomerMergeService
@@ -117,9 +117,26 @@ async def test_customer_order_create_commits_before_real_merge(db_session):
         store = Store(store_no=f"COW-{suffix[:20]}", name="Order create wins merge gate race")
         source = Customer(customer_no=f"COWS-{suffix[:27]}")
         target = Customer(customer_no=f"COWT-{suffix[:27]}")
-        setup.add_all([store, source, target])
+        category = ProductCategory(
+            store_id=store.id,
+            category_no=f"COWC-{suffix[:16]}",
+            name="Concurrency test category",
+        )
+        setup.add_all([store, source, target, category])
         await setup.flush()
-        store_id, source_id, target_id = int(store.id), int(source.id), int(target.id)
+        product = Product(
+            store_id=store.id,
+            category_id=category.id,
+            product_no=f"COWP-{suffix[:16]}",
+            name="Concurrency test noodle",
+            price=Decimal("12.00"),
+            status="ON_SALE",
+        )
+        setup.add(product)
+        await setup.flush()
+        store_id, source_id, target_id, product_id = (
+            int(store.id), int(source.id), int(target.id), int(product.id)
+        )
         await setup.commit()
 
     create_at_commit = asyncio.Event()
@@ -147,7 +164,7 @@ async def test_customer_order_create_commits_before_real_merge(db_session):
                     create_customer_order(
                         OrderCreate(
                             store_id=store_id,
-                            items=[{"product_id": 1, "quantity": 1}],
+                            items=[{"product_id": product_id, "quantity": 1}],
                             idempotency_key=f"customer-order-wins-{suffix[:18]}",
                             dining_type="TAKEAWAY",
                         ),
@@ -271,7 +288,8 @@ async def test_opposite_direction_customer_merges_serialize_and_reject_disabled_
                 )
                 assert isinstance(first_result, dict)
                 assert isinstance(second_result, AppException)
-                assert second_result.status_code == 40062
+                assert second_result.code == 40062
+                assert second_result.status_code == 400
         finally:
             release_first_merge.set()
             event.remove(engine.sync_engine, "before_cursor_execute", observe_second_gate_wait)
