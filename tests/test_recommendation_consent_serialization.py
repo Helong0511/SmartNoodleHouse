@@ -714,3 +714,79 @@ async def test_customer_recommendation_cache_hit_is_checked_only_after_consent_g
     assert response["data"]["state"] == "HOT"
     assert [item[0] for item in calls] == ["gate", "ab", "generation", "cache"]
     assert calls[-1] == ("cache", 961, 7)
+
+
+
+@pytest.mark.asyncio
+async def test_reconsent_schedules_cache_invalidation_after_delayed_opt_out(monkeypatch):
+    customer = Customer(
+        id=962, customer_no="LOCK-962", recommend_opt_in=0,
+        status=1, account_status="ACTIVE",
+    )
+    calls = []
+
+    class Session:
+        async def flush(self):
+            return None
+
+    session = Session()
+
+    async def lock_current(_db, customer_id):
+        assert customer_id == 962
+        return customer
+
+    async def audit(*_args, **_kwargs):
+        return None
+
+    async def privacy_settings(_db, _customer):
+        return {"recommend_opt_in": 1}
+
+    def defer(db, customer_id):
+        calls.append((db, customer_id))
+
+    monkeypatch.setattr(
+        PrivacyService, "lock_customer_for_recommendation", staticmethod(lock_current)
+    )
+    monkeypatch.setattr(PrivacyService, "get_privacy_settings", staticmethod(privacy_settings))
+    monkeypatch.setattr(AuditService, "log", staticmethod(audit))
+    monkeypatch.setattr(reco_cache, "defer_invalidate_customer", defer)
+
+    await PrivacyService.update_opt_in(session, customer, 1)
+
+    assert calls == [(session, 962)]
+
+
+@pytest.mark.asyncio
+async def test_record_consent_schedules_cache_invalidation_when_reenabling(monkeypatch):
+    customer = Customer(
+        id=963, customer_no="LOCK-963", recommend_opt_in=0,
+        status=1, account_status="ACTIVE",
+    )
+    calls = []
+
+    class Session:
+        async def flush(self):
+            return None
+
+    session = Session()
+
+    async def lock_current(_db, customer_id):
+        assert customer_id == 963
+        return customer
+
+    async def audit(*_args, **_kwargs):
+        return None
+
+    def defer(db, customer_id):
+        calls.append((db, customer_id))
+
+    monkeypatch.setattr(
+        PrivacyService, "lock_customer_for_recommendation", staticmethod(lock_current)
+    )
+    monkeypatch.setattr(AuditService, "log", staticmethod(audit))
+    monkeypatch.setattr(reco_cache, "defer_invalidate_customer", defer)
+
+    result = await PrivacyService.record_consent(session, customer)
+
+    assert result["recommend_opt_in"] == 1
+    assert calls == [(session, 963)]
