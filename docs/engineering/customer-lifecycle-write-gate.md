@@ -1,6 +1,6 @@
 # Customer lifecycle write-gate protocol
 
-Status: implemented on PR #217. The configured MySQL 8 CI suite passed on head `8356b066abef80630e8b944b0088bae15fe8d764` (35 passed, 42 deselected). This validates the scenarios listed below that are present in the CI command; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
+Status: implemented on PR #217. The configured MySQL 8 CI suite passed on code head `8356b066abef80630e8b944b0088bae15fe8d764` (35 passed, 42 deselected). A later recommendation-read/cache-epoch follow-up is on current PR head `6d357295dbacbc7be1f38703528749b744f019bd`; CI run `45140505315` is pending, so those latest changes are not yet validated. This does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
 
 ## Why a separate gate is required
 
@@ -76,6 +76,18 @@ The model, migration/backfill, gate helper, merge integration, POS create/bind, 
 - Refund parent-lock wait vs merge gate, plus the recommendation-consent serialization suite and missing-gate fail-closed behavior.
 
 On head `8356b066abef80630e8b944b0088bae15fe8d764`, CI run `45131701323` passed all 12 jobs; the MySQL-marked job reported 35 passed and 42 deselected. The CI command is the source of truth for which tests actually execute. Some items in the broader matrix (for example every possible simultaneous-merge topology, all wallet debit paths, and every operational recovery scenario) are not proven merely by this aggregate count.
+
+## Recommendation consent reads and cache coherence
+
+Recommendation reads participate in the same customer lifecycle gate as consent writes:
+
+- `/miniprogram/recommendations` acquires the customer's `CustomerWriteGate` and current `Customer` row before reading a customer-scoped cache. This prevents a cache hit from bypassing an in-flight consent revocation.
+- If the current consent is disabled, the endpoint skips customer-scoped cache lookup and returns cold-start recommendations. A stale optional-auth object is not trusted after the current locked read.
+- Consent revocation clears derived data and writes cache-invalidation Outbox events in the same transaction. Re-consent also writes a fresh invalidation event so a delayed opt-out invalidation cannot leave old cache payloads usable.
+- Redis generation keys remain the fast cross-worker fence. The cache identity additionally includes the latest durable recommendation-cache Outbox event ID, read with a current locking read after the customer gate. Thus a Redis outage/recovery window cannot make an old customer cache key current again while its invalidation event is pending.
+- Migration `0053_outbox_aggregate_lookup` adds `idx_oe_aggregate_latest(aggregate_type, aggregate_id, id)` for this current Outbox lookup. Production rollout must apply this migration before deploying the code that depends on it.
+
+The recommendation-read tests cover (1) opted-out requests bypassing customer cache and A/B assignment, (2) authorized cache hits occurring only after the consent gate, (3) durable Outbox epoch inclusion in the cache key, and (4) re-consent scheduling a new invalidation. These are unit/contract regressions; they do not replace a real Redis outage/recovery test in staging.
 
 ## Remaining rollout checks
 
