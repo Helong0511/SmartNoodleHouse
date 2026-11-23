@@ -17,6 +17,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.models import (
+    Customer,
     CustomerBehaviorEvent,
     CustomerTasteProfile,
     Order,
@@ -79,11 +80,12 @@ class TasteLearningService:
             return None, None
         observed_customer_id = int(order_snapshot.customer_id)
 
-        from app.services.privacy_service import PrivacyService
+        from app.services.customer_write_gate import lock_customer_write_gates
 
-        customer = await PrivacyService.lock_customer_for_recommendation(
-            db, observed_customer_id
-        )
+        # Match the repository-wide order: Gate → operation parent (Order) →
+        # Customer. CustomerMergeService locks all affected Orders before its
+        # Customer rows, so learning must not invert that order.
+        await lock_customer_write_gates(db, [observed_customer_id])
         order = (
             await db.execute(
                 select(Order)
@@ -101,6 +103,14 @@ class TasteLearningService:
             raise RuntimeError(
                 "order customer changed while acquiring recommendation gate; retry outbox"
             )
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == observed_customer_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         return order, customer
 
     # ---------- 信号键展开 ----------
