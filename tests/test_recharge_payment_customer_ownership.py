@@ -286,3 +286,21 @@ async def test_mysql_recharge_settlement_aborts_after_real_customer_merge(db_ses
         await verify.execute(delete(Customer).where(Customer.id.in_([source_id, target_id])))
         await verify.execute(delete(Store).where(Store.id == store_id))
         await verify.commit()
+
+
+def test_order_payment_uses_locked_order_owner_and_acquires_gate_before_order_lock():
+    source = inspect.getsource(PaymentService.create_payment)
+    gate = source.index("await lock_customer_write_gates(db, [int(observed_owner_id)])")
+    order_lock = source.index(".with_for_update()", source.index("locked = ("))
+    assert gate < order_lock
+    assert "payment.customer_id = order.customer_id" in source
+    assert "customer_id=order.customer_id" in source
+    assert "customer_id=customer_id or order.customer_id" not in source
+    assert "recharge.customer_id" not in source
+
+
+def test_order_payment_revalidates_request_owner_after_locked_order_refresh():
+    source = inspect.getsource(PaymentService.create_payment)
+    locked_refresh = source.index(".execution_options(populate_existing=True)")
+    owner_check = source.index("if customer_id is not None and int(customer_id) != locked_owner_id")
+    assert locked_refresh < owner_check
