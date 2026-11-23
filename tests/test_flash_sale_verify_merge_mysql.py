@@ -98,10 +98,10 @@ async def test_flash_sale_verify_observes_claim_cancelled_by_real_merge(db_sessi
 
             with pytest.raises(AppException) as exc:
                 await asyncio.wait_for(verify_task, timeout=15)
-            # Merge disables the source customer; verify fails closed at the customer gate
-            # before it can expose the claim cancellation state to a stale identity.
-            assert exc.value.status_code == 401
-            assert "顾客不存在或已禁用" in str(exc.value.message if hasattr(exc.value, "message") else exc.value)
+            # The lifecycle gate serializes verification after merge; terminal claims
+            # expose their durable cancellation state without requiring an active owner.
+            assert exc.value.status_code == 400
+            assert "该资格已取消" in str(exc.value.message if hasattr(exc.value, "message") else exc.value)
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", observe_gate)
             if verify_db.in_transaction():
