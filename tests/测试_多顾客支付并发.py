@@ -260,7 +260,7 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         status="PROCESSING",
         retry_count=1,
     )
-    settle_order = SimpleNamespace(id=9)
+    settle_order = SimpleNamespace(id=9, customer_id=None)
     settle_payment = SimpleNamespace(
         id=3,
         payment_no="PAY3",
@@ -277,6 +277,7 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         row.status = status
 
     settle_db = AsyncMock()
+    settle_db.scalar = AsyncMock(return_value=None)
     # 依次模拟：读取支付关联、锁订单、锁支付、锁退款行；
     # SUCCESS 入账前再次校验并锁定订单与支付，顺序始终为 Order→Payment→Refund。
     payment_peek = MagicMock()
