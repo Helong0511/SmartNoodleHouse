@@ -853,6 +853,20 @@ class PaymentService:
         extra: dict | None = None,
         amount: Decimal | None = None,
     ) -> tuple[Payment, dict]:
+        # Discover the current owner without locking, then acquire its lifecycle
+        # gate before the Order row. Merge uses the same gate -> Order lock order.
+        observed_owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == int(order.id))
+        )
+        if observed_owner_id is None and order.customer_id is not None:
+            # A nullable owner is valid for anonymous POS orders; this branch only
+            # distinguishes a missing Order from a row with no customer.
+            exists = await db.scalar(select(Order.id).where(Order.id == int(order.id)))
+            if exists is None:
+                raise AppException(40402, "订单不存在")
+        if observed_owner_id is not None:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
+
         locked = (
             await db.execute(
                 select(Order)
@@ -864,6 +878,12 @@ class PaymentService:
         if not locked:
             raise AppException(40402, "订单不存在")
         order = locked
+        locked_owner_id = int(order.customer_id) if order.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "订单顾客归属在加锁期间发生变化，请重试", status_code=409)
+        if customer_id is not None and int(customer_id) != locked_owner_id:
+            raise AppException(40906, "订单顾客归属已变化，请重新发起支付", status_code=409)
 
         if order.payment_status == "PAID":
             raise AppException(40010, "订单已支付")
@@ -941,17 +961,16 @@ class PaymentService:
             reused = True
             if operator_id is not None:
                 payment.operator_id = operator_id
-            # The locked RechargeOrder is the ownership authority. The optional
-            # customer_id may come from a request authenticated before a merge
-            # committed while this call was waiting for the RechargeOrder lock.
-            payment.customer_id = int(recharge.customer_id)
+            # The locked Order is the ownership authority. Never use a
+            # request-scoped customer ID after the order lock has refreshed state.
+            payment.customer_id = order.customer_id
         else:
             t_no, t_ph = await _order_table_parts(db, order)
             sno = await _order_store_no(db, order)
             payment = Payment(
                 payment_no=generate_no(payment_biz(provider_u), sno, t_no, table_placeholder=t_ph),
                 order_id=order.id,
-                customer_id=customer_id or order.customer_id,
+                customer_id=order.customer_id,
                 operator_id=operator_id,
                 provider=provider_u,
                 channel=channel,
@@ -966,7 +985,7 @@ class PaymentService:
 
         # 余额支付：本事务内扣款并结清，不走第三方
         if provider_u == "BALANCE":
-            cid = customer_id or order.customer_id
+            cid = order.customer_id
             if not cid:
                 raise AppException(40040, "余额支付需绑定顾客")
             # 游客/匿名会话不得使用储值财产能力
