@@ -1,6 +1,6 @@
 # Customer lifecycle write-gate protocol
 
-Status: implemented on PR #217. The configured MySQL 8 CI suite passed on code head `8356b066abef80630e8b944b0088bae15fe8d764` (35 passed, 42 deselected). A later recommendation-read/cache-epoch follow-up is on current PR head `6d357295dbacbc7be1f38703528749b744f019bd`; CI run `45140505315` is pending, so those latest changes are not yet validated. This does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
+Status: implemented on PR #217. The latest fully validated code head is `85d524b58598ddf5ce4a39ac40707bdba87b7f54`; CI run [#2897](https://github.com/Helong0511/SmartNoodleHouse/actions/runs/45144165215) passed all 12 jobs. Its MySQL 8 job reported 35 passed and 47 deselected; the backend suite reported 2,217 passed and 50 skipped (60.87% coverage). This confirms the tested CI environment only; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
 
 ## Why a separate gate is required
 
@@ -75,7 +75,7 @@ The model, migration/backfill, gate helper, merge integration, POS create/bind, 
 - Recharge payment creation and settlement vs merge.
 - Refund parent-lock wait vs merge gate, plus the recommendation-consent serialization suite and missing-gate fail-closed behavior.
 
-On head `8356b066abef80630e8b944b0088bae15fe8d764`, CI run `45131701323` passed all 12 jobs; the MySQL-marked job reported 35 passed and 42 deselected. The CI command is the source of truth for which tests actually execute. Some items in the broader matrix (for example every possible simultaneous-merge topology, all wallet debit paths, and every operational recovery scenario) are not proven merely by this aggregate count.
+On validated code head `85d524b58598ddf5ce4a39ac40707bdba87b7f54`, CI run `45144165215` passed all 12 jobs; the MySQL-marked job reported 35 passed and 47 deselected. The backend suite reported 2,217 passed and 50 skipped. The CI command is the source of truth for which tests actually execute. Some items in the broader matrix (for example every possible simultaneous-merge topology, all wallet debit paths, and every operational recovery scenario) are not proven merely by this aggregate count.
 
 ## Recommendation consent reads and cache coherence
 
