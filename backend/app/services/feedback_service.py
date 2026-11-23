@@ -12,7 +12,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Customer, Order, ProductFeedback
+from app.models import Order, ProductFeedback
 
 logger = logging.getLogger(__name__)
 
@@ -107,18 +107,18 @@ class FeedbackService:
         - 新评价落库后同步驱动画像 fold（失败由调用方隔离）。
         """
         from app.models import OrderItem
-        from app.services.privacy_service import PrivacyService
         from app.services.taste_learning_service import TasteLearningService
 
-        # Serialize feedback persistence with opt-out cleanup. Feedback remains a
-        # business record when opted out, but an in-flight pre-revocation submit
-        # must finish before the revocation cleanup can delete it.
-        if order.customer_id:
-            locked_customer = await PrivacyService.lock_customer_for_recommendation(
-                db, int(order.customer_id)
-            )
-            if locked_customer is None:
-                raise ValueError("顾客不存在，无法提交评价")
+        # Serialize feedback persistence with both merge and opt-out cleanup.
+        # The caller's Order may be stale: refresh its owner only after acquiring
+        # Gate → Customer → Order, and abort if ownership changed while waiting.
+        if not order.customer_id:
+            raise ValueError("订单未关联顾客，无法提交评价")
+        order, locked_customer = await TasteLearningService._lock_order_customer_for_learning(
+            db, int(order.id)
+        )
+        if order is None or locked_customer is None:
+            raise ValueError("顾客或订单不存在，无法提交评价")
 
         order_items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order.id)
@@ -175,8 +175,7 @@ class FeedbackService:
             saved.append(pid)
             # 关闭个性化的顾客：评价仅留存，不更新推荐画像
             # 画像学习用 savepoint 隔离，失败不回滚已落库的评价
-            customer = await db.get(Customer, int(order.customer_id))
-            if customer is not None and int(getattr(customer, "recommend_opt_in", 1) or 0) == 1:
+            if int(getattr(locked_customer, "recommend_opt_in", 1) or 0) == 1:
                 try:
                     async with db.begin_nested():
                         await TasteLearningService.learn_from_feedback(db, fb)
