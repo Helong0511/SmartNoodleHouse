@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects import mysql
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Customer, CustomerBehaviorEvent, CustomerPreference
+from app.models import Customer, CustomerBehaviorEvent, CustomerPreference, Order
 from app.services import behavior_event_service
 from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
@@ -85,6 +85,40 @@ async def test_profile_learning_uses_locked_consent_state(monkeypatch):
 
     assert await TasteLearningService.learn_from_events(object(), 93) == 0
     assert calls == [93]
+
+
+async def test_profile_learning_rejects_order_owner_changed_while_waiting_for_gate(monkeypatch):
+    stale_order = Order(id=940, customer_id=93, payment_status="PAID")
+    current_order = Order(id=940, customer_id=94, payment_status="PAID")
+
+    class Result:
+        def scalar_one_or_none(self):
+            return current_order
+
+    class Session:
+        statement = None
+
+        async def get(self, model, order_id):
+            assert model is Order
+            assert order_id == 940
+            return stale_order
+
+        async def execute(self, statement):
+            self.statement = statement
+            return Result()
+
+    async def locked(_db, customer_id):
+        assert customer_id == 93
+        return Customer(id=93, customer_no="LOCK-93", recommend_opt_in=1)
+
+    monkeypatch.setattr(PrivacyService, "lock_customer_for_recommendation", locked)
+    session = Session()
+
+    with pytest.raises(RuntimeError, match="order customer changed"):
+        await TasteLearningService._lock_order_customer_for_learning(session, 940)
+
+    assert session.statement._for_update_arg is not None
+    assert session.statement.get_execution_options()["populate_existing"] is True
 
 
 @pytest.mark.asyncio
