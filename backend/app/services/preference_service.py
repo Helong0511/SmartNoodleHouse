@@ -66,7 +66,7 @@ class PreferenceService:
     @staticmethod
     async def update_from_order(db: AsyncSession, order_id: int) -> None:
         # 订单可能在支付后异步处理前被顾客合并迁移。必须先按 Gate →
-        # Customer → Order 锁序取得当前归属，不能信任任务开始时缓存的 ORM 对象。
+        # Order → Customer 锁序取得当前归属，不能信任任务开始时缓存的 ORM 对象。
         from app.services.taste_learning_service import TasteLearningService
 
         order, customer = await TasteLearningService._lock_order_customer_for_learning(
