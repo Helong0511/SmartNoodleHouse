@@ -1,6 +1,6 @@
 # Customer lifecycle write-gate protocol
 
-Status: implemented on PR #217. The latest fully validated code head is `85d524b58598ddf5ce4a39ac40707bdba87b7f54`; CI run [#2897](https://github.com/Helong0511/SmartNoodleHouse/actions/runs/45144165215) passed all 12 jobs. Its MySQL 8 job reported 35 passed and 47 deselected; the backend suite reported 2,217 passed and 50 skipped (60.87% coverage). This confirms the tested CI environment only; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
+Status: implemented on PR #217. The latest fully validated PR head is `ad0e8575cf3d889ee6e3f8144f090ac3dc133ae4`; CI run [#2898](https://github.com/Helong0511/SmartNoodleHouse/actions/runs/45150219930) passed all 12 jobs on that exact head. Its MySQL 8 job reported 35 passed and 47 deselected; the backend suite reported 2,217 passed and 50 skipped (60.87% coverage). This confirms the tested CI environment only; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
 
 ## Why a separate gate is required
 
@@ -75,7 +75,7 @@ The model, migration/backfill, gate helper, merge integration, POS create/bind, 
 - Recharge payment creation and settlement vs merge.
 - Refund parent-lock wait vs merge gate, plus the recommendation-consent serialization suite and missing-gate fail-closed behavior.
 
-On validated code head `85d524b58598ddf5ce4a39ac40707bdba87b7f54`, CI run `45144165215` passed all 12 jobs; the MySQL-marked job reported 35 passed and 47 deselected. The backend suite reported 2,217 passed and 50 skipped. The CI command is the source of truth for which tests actually execute. Some items in the broader matrix (for example every possible simultaneous-merge topology, all wallet debit paths, and every operational recovery scenario) are not proven merely by this aggregate count.
+On validated PR head `ad0e8575cf3d889ee6e3f8144f090ac3dc133ae4`, CI run `45150219930` passed all 12 jobs; the MySQL-marked job reported 35 passed and 47 deselected. The backend suite reported 2,217 passed and 50 skipped (60.87% coverage). The CI command is the source of truth for which tests actually execute. Some items in the broader matrix (for example every possible simultaneous-merge topology, all wallet debit paths, and every operational recovery scenario) are not proven merely by this aggregate count.
 
 ## Recommendation consent reads and cache coherence
 
@@ -88,6 +88,8 @@ Recommendation reads participate in the same customer lifecycle gate as consent 
 - Migration `0053_outbox_aggregate_lookup` adds `idx_oe_aggregate_latest(aggregate_type, aggregate_id, id)` for this current Outbox lookup. Production rollout must apply this migration before deploying the code that depends on it.
 
 The recommendation-read tests cover (1) opted-out requests bypassing customer cache and A/B assignment, (2) authorized cache hits occurring only after the consent gate, (3) durable Outbox epoch inclusion in the cache key, and (4) re-consent scheduling a new invalidation. These are unit/contract regressions; they do not replace a real Redis outage/recovery test in staging.
+
+The endpoint currently retains the customer gate while it performs Redis generation/cache/lease operations and, on a miss, recommendation queries. This preserves read-vs-revocation serialization, but it also means slow Redis or recommendation queries can extend the gate's hold time and delay other customer-owned writes. CI establishes correctness under its test conditions, not production latency or lock-wait bounds. Measure gate wait/hold duration and exercise slow-Redis plus cache-miss scenarios in staging before deciding whether to introduce a different read-serialization mechanism; any optimization must preserve the revocation fence.
 
 ## Remaining rollout checks
 
