@@ -857,3 +857,74 @@ async def test_recommendation_profile_read_uses_current_locking_read():
     assert "from customer_taste_profiles" in sql
     assert "customer_id = 965" in sql
     assert "for update" in sql
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.mysql
+async def test_mysql_recommendation_profile_read_uses_current_view_after_reconsent(db_session):
+    if db_session.bind.dialect.name != "mysql":
+        pytest.skip("REPEATABLE READ current-read regression requires MySQL")
+
+    customer = await make_customer(db_session, recommend_opt_in=1)
+    customer_id = int(customer.id)
+    db_session.add(
+        CustomerTasteProfile(
+            customer_id=customer_id,
+            dim_type="TASTE_TAG",
+            target_key="stale-profile",
+            target_name="stale-profile",
+            score=0.9,
+            raw_weight=1.0,
+            event_count=3,
+        )
+    )
+    await db_session.commit()
+
+    async_session = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    stale_reader = async_session()
+    revoker = async_session()
+    reconsenter = async_session()
+    try:
+        # Establish a REPEATABLE READ snapshot before the consent changes.
+        stale_customer = await stale_reader.get(Customer, customer_id)
+        assert stale_customer is not None
+
+        revoked_customer = await PrivacyService.lock_customer_for_recommendation(
+            revoker, customer_id
+        )
+        assert revoked_customer is not None
+        revoked_customer.recommend_opt_in = 0
+        from sqlalchemy import delete
+
+        await revoker.execute(
+            delete(CustomerTasteProfile).where(
+                CustomerTasteProfile.customer_id == customer_id
+            )
+        )
+        await revoker.commit()
+
+        reconsented_customer = await PrivacyService.lock_customer_for_recommendation(
+            reconsenter, customer_id
+        )
+        assert reconsented_customer is not None
+        reconsented_customer.recommend_opt_in = 1
+        await reconsenter.commit()
+
+        # The locked Customer current read sees re-consent, while the profile
+        # loader must also use a current read rather than the stale snapshot.
+        locked_customer = await PrivacyService.lock_customer_for_recommendation(
+            stale_reader, customer_id
+        )
+        assert locked_customer is not None
+        assert int(locked_customer.recommend_opt_in or 0) == 1
+
+        profiles, total_events = await miniprogram_menu.RecommendationService.load_profiles(
+            stale_reader, customer_id
+        )
+        assert profiles == {}
+        assert total_events == 0
+    finally:
+        await stale_reader.close()
+        await revoker.close()
+        await reconsenter.close()
