@@ -111,7 +111,7 @@ class FeedbackService:
 
         # Serialize feedback persistence with both merge and opt-out cleanup.
         # The caller's Order may be stale: refresh its owner only after acquiring
-        # Gate → Customer → Order, and abort if ownership changed while waiting.
+        # Gate → Order → Customer, and abort if ownership changed while waiting.
         if not order.customer_id:
             raise ValueError("订单未关联顾客，无法提交评价")
         order, locked_customer = await TasteLearningService._lock_order_customer_for_learning(
@@ -178,7 +178,9 @@ class FeedbackService:
             if int(getattr(locked_customer, "recommend_opt_in", 1) or 0) == 1:
                 try:
                     async with db.begin_nested():
-                        await TasteLearningService.learn_from_feedback(db, fb)
+                        await TasteLearningService.learn_from_feedback(
+                            db, fb, locked_customer=locked_customer
+                        )
                 except Exception:
                     logger.exception(
                         "评价画像学习失败 order_id=%s product_id=%s customer_id=%s",
