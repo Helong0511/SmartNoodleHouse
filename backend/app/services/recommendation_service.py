@@ -625,10 +625,14 @@ class RecommendationService:
     async def load_profiles(
         db: AsyncSession, customer_id: int
     ) -> tuple[dict[tuple[str, str], ProfilePoint], int]:
+        # This endpoint may have established a REPEATABLE READ snapshot while
+        # resolving OptionalCustomer, before it waited for the customer gate.
+        # A normal SELECT here could therefore resurrect pre-revocation profile
+        # rows after a later re-consent. Use a current locking read after the gate.
         rows = await db.execute(
-            select(CustomerTasteProfile).where(
-                CustomerTasteProfile.customer_id == int(customer_id)
-            )
+            select(CustomerTasteProfile)
+            .where(CustomerTasteProfile.customer_id == int(customer_id))
+            .with_for_update()
         )
         profiles: dict[tuple[str, str], ProfilePoint] = {}
         total_events = 0
