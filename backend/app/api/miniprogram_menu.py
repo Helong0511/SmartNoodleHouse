@@ -123,6 +123,27 @@ def _reco_cache_fingerprint(fingerprint: str, limit: int) -> str:
     return f"{fingerprint}:limit={int(limit)}"
 
 
+async def _latest_reco_cache_epoch(db, customer_id: int) -> int:
+    """从持久化 Outbox 读取顾客最新画像失效序号，补足 Redis 代际故障窗口。
+
+    必须使用 current locking read：OptionalCustomer 可能已在本事务建立
+    REPEATABLE READ 快照，而撤权/重授权事务可能在等待 Customer Gate 时提交。
+    """
+    from app.models import OutboxEvent
+
+    result = await db.execute(
+        select(OutboxEvent.id)
+        .where(
+            OutboxEvent.aggregate_type == "reco_cache",
+            OutboxEvent.aggregate_id == int(customer_id),
+        )
+        .order_by(OutboxEvent.id.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    return int(result.scalar_one_or_none() or 0)
+
+
 def _serialize_reco(ranked, state, meta, ab_bucket, ab_status=None):
     items = []
     for r in ranked:
@@ -223,6 +244,13 @@ async def get_recommendations(
                 payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
                 payload["cache_hit"] = False
                 return success(payload, request=request)
+
+            # Redis generation keys can be unavailable during an outage while old
+            # cache payloads survive. Include the latest durable Outbox event id
+            # in the cache identity so a re-consent cannot revive pre-revocation
+            # data before the retry worker advances the Redis generation.
+            cache_epoch = await _latest_reco_cache_epoch(db, int(cid))
+            cache_fingerprint = f"{cache_fingerprint}:epoch={cache_epoch}"
 
     if cid is not None:
         ab_bucket, ab_params, ab_exp = await AbService.assign(db, cid, DEFAULT_EXPERIMENT_KEY)
