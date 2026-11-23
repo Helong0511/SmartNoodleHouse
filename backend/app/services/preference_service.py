@@ -118,6 +118,7 @@ class PreferenceService:
                         Order.id.desc(),
                     )
                     .limit(PreferenceService.RECENCY_WINDOW)
+                    .with_for_update()
                 )
             ).scalars().all()
         )
