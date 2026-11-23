@@ -168,12 +168,14 @@ class AbService:
             customer_id=int(customer_id),
             bucket=chosen["code"],
         )
-        db.add(row)
         try:
-            await db.flush()
+            # A full Session.rollback() would also release any customer lifecycle
+            # gate held by the caller. Isolate the unique-key race in a SAVEPOINT.
+            async with db.begin_nested():
+                db.add(row)
+                await db.flush()
         except IntegrityError:
-            # 并发首次分桶：唯一约束兜底，重查既有桶位
-            await db.rollback()
+            # 并发首次分桶：仅回滚本次 INSERT，保留外层事务与 Customer Gate。
             row = await db.scalar(
                 select(AbAssignment).where(
                     AbAssignment.experiment_key == experiment_key,
