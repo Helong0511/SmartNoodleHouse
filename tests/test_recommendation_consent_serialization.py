@@ -847,7 +847,7 @@ async def test_recommendation_profile_read_uses_current_locking_read():
         session, 965
     )
 
-    sql = str(session.statement.compile(dialect=mysql.dialect())).lower()
+    sql = str(session.statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True})).lower()
     assert profiles == {}
     assert total_events == 0
     assert "from customer_taste_profiles" in sql
