@@ -1,6 +1,6 @@
 # Customer lifecycle write-gate protocol
 
-Status: implementation notes for PR #217; the gate and flash-sale merge policy are implemented on the PR branch. MySQL concurrency validation remains in progress.
+Status: implemented on PR #217. The configured MySQL 8 CI suite passed on head `8356b066abef80630e8b944b0088bae15fe8d764` (35 passed, 42 deselected). This validates the scenarios listed below that are present in the CI command; it does not mean every item in the broader matrix has a dedicated two-session test or that production schema/lock behavior has been verified.
 
 ## Why a separate gate is required
 
@@ -61,13 +61,25 @@ Use two independent `AsyncSession` connections against MySQL 8 / InnoDB. Use exp
 
 For every case, assert both sessions finish within timeout, inspect committed ownership from a third fresh session, and verify no order/payment/recharge/claim is orphaned or attached to a disabled source account.
 
-## Rollout sequence
+## Implementation and CI coverage status
 
-1. Add model + migration/backfill and transactional gate-row creation to every customer creation path.
-2. Add the shared gate helper and unit tests for sorted multi-row locking, missing-row behavior, and active-customer refresh.
-3. Convert merge first so it acquires gates before all existing parent locks.
-4. Convert POS create/bind, recharge create, and flash claim/verify; audit all other customer-owned writes.
-5. Add and run the MySQL 8 two-session matrix above.
-6. Only after all participating paths are converted and MySQL tests pass, treat the gate as an enforced invariant.
+The model, migration/backfill, gate helper, merge integration, POS create/bind, recharge create/payment ownership, flash claim/verify, and recommendation-consent paths are implemented on the PR branch. The MySQL 8 CI job currently runs the following two-session lifecycle regressions:
 
-This document records the gate implementation and its intended lock protocol on the PR branch. It does not claim that the full MySQL 8 concurrency matrix has passed: the matrix remains a release gate until each participating path is exercised against the real `CustomerMergeService.merge()` implementation and committed ownership is checked from a third session.
+- Customer order creation vs merge, including both merge-wins and create-wins orderings.
+- Opposite-direction customer merges sharing a customer.
+- Recharge creation vs merge, including merge-wins and create-wins orderings.
+- Customer-associated POS order creation vs merge.
+- POS bind/reassignment vs merge for both the new owner and stale old owner.
+- Flash-sale claim creation vs merge, including stale authenticated customer and claim-wins ordering.
+- Flash-sale verification vs merge, covering merge-cancels-claim and verify-wins/history-preservation orderings.
+- Recharge payment creation and settlement vs merge.
+- Refund parent-lock wait vs merge gate, plus the recommendation-consent serialization suite and missing-gate fail-closed behavior.
+
+On head `8356b066abef80630e8b944b0088bae15fe8d764`, CI run `45131701323` passed all 12 jobs; the MySQL-marked job reported 35 passed and 42 deselected. The CI command is the source of truth for which tests actually execute. Some items in the broader matrix (for example every possible simultaneous-merge topology, all wallet debit paths, and every operational recovery scenario) are not proven merely by this aggregate count.
+
+## Remaining rollout checks
+
+1. Verify the deployed production migration head, trigger definitions, gate-row parity, table DDL/indexes, and relevant `EXPLAIN` plans.
+2. Run realistic staging concurrency tests across merge, order/recharge creation, payment, refund, POS bind, and flash-sale flows; inspect InnoDB lock diagnostics and retry behavior.
+3. Verify Redis outage/recovery and Outbox retry behavior in the deployed environment.
+4. Treat the gate as a code-level serialization invariant, but do not infer production readiness from CI alone.
