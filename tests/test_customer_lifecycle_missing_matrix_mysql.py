@@ -21,6 +21,8 @@ from app.models import (
     FlashSaleStock,
     MarketingCampaign,
     Order,
+    OrderStatusHistory,
+    Payment,
     Product,
     ProductCategory,
     Store,
@@ -577,3 +579,123 @@ async def test_pos_bind_rejects_stale_old_owner_after_real_merge_commits(db_sess
         )
         await verify.execute(delete(Store).where(Store.id == ids["store_id"]))
         await verify.commit()
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_flash_sale_verify_commits_before_real_merge_preserves_used_entitlement(db_session):
+    """Verification that owns the gate first completes; merge preserves its USED claim."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    ids = await _seed_flash_claim_race(maker, uuid.uuid4().hex)
+    claim_id = None
+    order_id = None
+
+    async with maker() as claim_db:
+        with (
+            patch("app.services.flash_sale_service.MarketingService.is_enabled",
+                  new=AsyncMock(return_value=True)),
+            patch("app.services.flash_sale_service.MarketingService.is_store_participating",
+                  new=AsyncMock(return_value=True)),
+        ):
+            claimed = await FlashSaleService.claim(
+                claim_db,
+                campaign_id=ids["campaign_id"],
+                store_id=ids["store_id"],
+                customer_id=ids["source_id"],
+                client_request_id=f"fverify-{uuid.uuid4().hex[:24]}",
+            )
+        claim_id = int(claimed["claim_id"])
+        await claim_db.commit()
+
+    verify_gate_acquired = asyncio.Event()
+    allow_verify_to_continue = asyncio.Event()
+    merge_waiting = asyncio.Event()
+    original_verify_lock = __import__(
+        "app.services.flash_sale_service", fromlist=["lock_customer_write_gates"]
+    ).lock_customer_write_gates
+
+    async def pause_verify_after_gate(db, customer_ids):
+        result = await original_verify_lock(db, customer_ids)
+        if db is verify_db:
+            verify_gate_acquired.set()
+            await asyncio.wait_for(allow_verify_to_continue.wait(), timeout=20)
+        return result
+
+    async with maker() as verify_db, maker() as merge_db:
+        verify_connection = (await verify_db.connection()).sync_connection
+
+        def observe_merge_wait(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if (
+                conn is not verify_connection
+                and "CUSTOMER_WRITE_GATES" in normalized
+                and "FOR UPDATE" in normalized
+            ):
+                merge_waiting.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_merge_wait)
+        try:
+            import app.services.flash_sale_service as flash_module
+
+            with patch.object(flash_module, "lock_customer_write_gates", new=pause_verify_after_gate):
+                verify_task = asyncio.create_task(
+                    FlashSaleService.verify(
+                        verify_db,
+                        claim_no=claimed["claim_no"],
+                        store_id=ids["store_id"],
+                        operator_id=None,
+                    )
+                )
+                await asyncio.wait_for(verify_gate_acquired.wait(), timeout=10)
+                with patch(
+                    "app.services.customer_merge_service.AuditService.log",
+                    new_callable=AsyncMock,
+                ):
+                    merge_task = asyncio.create_task(
+                        CustomerMergeService.merge(
+                            merge_db,
+                            target_customer_id=ids["target_id"],
+                            source_customer_id=ids["source_id"],
+                            reason="MySQL flash verify wins lifecycle gate regression",
+                        )
+                    )
+                    await asyncio.wait_for(merge_waiting.wait(), timeout=10)
+                    allow_verify_to_continue.set()
+                    verified = await asyncio.wait_for(verify_task, timeout=20)
+                    order_id = int(verified["order_id"])
+                    await verify_db.commit()
+                    await asyncio.wait_for(merge_task, timeout=20)
+                    await merge_db.commit()
+        finally:
+            allow_verify_to_continue.set()
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_merge_wait)
+            if verify_db.in_transaction():
+                await verify_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as check:
+        claim = await check.get(FlashSaleClaim, claim_id)
+        order = await check.get(Order, order_id)
+        source = await check.get(Customer, ids["source_id"])
+        target = await check.get(Customer, ids["target_id"])
+        assert claim is not None and claim.status == "USED"
+        assert claim.customer_id == ids["source_id"]
+        assert claim.order_id == order_id
+        assert order is not None and order.customer_id == ids["target_id"]
+        assert source is not None and source.account_status == "DISABLED"
+        assert target is not None and target.status == 1
+
+    async with maker() as cleanup:
+        await cleanup.execute(
+            delete(OrderStatusHistory).where(OrderStatusHistory.order_id == order_id)
+        )
+        await cleanup.execute(delete(Payment).where(Payment.order_id == order_id))
+        await cleanup.execute(delete(Order).where(Order.id == order_id))
+        await cleanup.commit()
+    await _cleanup_flash_claim_race(maker, ids)
