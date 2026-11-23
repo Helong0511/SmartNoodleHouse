@@ -91,6 +91,12 @@ class PrivacyService:
             # 顾客主动点击授权后调用；每次重新开启均记录新的同意时间与政策版本。
             customer.consent_version = CONSENT_VERSION
             customer.recommend_consent_at = datetime.now(timezone.utc)
+            if old != 1:
+                # Redis outage may have delayed the opt-out invalidation Outbox.
+                # Fence any pre-revocation cache before personalized reads resume.
+                from app.services.reco_cache import defer_invalidate_customer
+
+                defer_invalidate_customer(db, int(customer.id))
         else:
             # 撤回授权后立即清除派生画像与行为数据；订单及财务凭证不删除。
             await cls.clear_taste_profile(db, customer, request=request, acquire_lock=False)
@@ -258,9 +264,16 @@ class PrivacyService:
         ver = (version or CONSENT_VERSION).strip()[:40]
         now = datetime.now(timezone.utc)
         old_ver = customer.consent_version
+        old_opt_in = int(getattr(customer, "recommend_opt_in", 0) or 0)
         customer.consent_version = ver
         customer.recommend_consent_at = now
         customer.recommend_opt_in = 1
+        if old_opt_in != 1:
+            # Re-consent must fence caches left behind by a delayed opt-out
+            # invalidation while Redis was unavailable.
+            from app.services.reco_cache import defer_invalidate_customer
+
+            defer_invalidate_customer(db, int(customer.id))
         await db.flush()
 
         await AuditService.log(
