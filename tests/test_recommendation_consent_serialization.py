@@ -565,7 +565,8 @@ async def test_preference_update_uses_current_locked_order_owner(monkeypatch):
         calls.append(("lock", order_id))
         return current_order, current_customer
 
-    async def recompute(_db, customer_id):
+    async def recompute(_db, customer_id, *, locked_customer=None):
+        assert locked_customer is current_customer
         calls.append(("recompute", customer_id))
 
     async def promote(_db, customer_id):
