@@ -1589,9 +1589,14 @@ class CustomerService:
                     db.add(identity)
                     await db.flush()
             except IntegrityError:
+                # The transaction already performed snapshot reads before the
+                # unique-key race. Use a locking current read here so MySQL
+                # REPEATABLE READ can see the transaction that won the insert.
                 winner = (
                     await db.execute(
-                        identity_stmt.execution_options(populate_existing=True)
+                        identity_stmt.with_for_update().execution_options(
+                            populate_existing=True
+                        )
                     )
                 ).scalar_one_or_none()
                 if not winner or int(winner.customer_id) not in gate_ids:
