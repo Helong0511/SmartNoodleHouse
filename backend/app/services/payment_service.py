@@ -2029,6 +2029,19 @@ class PaymentService:
         round_down: bool = False,
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
+        # Cash settlement must follow the same Customer Gate → Order lock
+        # order as electronic payment and customer merge. Anonymous POS orders
+        # have no gate, but still use the current-read Order lock below.
+        observed_owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == int(order.id))
+        )
+        if observed_owner_id is None:
+            exists = await db.scalar(select(Order.id).where(Order.id == int(order.id)))
+            if exists is None:
+                raise AppException(40402, "订单不存在")
+        else:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
+
         locked = (
             await db.execute(
                 select(Order)
@@ -2039,6 +2052,10 @@ class PaymentService:
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40402, "订单不存在")
+        locked_owner_id = int(locked.customer_id) if locked.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "订单顾客归属在加锁期间发生变化，请重试", status_code=409)
         order = locked
 
         if order.payment_status == "PAID" or order.status in (
