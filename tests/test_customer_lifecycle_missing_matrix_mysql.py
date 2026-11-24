@@ -813,3 +813,90 @@ async def test_verified_phone_binding_rejects_identity_owner_changed_while_waiti
             )
         )
         await cleanup.commit()
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_verified_phone_binding_rejects_peer_added_while_waiting_for_gates(db_session):
+    """The post-gate current read must reject a same-phone peer added after observation."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    phone = f"156{suffix[:8]}"
+    async with maker() as setup:
+        source = Customer(customer_no=f"VPSP-{suffix[:25]}")
+        setup.add(source)
+        await setup.flush()
+        source_id = int(source.id)
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+    async with maker() as blocker_db, maker() as bind_db, maker() as peer_db:
+        await lock_customer_write_gates(blocker_db, [source_id])
+        source_for_binding = await bind_db.get(Customer, source_id)
+        assert source_for_binding is not None
+        bind_connection = (await bind_db.connection()).sync_connection
+
+        def observe_gate_wait(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if (
+                conn is bind_connection
+                and "CUSTOMER_WRITE_GATES" in normalized
+                and "FOR UPDATE" in normalized
+            ):
+                gate_waiting.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        peer_id = None
+        try:
+            bind_task = asyncio.create_task(
+                CustomerService.bind_verified_phone(
+                    bind_db,
+                    source_for_binding,
+                    phone,
+                    verification_source="WECHAT",
+                    confirm_merge=True,
+                )
+            )
+            await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+
+            # Simulate a pre-gate/legacy writer introducing a same-phone customer
+            # after the binding call's initial peer snapshot.
+            peer = Customer(
+                customer_no=f"VPP-{suffix[:27]}",
+                phone=phone,
+                status=1,
+                account_status="ACTIVE",
+            )
+            peer_db.add(peer)
+            await peer_db.flush()
+            peer_id = int(peer.id)
+            await peer_db.commit()
+            await blocker_db.commit()
+
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(bind_task, timeout=15)
+            assert exc.value.status_code == 409
+            assert exc.value.code == 40907
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            for session in (bind_db, blocker_db, peer_db):
+                if session.in_transaction():
+                    await session.rollback()
+
+    async with maker() as cleanup:
+        await cleanup.execute(
+            delete(CustomerIdentity).where(
+                CustomerIdentity.provider == "PHONE",
+                CustomerIdentity.provider_subject == phone,
+            )
+        )
+        customer_ids = [source_id]
+        if peer_id is not None:
+            customer_ids.append(peer_id)
+        await cleanup.execute(delete(Customer).where(Customer.id.in_(customer_ids)))
+        await cleanup.commit()
