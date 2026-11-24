@@ -1903,6 +1903,12 @@ class PaymentService:
         cls, db: AsyncSession, recharge_id: int, payment_id: int
     ) -> Payment:
         """充值即时金额不匹配时按 RechargeOrder→Payment 当前读收敛，保留并发成功回调。"""
+        # Match merge/settlement lock order: Customer Gate → RechargeOrder → Payment.
+        observed_owner_id = await db.scalar(
+            select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
+        )
+        if observed_owner_id is not None:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
         recharge = (
             await db.execute(
                 select(RechargeOrder)
@@ -1911,6 +1917,12 @@ class PaymentService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+        if recharge is None:
+            raise AppException(40491, "充值单或支付单不存在")
+        locked_owner_id = int(recharge.customer_id) if recharge.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "充值单顾客归属在加锁期间发生变化，请重试", status_code=409)
         payment = (
             await db.execute(
                 select(Payment)
@@ -1919,7 +1931,7 @@ class PaymentService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if recharge is None or payment is None:
+        if payment is None or payment.recharge_order_id is None or int(payment.recharge_order_id) != int(recharge.id):
             raise AppException(40491, "充值单或支付单不存在")
         if recharge.status == "PAID" or payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             await db.commit()
