@@ -551,7 +551,8 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
-            return exc_type is IntegrityError
+            # Roll back the savepoint but propagate IntegrityError to the service handler.
+            return False
 
     db = AsyncMock()
     # begin_nested() is synchronous and returns an async context manager.
