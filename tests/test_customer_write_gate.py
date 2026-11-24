@@ -200,3 +200,16 @@ def test_staff_phone_edit_does_not_preserve_verified_status():
     verification_reset_at = source.index("customer.phone_verified = 0", phone_change_at)
     assert phone_change_at < verification_reset_at
     assert "customer.phone_verified = int(customer.phone_verified or 0)" not in source
+
+
+def test_verified_phone_identity_insert_conflict_uses_current_locking_read():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.bind_verified_phone)
+    conflict_at = source.index("except IntegrityError:")
+    winner_at = source.index("winner =", conflict_at)
+    winner_end = source.index("if not winner", winner_at)
+    winner_lookup = source[winner_at:winner_end]
+    assert ".with_for_update()" in winner_lookup
+    assert "populate_existing=True" in winner_lookup
+    assert "int(winner.customer_id) not in gate_ids" in source[winner_end:]
