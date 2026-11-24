@@ -180,3 +180,13 @@ def test_verified_phone_peer_recheck_uses_current_locking_read():
     assert ".with_for_update()" in recheck
     assert "populate_existing=True" in recheck
     assert ".order_by(Customer.id)" in recheck
+
+
+def test_miniprogram_member_profile_gates_channel_profile_fallback_writes():
+    from app.api.miniprogram_customer import get_my_profile
+
+    source = inspect.getsource(get_my_profile)
+    gate_at = source.index("await lock_active_customer_for_write")
+    profile_at = source.index("CustomerService.build_member_profile")
+    resolve_at = source.index("CustomerService.resolve_channel_profile")
+    assert gate_at < profile_at < resolve_at
