@@ -1500,6 +1500,7 @@ class CustomerService:
         phone = (phone or "").strip()
         if not phone:
             return customer
+        customer = await lock_active_customer_for_write(db, int(customer.id))
         if int(getattr(customer, "phone_verified", 0) or 0) == 1:
             if (customer.phone or "").strip() == phone:
                 return customer
@@ -1520,29 +1521,59 @@ class CustomerService:
         confirm_merge: bool = False,
         request=None,
     ) -> tuple[Customer, bool]:
-        """绑定官方验证手机号；号码已属其他账号时必须二次确认后完整合并。"""
+        """绑定官方验证手机号；先锁定所有候选顾客 Gate，再锁身份/合并记录。"""
         phone = (phone or "").strip()
         source = (verification_source or "").strip().upper()
         if source not in ("WECHAT", "ALIPAY"):
             raise AppException(40054, "手机号缺少可信验证来源")
 
+        source_customer_id = int(customer.id)
+        identity_stmt = select(CustomerIdentity).where(
+            CustomerIdentity.provider == "PHONE",
+            CustomerIdentity.provider_subject == phone,
+            CustomerIdentity.verified == 1,
+        )
+        observed_identity_owner = await db.scalar(
+            select(CustomerIdentity.customer_id).where(
+                CustomerIdentity.provider == "PHONE",
+                CustomerIdentity.provider_subject == phone,
+                CustomerIdentity.verified == 1,
+            )
+        )
+        observed_peer_ids = {
+            int(value)
+            for value in (
+                await db.scalars(
+                    select(Customer.id).where(
+                        Customer.status == 1,
+                        Customer.phone == phone,
+                        Customer.id != source_customer_id,
+                    )
+                )
+            ).all()
+        }
+        gate_ids = {source_customer_id, *observed_peer_ids}
+        if observed_identity_owner:
+            gate_ids.add(int(observed_identity_owner))
+        await lock_customer_write_gates(db, gate_ids)
+
+        # Re-read the identity only after all known owners' gates are held.
         identity = (
             await db.execute(
-                select(CustomerIdentity)
-                .where(
-                    CustomerIdentity.provider == "PHONE",
-                    CustomerIdentity.provider_subject == phone,
-                    CustomerIdentity.verified == 1,
-                )
-                .with_for_update()
+                identity_stmt.with_for_update().execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+        current_identity_owner = int(identity.customer_id) if identity else None
+        if current_identity_owner != (
+            int(observed_identity_owner) if observed_identity_owner else None
+        ):
+            raise AppException(40905, "手机号关联状态已变化，请重新查询后重试", status_code=409)
 
         if not identity:
             try:
                 async with db.begin_nested():
                     identity = CustomerIdentity(
-                        customer_id=customer.id,
+                        customer_id=source_customer_id,
                         provider="PHONE",
                         provider_subject=phone,
                         verified=1,
@@ -1550,20 +1581,17 @@ class CustomerService:
                     db.add(identity)
                     await db.flush()
             except IntegrityError:
-                identity = (
+                winner = (
                     await db.execute(
-                        select(CustomerIdentity).where(
-                            CustomerIdentity.provider == "PHONE",
-                            CustomerIdentity.provider_subject == phone,
-                            CustomerIdentity.verified == 1,
-                        )
+                        identity_stmt.execution_options(populate_existing=True)
                     )
                 ).scalar_one_or_none()
-                if not identity:
-                    raise AppException(40905, "手机号绑定冲突，请重试", status_code=409)
+                if not winner or int(winner.customer_id) not in gate_ids:
+                    raise AppException(40905, "手机号绑定冲突，请重新查询后重试", status_code=409)
+                identity = winner
 
         merged = False
-        if int(identity.customer_id) != int(customer.id):
+        if int(identity.customer_id) != source_customer_id:
             if not confirm_merge:
                 raise AppException(
                     40906,
@@ -1575,48 +1603,39 @@ class CustomerService:
             result = await CustomerMergeService.merge(
                 db,
                 target_customer_id=int(identity.customer_id),
-                source_customer_id=int(customer.id),
+                source_customer_id=source_customer_id,
                 reason=f"用户确认通过{source}官方手机号合并",
                 request=request,
             )
-            customer = await db.get(Customer, int(result["target_customer_id"]))
-            if not customer:
-                raise AppException(40905, "账号合并失败，请重试", status_code=409)
+            target_customer_id = int(result["target_customer_id"])
             merged = True
         else:
-            locked = (
-                await db.execute(
-                    select(Customer).where(Customer.id == customer.id).with_for_update()
-                )
-            ).scalar_one_or_none()
-            if not locked or int(locked.status or 0) != 1:
-                raise AppException(40102, "顾客不存在或已禁用", status_code=401)
-            customer = locked
+            target_customer_id = source_customer_id
 
-        customer.phone = phone
-        customer.phone_verified = 1
-        CustomerService.refresh_profile_status(customer)
-        await db.flush()
-
-        # 收银预留壳 / 其它同号未验证账号 → 并入当前官方绑号账号（积分、订单、公益身份）
-        phone_peers = list(
-            (
-                await db.execute(
-                    select(Customer)
-                    .where(
+        # No new peer may be merged unless its gate was included in the sorted
+        # acquisition above. A changed candidate set aborts instead of taking
+        # an out-of-order gate while this transaction already owns other gates.
+        current_peer_ids = {
+            int(value)
+            for value in (
+                await db.scalars(
+                    select(Customer.id).where(
                         Customer.status == 1,
                         Customer.phone == phone,
-                        Customer.id != int(customer.id),
+                        Customer.id != target_customer_id,
                     )
-                    .with_for_update()
                 )
-            ).scalars().all()
-        )
-        if phone_peers:
+            ).all()
+        }
+        expected_peer_ids = observed_peer_ids - {target_customer_id}
+        if current_peer_ids != expected_peer_ids:
+            raise AppException(40907, "手机号关联账号已变化，请重新查询后重试", status_code=409)
+
+        if current_peer_ids:
             from app.services.customer_merge_service import CustomerMergeService
 
-            for peer in phone_peers:
-                has_platform = await CustomerService._customer_has_platform_login(db, int(peer.id))
+            for peer_id in sorted(current_peer_ids):
+                has_platform = await CustomerService._customer_has_platform_login(db, peer_id)
                 if has_platform and not confirm_merge:
                     raise AppException(
                         40906,
@@ -1625,20 +1644,27 @@ class CustomerService:
                     )
                 await CustomerMergeService.merge(
                     db,
-                    target_customer_id=int(customer.id),
-                    source_customer_id=int(peer.id),
+                    target_customer_id=target_customer_id,
+                    source_customer_id=peer_id,
                     reason=f"官方{source}绑号合并收银预留/同号账号",
                     request=request,
                 )
                 merged = True
-            customer = await db.get(Customer, int(customer.id))
-            if not customer:
-                raise AppException(40905, "账号合并失败，请重试", status_code=409)
-            customer.phone = phone
-            customer.phone_verified = 1
-            CustomerService.refresh_profile_status(customer)
-            await db.flush()
 
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == target_customer_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not customer or int(customer.status or 0) != 1:
+            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
+        customer.phone = phone
+        customer.phone_verified = 1
+        CustomerService.refresh_profile_status(customer)
+        await db.flush()
         return customer, merged
 
     @staticmethod
