@@ -905,7 +905,7 @@ async def test_verified_phone_binding_rejects_peer_added_while_waiting_for_gates
 @pytest.mark.mysql
 @pytest.mark.asyncio
 async def test_verified_phone_binding_identity_insert_race_reads_committed_winner(db_session):
-    """A concurrent unique-key winner is visible to the losing transaction's current read."""
+    """A real unique-key collision exposes its committed winner to the losing transaction."""
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
 
@@ -921,31 +921,27 @@ async def test_verified_phone_binding_identity_insert_race_reads_committed_winne
         first_id, second_id = int(first.id), int(second.id)
         await setup.commit()
 
-    insert_waiting = asyncio.Event()
+    loser_reached_insert = asyncio.Event()
+    allow_loser_insert = asyncio.Event()
     async with maker() as winner_db, maker() as loser_db:
+        # READ COMMITTED is used only to let the two-session unique-key race
+        # pass the pre-insert locking lookup without an InnoDB gap-lock deadlock.
+        # The loser still performs its initial non-locking reads before the
+        # winner commits, then must recover the unique-key conflict correctly.
+        await loser_db.connection(execution_options={"isolation_level": "READ COMMITTED"})
         winner_customer = await winner_db.get(Customer, first_id)
         loser_customer = await loser_db.get(Customer, second_id)
         assert winner_customer is not None and loser_customer is not None
 
-        # The first transaction wins the unique identity insert but deliberately
-        # keeps it uncommitted while the second transaction observes no identity.
-        await CustomerService.bind_verified_phone(
-            winner_db,
-            winner_customer,
-            phone,
-            verification_source="WECHAT",
-        )
-        loser_connection = (await loser_db.connection()).sync_connection
-        identity_table = CustomerIdentity.__tablename__.upper()
+        original_loser_flush = loser_db.flush
 
-        def observe_losing_insert(conn, _cursor, statement, _parameters, _context, _many):
-            normalized = statement.upper()
-            if conn is loser_connection and normalized.lstrip().startswith(
-                f"INSERT INTO {identity_table}"
-            ):
-                insert_waiting.set()
+        async def pause_loser_identity_flush(*args, **kwargs):
+            if any(isinstance(obj, CustomerIdentity) for obj in loser_db.new):
+                loser_reached_insert.set()
+                await asyncio.wait_for(allow_loser_insert.wait(), timeout=15)
+            return await original_loser_flush(*args, **kwargs)
 
-        event.listen(engine.sync_engine, "before_cursor_execute", observe_losing_insert)
+        loser_db.flush = pause_loser_identity_flush
         try:
             loser_task = asyncio.create_task(
                 CustomerService.bind_verified_phone(
@@ -955,11 +951,18 @@ async def test_verified_phone_binding_identity_insert_race_reads_committed_winne
                     verification_source="WECHAT",
                 )
             )
-            # The second transaction has already performed its initial snapshot
-            # reads and is attempting the same unique key while the winner is
-            # still uncommitted. Commit only after that insert reaches MySQL.
-            await asyncio.wait_for(insert_waiting.wait(), timeout=10)
+            # The loser has observed no identity and reached the INSERT flush.
+            # Let the winner commit the same unique key before allowing that
+            # INSERT to proceed, deterministically producing IntegrityError.
+            await asyncio.wait_for(loser_reached_insert.wait(), timeout=10)
+            await CustomerService.bind_verified_phone(
+                winner_db,
+                winner_customer,
+                phone,
+                verification_source="WECHAT",
+            )
             await winner_db.commit()
+            allow_loser_insert.set()
 
             with pytest.raises(AppException) as exc:
                 await asyncio.wait_for(loser_task, timeout=15)
@@ -967,7 +970,8 @@ async def test_verified_phone_binding_identity_insert_race_reads_committed_winne
             assert exc.value.code == 40905
             assert exc.value.message == "手机号关联账号已变化，请重新查询后重试"
         finally:
-            event.remove(engine.sync_engine, "before_cursor_execute", observe_losing_insert)
+            allow_loser_insert.set()
+            loser_db.flush = original_loser_flush
             for session in (winner_db, loser_db):
                 if session.in_transaction():
                     await session.rollback()
