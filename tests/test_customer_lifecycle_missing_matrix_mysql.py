@@ -8,13 +8,14 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import delete, event, func, select
+from sqlalchemy import delete, event, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
 from app.core.response import naive_local_now
 from app.models import (
     Customer,
+    CustomerIdentity,
     CustomerWriteGate,
     FlashSaleClaim,
     FlashSaleConfig,
@@ -28,6 +29,7 @@ from app.models import (
     Store,
 )
 from app.services.customer_merge_service import CustomerMergeService
+from app.services.customer_service import CustomerService
 from app.services.flash_sale_service import FlashSaleService
 from app.services.customer_write_gate import lock_customer_write_gates
 
@@ -707,3 +709,107 @@ async def test_flash_sale_verify_commits_before_real_merge_preserves_used_entitl
         await cleanup.execute(delete(Order).where(Order.id == order_id))
         await cleanup.commit()
     await _cleanup_flash_claim_race(maker, ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_verified_phone_binding_rejects_identity_owner_changed_while_waiting_for_gates(db_session):
+    """The identity current read must reject an owner change made after observation."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    phone = f"155{suffix[:8]}"
+    async with maker() as setup:
+        source = Customer(customer_no=f"VPS-{suffix[:27]}")
+        observed_owner = Customer(customer_no=f"VPO-{suffix[:27]}")
+        changed_owner = Customer(customer_no=f"VPN-{suffix[:27]}")
+        setup.add_all([source, observed_owner, changed_owner])
+        await setup.flush()
+        source_id = int(source.id)
+        observed_owner_id = int(observed_owner.id)
+        changed_owner_id = int(changed_owner.id)
+        setup.add(
+            CustomerIdentity(
+                customer_id=observed_owner_id,
+                provider="PHONE",
+                provider_subject=phone,
+                verified=1,
+            )
+        )
+        await setup.commit()
+
+    gate_waiting = asyncio.Event()
+    async with maker() as blocker_db, maker() as bind_db, maker() as identity_db:
+        # Hold every gate the binding call will observe. This lets its initial
+        # non-locking identity read complete, then pauses it before the gate.
+        from app.services.customer_write_gate import lock_customer_write_gates
+
+        await lock_customer_write_gates(
+            blocker_db, [source_id, observed_owner_id]
+        )
+        source_for_binding = await bind_db.get(Customer, source_id)
+        assert source_for_binding is not None
+        bind_connection = (await bind_db.connection()).sync_connection
+
+        def observe_gate_wait(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if (
+                conn is bind_connection
+                and "CUSTOMER_WRITE_GATES" in normalized
+                and "FOR UPDATE" in normalized
+            ):
+                gate_waiting.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+        try:
+            bind_task = asyncio.create_task(
+                CustomerService.bind_verified_phone(
+                    bind_db,
+                    source_for_binding,
+                    phone,
+                    verification_source="WECHAT",
+                    confirm_merge=True,
+                )
+            )
+            await asyncio.wait_for(gate_waiting.wait(), timeout=10)
+
+            # Simulate a legacy/out-of-band identity writer racing after the
+            # observation. A compliant writer also takes gates; this mutation
+            # deliberately exercises the defensive stale-owner check.
+            await identity_db.execute(
+                update(CustomerIdentity)
+                .where(
+                    CustomerIdentity.provider == "PHONE",
+                    CustomerIdentity.provider_subject == phone,
+                )
+                .values(customer_id=changed_owner_id)
+            )
+            await identity_db.commit()
+            await blocker_db.commit()
+
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(bind_task, timeout=15)
+            assert exc.value.status_code == 409
+            assert exc.value.code == 40905
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_gate_wait)
+            for session in (bind_db, blocker_db, identity_db):
+                if session.in_transaction():
+                    await session.rollback()
+
+    async with maker() as cleanup:
+        await cleanup.execute(
+            delete(CustomerIdentity).where(
+                CustomerIdentity.provider == "PHONE",
+                CustomerIdentity.provider_subject == phone,
+            )
+        )
+        await cleanup.execute(
+            delete(Customer).where(
+                Customer.id.in_([source_id, observed_owner_id, changed_owner_id])
+            )
+        )
+        await cleanup.commit()
