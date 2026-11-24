@@ -21,7 +21,7 @@ def upgrade() -> None:
         raise RuntimeError(
             "marketing_flash_sale_claims is missing; apply migration 0040 before 0054"
         )
-    if not inspector.has_column("marketing_flash_sale_claims", "status_reason"):
+    if not any(column["name"] == "status_reason" for column in inspector.get_columns("marketing_flash_sale_claims")):
         op.add_column(
             "marketing_flash_sale_claims",
             sa.Column("status_reason", sa.String(length=40), nullable=True),
@@ -31,7 +31,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
-    if inspector.has_table("marketing_flash_sale_claims") and inspector.has_column(
-        "marketing_flash_sale_claims", "status_reason"
+    if inspector.has_table("marketing_flash_sale_claims") and any(
+        column["name"] == "status_reason"
+        for column in inspector.get_columns("marketing_flash_sale_claims")
     ):
         op.drop_column("marketing_flash_sale_claims", "status_reason")
