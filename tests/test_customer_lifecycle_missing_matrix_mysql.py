@@ -900,3 +900,96 @@ async def test_verified_phone_binding_rejects_peer_added_while_waiting_for_gates
             customer_ids.append(peer_id)
         await cleanup.execute(delete(Customer).where(Customer.id.in_(customer_ids)))
         await cleanup.commit()
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_verified_phone_binding_identity_insert_race_reads_committed_winner(db_session):
+    """A concurrent unique-key winner is visible to the losing transaction's current read."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    phone = f"157{suffix[:8]}"
+    async with maker() as setup:
+        first = Customer(customer_no=f"VPI1-{suffix[:24]}")
+        second = Customer(customer_no=f"VPI2-{suffix[:24]}")
+        setup.add_all([first, second])
+        await setup.flush()
+        first_id, second_id = int(first.id), int(second.id)
+        await setup.commit()
+
+    insert_waiting = asyncio.Event()
+    async with maker() as winner_db, maker() as loser_db:
+        winner_customer = await winner_db.get(Customer, first_id)
+        loser_customer = await loser_db.get(Customer, second_id)
+        assert winner_customer is not None and loser_customer is not None
+
+        # The first transaction wins the unique identity insert but deliberately
+        # keeps it uncommitted while the second transaction observes no identity.
+        await CustomerService.bind_verified_phone(
+            winner_db,
+            winner_customer,
+            phone,
+            verification_source="WECHAT",
+        )
+        loser_connection = (await loser_db.connection()).sync_connection
+        identity_table = CustomerIdentity.__tablename__.upper()
+
+        def observe_losing_insert(conn, _cursor, statement, _parameters, _context, _many):
+            normalized = statement.upper()
+            if conn is loser_connection and normalized.lstrip().startswith(
+                f"INSERT INTO {identity_table}"
+            ):
+                insert_waiting.set()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_losing_insert)
+        try:
+            loser_task = asyncio.create_task(
+                CustomerService.bind_verified_phone(
+                    loser_db,
+                    loser_customer,
+                    phone,
+                    verification_source="WECHAT",
+                )
+            )
+            # The second transaction has already performed its initial snapshot
+            # reads and is attempting the same unique key while the winner is
+            # still uncommitted. Commit only after that insert reaches MySQL.
+            await asyncio.wait_for(insert_waiting.wait(), timeout=10)
+            await winner_db.commit()
+
+            with pytest.raises(AppException) as exc:
+                await asyncio.wait_for(loser_task, timeout=15)
+            assert exc.value.status_code == 409
+            assert exc.value.code == 40905
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_losing_insert)
+            for session in (winner_db, loser_db):
+                if session.in_transaction():
+                    await session.rollback()
+
+    async with maker() as verify:
+        identity = await verify.scalar(
+            select(CustomerIdentity).where(
+                CustomerIdentity.provider == "PHONE",
+                CustomerIdentity.provider_subject == phone,
+                CustomerIdentity.verified == 1,
+            )
+        )
+        assert identity is not None
+        assert int(identity.customer_id) == first_id
+
+    async with maker() as cleanup:
+        await cleanup.execute(
+            delete(CustomerIdentity).where(
+                CustomerIdentity.provider == "PHONE",
+                CustomerIdentity.provider_subject == phone,
+            )
+        )
+        await cleanup.execute(
+            delete(Customer).where(Customer.id.in_([first_id, second_id]))
+        )
+        await cleanup.commit()
