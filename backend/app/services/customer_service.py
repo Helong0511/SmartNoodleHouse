@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_CU, generate_no
 from app.core.exceptions import AppException
 from app.core.response import money, now_local, serialize_dt
-from app.services.customer_write_gate import lock_active_customer_for_write
+from app.services.customer_write_gate import (
+    lock_active_customer_for_write,
+    lock_customer_write_gates,
+)
 from app.models import (
     Customer,
     CustomerAlipayAccount,
@@ -77,6 +80,26 @@ class CustomerService:
             raise AppException(40053, "手机号格式不正确")
         existing = await CustomerService.find_active_by_phone(db, phone)
         if existing is not None:
+            # POS may reuse an account while a merge is moving its identity/profile
+            # fields. Observe the candidate first, then serialize and current-read it.
+            observed_customer_id = int(existing.id)
+            await lock_customer_write_gates(db, [observed_customer_id])
+            locked = (
+                await db.execute(
+                    select(Customer)
+                    .where(
+                        Customer.id == observed_customer_id,
+                        Customer.status == 1,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if not locked or str(locked.phone or "").strip() != phone:
+                raise AppException(
+                    40907, "手机号关联状态已变化，请重新查询后重试", status_code=409
+                )
+            existing = locked
             if not getattr(existing, "registered_store_id", None):
                 existing.registered_store_id = int(store_id)
                 await db.flush()
