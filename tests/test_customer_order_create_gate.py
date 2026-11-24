@@ -19,3 +19,14 @@ def test_order_idempotency_race_uses_savepoint_not_outer_rollback():
     recovery = source[race:source.index("subtotal, packing_fee", race)]
     assert "db.begin_nested()" in source
     assert "await db.rollback()" not in recovery
+
+
+def test_pos_cash_settlement_acquires_customer_gate_before_order_lock():
+    from app.services.payment_service import PaymentService
+
+    source = inspect.getsource(PaymentService.settle_cash_payment)
+    owner_peek = source.index("select(Order.customer_id)")
+    gate = source.index("await lock_customer_write_gates")
+    order_lock = source.index(".with_for_update()")
+    owner_recheck = source.index("locked_owner_id != observed_owner_id")
+    assert owner_peek < gate < order_lock < owner_recheck
