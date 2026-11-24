@@ -546,7 +546,17 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
     winner_result = MagicMock()
     winner_result.scalar_one_or_none.return_value = winner
 
+    class Savepoint:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return exc_type is IntegrityError
+
     db = AsyncMock()
+    # begin_nested() is synchronous and returns an async context manager.
+    # Model that SQLAlchemy contract instead of AsyncMock's coroutine result.
+    db.begin_nested = MagicMock(return_value=Savepoint())
     # AsyncSession.add() is synchronous; keep it a normal mock to avoid an
     # un-awaited coroutine warning that can hide real async lifecycle bugs.
     db.add = MagicMock()
@@ -581,7 +591,8 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
 
     assert returned is winner
     assert getattr(returned, "_idempotent_replay", False) is True
-    db.rollback.assert_awaited_once()
+    db.begin_nested.assert_called_once_with()
+    db.rollback.assert_not_awaited()
     db.commit.assert_not_awaited()
 
 @pytest.mark.asyncio
