@@ -12,6 +12,7 @@ async def test_cash_payment_rejects_pending_wechat_or_alipay_flow():
 
     order = SimpleNamespace(
         id=10,
+        customer_id=None,
         status="PENDING_PAYMENT",
         payment_status="PENDING",
     )
