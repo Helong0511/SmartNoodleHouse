@@ -516,12 +516,32 @@ class CustomerService:
         """
         if not order or not getattr(order, "id", None):
             return 0
-        # 锁订单再判态，避免与退款状态机竞态
+        # Outbox may run after a customer merge. Observe the owner without a row
+        # lock, acquire its lifecycle gate, then current-read the order before
+        # touching either the order or customer. Never take Order before Gate.
+        order_snapshot = await db.get(Order, int(order.id))
+        if not order_snapshot or not order_snapshot.customer_id:
+            return 0
+        observed_customer_id = int(order_snapshot.customer_id)
+        from app.services.customer_write_gate import lock_customer_write_gates
+
+        await lock_customer_write_gates(db, [observed_customer_id])
         locked_order = (
-            await db.execute(select(Order).where(Order.id == int(order.id)).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked_order or not locked_order.customer_id:
             return 0
+        if int(locked_order.customer_id) != observed_customer_id:
+            # The outbox event raced with merge/reassignment. Roll back and let
+            # the worker retry against the new owner rather than writing stale ownership.
+            raise RuntimeError(
+                "order customer changed while acquiring points-award gate; retry outbox"
+            )
         order = locked_order
         st = (order.status or "").upper()
         pay = (order.payment_status or "").upper()
@@ -732,9 +752,17 @@ class CustomerService:
         """
         from app.services.coupon_service import CouponService
 
+        # Point exchange mutates Customer.points; serialize it with merge,
+        # refund deductions and all other customer-owned writes.
+        from app.services.customer_write_gate import lock_customer_write_gates
+
+        await lock_customer_write_gates(db, [int(customer_id)])
         customer = (
             await db.execute(
-                select(Customer).where(Customer.id == int(customer_id)).with_for_update()
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not customer:
