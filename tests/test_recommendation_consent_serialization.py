@@ -962,10 +962,12 @@ async def test_ab_assignment_integrity_race_keeps_outer_customer_gate_transactio
     class Session:
         transaction_active = True
         flush_calls = 0
+        scalar_calls = 0
         added = None
 
         async def scalar(self, statement):
-            if "ab_experiments" in str(statement):
+            self.scalar_calls += 1
+            if self.scalar_calls == 1:
                 return experiment
             if self.flush_calls == 0:
                 return None
