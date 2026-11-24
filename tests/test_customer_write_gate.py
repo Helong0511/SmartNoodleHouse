@@ -213,3 +213,19 @@ def test_verified_phone_identity_insert_conflict_uses_current_locking_read():
     assert ".with_for_update()" in winner_lookup
     assert "populate_existing=True" in winner_lookup
     assert "int(winner.customer_id) not in gate_ids" in source[winner_end:]
+
+
+def test_recharge_amount_mismatch_status_update_acquires_customer_gate_before_parent_rows():
+    from app.services.payment_service import PaymentService
+
+    source = inspect.getsource(
+        PaymentService._mark_recharge_payment_unknown_after_amount_mismatch
+    )
+    owner_peek_at = source.index("select(RechargeOrder.customer_id)")
+    gate_at = source.index("await lock_customer_write_gates")
+    recharge_lock_at = source.index("select(RechargeOrder)", gate_at)
+    payment_lock_at = source.index("select(Payment)", recharge_lock_at)
+    assert owner_peek_at < gate_at < recharge_lock_at < payment_lock_at
+    assert "populate_existing=True" in source
+    assert "locked_owner_id != observed_owner_id" in source
+    assert "payment.recharge_order_id" in source
