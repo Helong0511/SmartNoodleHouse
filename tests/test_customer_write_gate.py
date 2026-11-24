@@ -1,3 +1,5 @@
+import inspect
+
 import pytest
 from sqlalchemy import select
 
@@ -59,3 +61,27 @@ async def test_lock_active_customer_rejects_disabled_account(db_session):
 
     with pytest.raises(AppException):
         await lock_active_customer_for_write(db_session, customer.id)
+
+
+
+def test_paid_order_points_award_acquires_gate_before_order_and_customer_locks():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.award_points_for_paid_order)
+    gate_at = source.index("await lock_customer_write_gates")
+    order_lock_at = source.index(".with_for_update()")
+    customer_lock_at = source.index("select(Customer)")
+    assert gate_at < order_lock_at < customer_lock_at
+    assert "populate_existing=True" in source
+    assert "observed_customer_id" in source
+
+
+def test_points_exchange_acquires_gate_before_customer_lock():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.exchange_points_for_coupon)
+    gate_at = source.index("await lock_customer_write_gates")
+    customer_lock_at = source.index("select(Customer)")
+    assert gate_at < customer_lock_at
+    assert ".with_for_update()" in source
+    assert "populate_existing=True" in source
