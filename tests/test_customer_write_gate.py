@@ -117,3 +117,36 @@ def test_miniprogram_logout_acquires_customer_gate_before_token_version_write():
     mutation_at = source.index("customer.token_version =")
     assert gate_at < mutation_at
 
+def test_verified_phone_binding_acquires_all_gates_before_identity_lock():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.bind_verified_phone)
+    gate_at = source.index("await lock_customer_write_gates")
+    identity_lock_at = source.index("identity_stmt.with_for_update()")
+    merge_at = source.index("CustomerMergeService.merge")
+    assert gate_at < identity_lock_at < merge_at
+    assert "observed_peer_ids" in source
+    assert "current_peer_ids != expected_peer_ids" in source
+
+
+def test_unverified_phone_save_refreshes_customer_after_lifecycle_gate():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.save_unverified_phone)
+    gate_at = source.index("await lock_active_customer_for_write")
+    mutation_at = source.index("customer.phone = phone")
+    assert gate_at < mutation_at
+
+
+def test_miniprogram_member_profile_and_avatar_writes_acquire_lifecycle_gate():
+    from app.api.miniprogram_member import (
+        import_member_avatar_from_url,
+        patch_member_profile,
+        upload_member_avatar,
+    )
+
+    for endpoint in (patch_member_profile, upload_member_avatar, import_member_avatar_from_url):
+        source = inspect.getsource(endpoint)
+        gate_at = source.index("await lock_active_customer_for_write")
+        assert gate_at >= 0
+
