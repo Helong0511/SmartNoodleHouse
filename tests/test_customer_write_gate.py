@@ -190,3 +190,13 @@ def test_miniprogram_member_profile_gates_channel_profile_fallback_writes():
     profile_at = source.index("CustomerService.build_member_profile")
     resolve_at = source.index("CustomerService.resolve_channel_profile")
     assert gate_at < profile_at < resolve_at
+
+
+def test_staff_phone_edit_does_not_preserve_verified_status():
+    from app.api.customers import update_customer
+
+    source = inspect.getsource(update_customer)
+    phone_change_at = source.index("customer.phone = new_phone")
+    verification_reset_at = source.index("customer.phone_verified = 0", phone_change_at)
+    assert phone_change_at < verification_reset_at
+    assert "customer.phone_verified = int(customer.phone_verified or 0)" not in source
