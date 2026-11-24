@@ -42,6 +42,8 @@ async def test_settle_cash_rejects_over_remaining():
     exec_result = MagicMock()
     exec_result.scalar_one_or_none.return_value = locked
     db.execute = AsyncMock(return_value=exec_result)
+    # Anonymous order: no Customer Gate is needed; confirm it exists.
+    db.scalar = AsyncMock(side_effect=[None, order.id])
 
     with patch.object(
         PaymentService, "remaining_amount", new_callable=AsyncMock, return_value=money("6.00")
