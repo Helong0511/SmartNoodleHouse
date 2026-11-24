@@ -98,3 +98,22 @@ def test_pos_phone_reuse_acquires_gate_and_current_reads_customer_before_mutatio
     assert "observed_customer_id" in source
     assert "locked.phone" in source
 
+def test_miniprogram_login_finalization_acquires_customer_gate_before_profile_writes():
+    from app.api.miniprogram_auth import _finalize_channel_login
+
+    source = inspect.getsource(_finalize_channel_login)
+    gate_at = source.index("await lock_active_customer_for_write")
+    profile_at = source.index("CustomerService.save_channel_profile")
+    first_seen_at = source.index("CustomerService.remember_first_seen")
+    assert gate_at < profile_at < first_seen_at
+    assert "customer = await lock_active_customer_for_write" in source
+
+
+def test_miniprogram_logout_acquires_customer_gate_before_token_version_write():
+    from app.api.miniprogram_auth import customer_logout
+
+    source = inspect.getsource(customer_logout)
+    gate_at = source.index("await lock_active_customer_for_write")
+    mutation_at = source.index("customer.token_version =")
+    assert gate_at < mutation_at
+
