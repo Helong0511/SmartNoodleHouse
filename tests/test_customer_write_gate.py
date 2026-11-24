@@ -85,3 +85,16 @@ def test_points_exchange_acquires_gate_before_customer_lock():
     assert gate_at < customer_lock_at
     assert ".with_for_update()" in source
     assert "populate_existing=True" in source
+
+def test_pos_phone_reuse_acquires_gate_and_current_reads_customer_before_mutation():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.remember_pos_phone)
+    gate_at = source.index("await lock_customer_write_gates")
+    customer_lock_at = source.index(".with_for_update()")
+    mutation_at = source.index("existing.registered_store_id =")
+    assert gate_at < customer_lock_at < mutation_at
+    assert "populate_existing=True" in source
+    assert "observed_customer_id" in source
+    assert "locked.phone" in source
+
