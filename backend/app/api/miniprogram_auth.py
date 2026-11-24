@@ -36,6 +36,7 @@ from app.core.security import create_customer_token, decode_customer_token
 from app.models import Customer, CustomerAlipayAccount, CustomerWechatAccount
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_active_customer_for_write
 from app.services.private_media import (
     avatar_object_key,
     private_avatar_path,
@@ -204,6 +205,9 @@ async def _finalize_channel_login(
     is_mock: bool,
 ) -> dict:
     """P2-16：微信/支付宝登录共用收尾（资料回写 → 桌台/会话 → 登录 payload）。"""
+    # get_or_create resolves the stable channel identity; serialize all subsequent
+    # customer/profile writes against merge and refresh any stale ORM instance.
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     # 登录不接受客户端缓存写回新客；资料完善走 /member/profile 或 /member/activate
     profile_ready = bool(account) and int(getattr(account, "profile_completed", 0) or 0) == 1
     if profile_ready:
@@ -381,6 +385,7 @@ async def customer_logout(
     重放（如设备被他人使用、Token 泄露）。现服务端递增 token_version，使任何持有
     旧 token 的请求都立即 401，配合前端清 storage 实现真正吊销。
     """
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
     await db.flush()
     await AuditService.log(
