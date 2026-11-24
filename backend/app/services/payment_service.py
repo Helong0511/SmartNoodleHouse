@@ -3078,13 +3078,14 @@ class PaymentService:
             operator_id=operator_id,
             idempotency_key=idem_key,
         )
-        db.add(row)
         try:
-            await db.flush()
+            # _lock_order_then_payment() may hold the Customer Gate. Keep a
+            # duplicate-idempotency race inside a SAVEPOINT, not the outer txn.
+            async with db.begin_nested():
+                db.add(row)
+                await db.flush()
         except IntegrityError:
-            # 不同支付单并发复用同一幂等键时，先由唯一索引裁决；
-            # 回滚失败事务后重新读取胜出的退款单，匹配参数则安全返回原单。
-            await db.rollback()
+            # 仅回滚本次退款单 INSERT；保留 Order/Payment 锁与 Customer Gate。
             if idem_key is not None:
                 winner = (
                     await db.execute(
