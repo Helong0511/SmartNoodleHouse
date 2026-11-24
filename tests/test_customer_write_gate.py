@@ -168,3 +168,15 @@ def test_existing_alipay_identity_is_gated_before_identity_claim_or_account_inse
     account_insert_at = source.index("db.add(")
     assert gate_at < min(claim_at, account_insert_at)
 
+
+
+def test_verified_phone_peer_recheck_uses_current_locking_read():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.bind_verified_phone)
+    recheck_at = source.index("current_peer_ids =")
+    recheck_end = source.index("expected_peer_ids =", recheck_at)
+    recheck = source[recheck_at:recheck_end]
+    assert ".with_for_update()" in recheck
+    assert "populate_existing=True" in recheck
+    assert ".order_by(Customer.id)" in recheck
