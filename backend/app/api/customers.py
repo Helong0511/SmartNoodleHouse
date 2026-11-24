@@ -659,10 +659,9 @@ async def update_customer(
                     raise AppException(40002, "该手机号已被其他顾客使用")
             changes["phone"] = {"old": old_phone, "new": new_phone}
             customer.phone = new_phone
-            if new_phone:
-                customer.phone_verified = int(customer.phone_verified or 0)
-            else:
-                customer.phone_verified = 0
+            # Staff-entered or edited phone numbers are not official proof of
+            # ownership; verification only remains valid for the unchanged number.
+            customer.phone_verified = 0
     if "status" in fields and body.status is not None:
         old_status = int(customer.status or 0)
         new_status = int(body.status)
