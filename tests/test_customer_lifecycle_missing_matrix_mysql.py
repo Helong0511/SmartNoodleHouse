@@ -1059,7 +1059,7 @@ async def test_flash_sale_verify_rejects_claim_after_real_merge_commits(db_sessi
                         verify_db,
                         claim_no=claim_no,
                         store_id=ids["store_id"],
-                        operator_id=1,
+                        operator_id=None,
                     )
                 )
                 await asyncio.wait_for(verify_attempted_gate.wait(), timeout=10)
@@ -1170,7 +1170,7 @@ async def test_flash_sale_verify_commits_before_real_merge_preserves_used_histor
                         verify_db,
                         claim_no=claim_no,
                         store_id=ids["store_id"],
-                        operator_id=1,
+                        operator_id=None,
                     )
                 )
                 await asyncio.wait_for(verify_gate_acquired.wait(), timeout=10)
@@ -1224,7 +1224,7 @@ async def test_flash_sale_verify_commits_before_real_merge_preserves_used_histor
             verify,
             claim_no=claim_no,
             store_id=ids["store_id"],
-            operator_id=1,
+            operator_id=None,
         )
         assert replay["already_verified"] is True
         assert int(replay["order_id"]) == int(order.id)
