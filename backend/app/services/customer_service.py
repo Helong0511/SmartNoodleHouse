@@ -1620,18 +1620,23 @@ class CustomerService:
         else:
             target_customer_id = source_customer_id
 
-        # No new peer may be merged unless its gate was included in the sorted
-        # acquisition above. A changed candidate set aborts instead of taking
-        # an out-of-order gate while this transaction already owns other gates.
+        # This must be a current locking read, not a REPEATABLE READ snapshot:
+        # a peer may have been inserted after the initial observation while this
+        # transaction waited for the known customer gates. Lock matching rows in
+        # stable order so no unseen peer can be merged without its gate.
         current_peer_ids = {
             int(value)
             for value in (
                 await db.scalars(
-                    select(Customer.id).where(
+                    select(Customer.id)
+                    .where(
                         Customer.status == 1,
                         Customer.phone == phone,
                         Customer.id != target_customer_id,
                     )
+                    .order_by(Customer.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             ).all()
         }
