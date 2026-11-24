@@ -150,3 +150,21 @@ def test_miniprogram_member_profile_and_avatar_writes_acquire_lifecycle_gate():
         gate_at = source.index("await lock_active_customer_for_write")
         assert gate_at >= 0
 
+def test_existing_wechat_identity_is_gated_before_channel_account_repair():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.get_or_create_by_wechat)
+    gate_at = source.index("lock_active_customer_for_write")
+    ensure_at = source.index("CustomerService._ensure_wechat_account")
+    assert gate_at < ensure_at
+
+
+def test_existing_alipay_identity_is_gated_before_identity_claim_or_account_insert():
+    from app.services.customer_service import CustomerService
+
+    source = inspect.getsource(CustomerService.get_or_create_by_alipay)
+    gate_at = source.index("lock_active_customer_for_write")
+    claim_at = source.index("CustomerService._claim_identity")
+    account_insert_at = source.index("db.add(")
+    assert gate_at < min(claim_at, account_insert_at)
+
