@@ -998,3 +998,242 @@ async def test_verified_phone_binding_identity_insert_race_reads_committed_winne
             delete(Customer).where(Customer.id.in_([first_id, second_id]))
         )
         await cleanup.commit()
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_flash_sale_verify_rejects_claim_after_real_merge_commits(db_session):
+    """A verify queued behind merge must see the cancelled claim via current read."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    import app.services.flash_sale_service as flash_module
+    from app.services.flash_sale_service import MarketingService
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    ids = await _seed_flash_claim_race(maker, uuid.uuid4().hex)
+    async with maker() as setup:
+        with (
+            patch.object(MarketingService, "is_enabled", new=AsyncMock(return_value=True)),
+            patch.object(
+                MarketingService,
+                "is_store_participating",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            claimed = await FlashSaleService.claim(
+                setup,
+                campaign_id=ids["campaign_id"],
+                store_id=ids["store_id"],
+                customer_id=ids["source_id"],
+                client_request_id=f"fverify-{uuid.uuid4().hex[:24]}",
+            )
+        await setup.commit()
+    claim_no = claimed["claim_no"]
+
+    verify_attempted_gate = asyncio.Event()
+    original_gate_lock = flash_module.lock_customer_write_gates
+
+    async def observe_verify_gate(db, customer_ids):
+        if db is verify_db:
+            verify_attempted_gate.set()
+        return await original_gate_lock(db, customer_ids)
+
+    async with maker() as merge_db, maker() as verify_db:
+        with patch(
+            "app.services.customer_merge_service.AuditService.log",
+            new_callable=AsyncMock,
+        ):
+            await CustomerMergeService.merge(
+                merge_db,
+                target_customer_id=ids["target_id"],
+                source_customer_id=ids["source_id"],
+                reason="MySQL flash verify queued behind merge",
+            )
+
+        try:
+            with patch.object(flash_module, "lock_customer_write_gates", new=observe_verify_gate):
+                verify_task = asyncio.create_task(
+                    FlashSaleService.verify(
+                        verify_db,
+                        claim_no=claim_no,
+                        store_id=ids["store_id"],
+                        operator_id=1,
+                    )
+                )
+                await asyncio.wait_for(verify_attempted_gate.wait(), timeout=10)
+                await merge_db.commit()
+                with pytest.raises(AppException) as exc:
+                    await asyncio.wait_for(verify_task, timeout=20)
+                assert exc.value.code == 40013
+        finally:
+            if verify_db.in_transaction():
+                await verify_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        claim = await verify.scalar(
+            select(FlashSaleClaim).where(FlashSaleClaim.claim_no == claim_no)
+        )
+        source = await verify.get(Customer, ids["source_id"])
+        stock = await verify.scalar(
+            select(FlashSaleStock).where(
+                FlashSaleStock.campaign_id == ids["campaign_id"],
+                FlashSaleStock.store_id == ids["store_id"],
+            )
+        )
+        assert claim is not None and claim.status == "CANCELLED"
+        assert claim.status_reason == "CUSTOMER_MERGED"
+        assert claim.order_id is None
+        assert source is not None and source.account_status == "DISABLED"
+        assert stock is not None and stock.remaining_quantity == 0
+        assert await verify.scalar(
+            select(func.count()).select_from(Order).where(
+                Order.flash_claim_id == claim.id
+            )
+        ) == 0
+    await _cleanup_flash_claim_race(maker, ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_flash_sale_verify_commits_before_real_merge_preserves_used_history(db_session):
+    """A verify that owns the gate first commits once; merge preserves its history."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    import app.services.flash_sale_service as flash_module
+    import app.services.customer_merge_service as merge_module
+    from app.models import OrderItem
+    from app.services.flash_sale_service import MarketingService
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    ids = await _seed_flash_claim_race(maker, uuid.uuid4().hex)
+    async with maker() as setup:
+        with (
+            patch.object(MarketingService, "is_enabled", new=AsyncMock(return_value=True)),
+            patch.object(
+                MarketingService,
+                "is_store_participating",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            claimed = await FlashSaleService.claim(
+                setup,
+                campaign_id=ids["campaign_id"],
+                store_id=ids["store_id"],
+                customer_id=ids["source_id"],
+                client_request_id=f"fverify-{uuid.uuid4().hex[:24]}",
+            )
+        await setup.commit()
+    claim_no = claimed["claim_no"]
+
+    verify_gate_acquired = asyncio.Event()
+    release_verify = asyncio.Event()
+    merge_gate_attempted = asyncio.Event()
+    original_flash_gate_lock = flash_module.lock_customer_write_gates
+    original_merge_gate_lock = merge_module.lock_customer_write_gates
+
+    async with maker() as verify_db, maker() as merge_db:
+        async def pause_verify_after_gate(db, customer_ids):
+            result = await original_flash_gate_lock(db, customer_ids)
+            if db is verify_db:
+                verify_gate_acquired.set()
+                await asyncio.wait_for(release_verify.wait(), timeout=20)
+            return result
+
+        async def observe_merge_gate(db, customer_ids):
+            if db is merge_db:
+                merge_gate_attempted.set()
+            return await original_merge_gate_lock(db, customer_ids)
+
+        try:
+            with (
+                patch.object(flash_module, "lock_customer_write_gates", new=pause_verify_after_gate),
+                patch.object(merge_module, "lock_customer_write_gates", new=observe_merge_gate),
+                patch(
+                    "app.services.customer_merge_service.AuditService.log",
+                    new_callable=AsyncMock,
+                ),
+                patch.object(MarketingService, "is_enabled", new=AsyncMock(return_value=True)),
+                patch.object(
+                    MarketingService,
+                    "is_store_participating",
+                    new=AsyncMock(return_value=True),
+                ),
+            ):
+                verify_task = asyncio.create_task(
+                    FlashSaleService.verify(
+                        verify_db,
+                        claim_no=claim_no,
+                        store_id=ids["store_id"],
+                        operator_id=1,
+                    )
+                )
+                await asyncio.wait_for(verify_gate_acquired.wait(), timeout=10)
+                merge_task = asyncio.create_task(
+                    CustomerMergeService.merge(
+                        merge_db,
+                        target_customer_id=ids["target_id"],
+                        source_customer_id=ids["source_id"],
+                        reason="MySQL flash verify wins lifecycle gate",
+                    )
+                )
+                await asyncio.wait_for(merge_gate_attempted.wait(), timeout=10)
+                release_verify.set()
+                verified = await asyncio.wait_for(verify_task, timeout=20)
+                assert verified["already_verified"] is False
+                await verify_db.commit()
+                await asyncio.wait_for(merge_task, timeout=20)
+                await merge_db.commit()
+        finally:
+            release_verify.set()
+            if verify_db.in_transaction():
+                await verify_db.rollback()
+            if merge_db.in_transaction():
+                await merge_db.rollback()
+
+    async with maker() as verify:
+        claim = await verify.scalar(
+            select(FlashSaleClaim).where(FlashSaleClaim.claim_no == claim_no)
+        )
+        source = await verify.get(Customer, ids["source_id"])
+        target = await verify.get(Customer, ids["target_id"])
+        order = await verify.get(Order, int(claim.order_id)) if claim and claim.order_id else None
+        assert claim is not None and claim.status == "USED"
+        assert int(claim.customer_id) == ids["source_id"]
+        assert source is not None and source.account_status == "DISABLED"
+        assert target is not None and target.account_status == "ACTIVE"
+        assert order is not None and int(order.customer_id) == ids["target_id"]
+        payment_count = await verify.scalar(
+            select(func.count()).select_from(Payment).where(Payment.order_id == order.id)
+        )
+        assert payment_count == 1
+        assert await verify.scalar(
+            select(func.count()).select_from(Order).where(
+                Order.flash_claim_id == claim.id
+            )
+        ) == 1
+
+        # USED is terminal history: an old claim code remains idempotently readable
+        # after merge, without creating another order or payment.
+        replay = await FlashSaleService.verify(
+            verify,
+            claim_no=claim_no,
+            store_id=ids["store_id"],
+            operator_id=1,
+        )
+        assert replay["already_verified"] is True
+        assert int(replay["order_id"]) == int(order.id)
+        await verify.commit()
+
+        await verify.execute(delete(FlashSaleClaim).where(FlashSaleClaim.id == claim.id))
+        await verify.execute(delete(OrderStatusHistory).where(OrderStatusHistory.order_id == order.id))
+        await verify.execute(delete(OrderItem).where(OrderItem.order_id == order.id))
+        await verify.execute(delete(Payment).where(Payment.order_id == order.id))
+        await verify.execute(delete(Order).where(Order.id == order.id))
+        await verify.commit()
+    await _cleanup_flash_claim_race(maker, ids)
