@@ -956,8 +956,8 @@ async def test_ab_assignment_integrity_race_keeps_outer_customer_gate_transactio
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
-            # SQLAlchemy's nested transaction rolls back only this savepoint.
-            return exc_type is IntegrityError
+            # Roll back the savepoint but propagate IntegrityError to the service handler.
+            return False
 
     class Session:
         transaction_active = True
