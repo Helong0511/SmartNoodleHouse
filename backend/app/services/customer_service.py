@@ -1599,8 +1599,14 @@ class CustomerService:
                         )
                     )
                 ).scalar_one_or_none()
-                if not winner or int(winner.customer_id) not in gate_ids:
+                if not winner:
                     raise AppException(40905, "手机号绑定冲突，请重新查询后重试", status_code=409)
+                if int(winner.customer_id) not in gate_ids:
+                    raise AppException(
+                        40905,
+                        "手机号关联账号已变化，请重新查询后重试",
+                        status_code=409,
+                    )
                 identity = winner
 
         merged = False
