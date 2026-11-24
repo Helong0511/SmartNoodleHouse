@@ -965,6 +965,7 @@ async def test_verified_phone_binding_identity_insert_race_reads_committed_winne
                 await asyncio.wait_for(loser_task, timeout=15)
             assert exc.value.status_code == 409
             assert exc.value.code == 40905
+            assert exc.value.message == "手机号关联账号已变化，请重新查询后重试"
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", observe_losing_insert)
             for session in (winner_db, loser_db):
