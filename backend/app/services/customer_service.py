@@ -1175,25 +1175,27 @@ class CustomerService:
             raise AppException(40905, "微信身份数据冲突，请联系客服处理")
         identity_customer_id = openid_customer_id or union_customer_id
         if identity_customer_id:
+            customer = await lock_active_customer_for_write(db, int(identity_customer_id))
             await CustomerService._ensure_wechat_account(
                 db,
                 customer_id=identity_customer_id,
                 openid=openid,
                 unionid=unionid,
             )
-            return await db.get(Customer, identity_customer_id)
+            return customer
 
         account = (
             await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
         ).scalar_one_or_none()
         if account:
+            customer = await lock_active_customer_for_write(db, int(account.customer_id))
             await CustomerService._ensure_wechat_account(
                 db,
                 customer_id=account.customer_id,
                 openid=openid,
                 unionid=unionid,
             )
-            return await db.get(Customer, account.customer_id)
+            return customer
 
         # 兼容迁移前数据：仅 UnionID 这一微信官方强身份可复用既有 Customer。
         union_acc = None
@@ -1207,6 +1209,7 @@ class CustomerService:
                 )
             ).scalar_one_or_none()
         if union_acc:
+            customer = await lock_active_customer_for_write(db, int(union_acc.customer_id))
             await CustomerService._ensure_wechat_account(
                 db,
                 customer_id=union_acc.customer_id,
@@ -1214,7 +1217,7 @@ class CustomerService:
                 unionid=unionid,
                 copy_profile_from=union_acc,
             )
-            return await db.get(Customer, union_acc.customer_id)
+            return customer
 
         try:
             async with db.begin_nested():
@@ -1248,13 +1251,14 @@ class CustomerService:
                 raise AppException(40905, "微信身份数据冲突，请联系客服处理")
             winner_id = winner_id or union_winner_id
             if winner_id:
+                customer = await lock_active_customer_for_write(db, int(winner_id))
                 await CustomerService._ensure_wechat_account(
                     db,
                     customer_id=winner_id,
                     openid=openid,
                     unionid=unionid,
                 )
-                return await db.get(Customer, winner_id)
+                return customer
             raise AppException(40002, "微信登录冲突，请重试")
 
     @staticmethod
@@ -1273,6 +1277,7 @@ class CustomerService:
             )
         ).scalar_one_or_none()
         if identity_customer_id:
+            customer = await lock_active_customer_for_write(db, int(identity_customer_id))
             if account and int(account.customer_id) != int(identity_customer_id):
                 raise AppException(40905, "支付宝身份绑定冲突，请联系客服处理")
             if not account:
@@ -1283,15 +1288,16 @@ class CustomerService:
                     )
                 )
                 await db.flush()
-            return await db.get(Customer, identity_customer_id)
+            return customer
         if account:
+            customer = await lock_active_customer_for_write(db, int(account.customer_id))
             await CustomerService._claim_identity(
                 db,
                 customer_id=account.customer_id,
                 provider="ALIPAY_USER_ID",
                 provider_subject=alipay_user_id,
             )
-            return await db.get(Customer, account.customer_id)
+            return customer
         try:
             async with db.begin_nested():
                 customer = CustomerService._new_guest_customer()
@@ -1313,7 +1319,8 @@ class CustomerService:
                 db, "ALIPAY_USER_ID", alipay_user_id
             )
             if winner_id:
-                return await db.get(Customer, winner_id)
+                customer = await lock_active_customer_for_write(db, int(winner_id))
+                return customer
             again = (
                 await db.execute(
                     select(CustomerAlipayAccount).where(
@@ -1322,13 +1329,14 @@ class CustomerService:
                 )
             ).scalar_one_or_none()
             if again:
+                customer = await lock_active_customer_for_write(db, int(again.customer_id))
                 await CustomerService._claim_identity(
                     db,
                     customer_id=again.customer_id,
                     provider="ALIPAY_USER_ID",
                     provider_subject=alipay_user_id,
                 )
-                return await db.get(Customer, again.customer_id)
+                return customer
             raise AppException(40002, "支付宝登录冲突，请重试")
 
     @staticmethod
