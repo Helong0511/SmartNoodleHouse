@@ -9,6 +9,14 @@ FIELD_PERMISSION_GATES: dict[str, frozenset[str]] = {
     "cost_price": frozenset({"product:cost:read"}),
     "phone": frozenset({"customer:pii", "customer:manage"}),
     "id_card_no": frozenset({"customer:pii", "customer:manage"}),
+    "openid": frozenset({"customer:pii", "customer:manage"}),
+    "unionid": frozenset({"customer:pii", "customer:manage"}),
+    "alipay_user_id": frozenset({"customer:pii", "customer:manage"}),
+    "birthday": frozenset({"customer:pii", "customer:manage"}),
+    "birthday_picker": frozenset({"customer:pii", "customer:manage"}),
+    "birthday_calendar": frozenset({"customer:pii", "customer:manage"}),
+    "birthday_display": frozenset({"customer:pii", "customer:manage"}),
+    "birthday_locked": frozenset({"customer:pii", "customer:manage"}),
 }
 
 
@@ -54,3 +62,25 @@ def apply_field_policy_list(
     return [
         apply_field_policy(it, permissions, is_super_admin=is_super_admin) for it in items
     ]
+
+
+
+def apply_customer_detail_policy(
+    payload: dict[str, Any],
+    permissions: Iterable[str],
+    *,
+    is_super_admin: bool = False,
+) -> dict[str, Any]:
+    """裁剪顾客详情中的顶层及渠道账号嵌套敏感字段。"""
+    apply_field_policy(payload, permissions, is_super_admin=is_super_admin)
+    if is_super_admin:
+        return payload
+    for key in ("wechat_accounts", "alipay_accounts"):
+        accounts = payload.get(key)
+        if isinstance(accounts, list):
+            payload[key] = [
+                apply_field_policy(item, permissions)
+                for item in accounts
+                if isinstance(item, dict)
+            ]
+    return payload
