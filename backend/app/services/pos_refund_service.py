@@ -438,7 +438,7 @@ class PosRefundService:
             from app.models import PaymentRefund
 
             # 这里只做非锁定读取，避免先持有 POS 申请锁再等待退款行锁；
-            # 退款成功回调的锁序是 PaymentRefund → Order → Payment → POS request。
+            # 退款成功回调先按 Customer Gate → Order → Payment → PaymentRefund，最后锁 POS request。
             linked_refund = (
                 await db.execute(
                     select(PaymentRefund)
