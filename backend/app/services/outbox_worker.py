@@ -444,6 +444,21 @@ async def process_outbox_item(outbox_id: int) -> bool:
         # 任意支付 API 请求恢复积压事件；不能依赖业务请求曾经 import 过该模块。
         # 显式按 aggregate_type 懒加载，保证 paid_side_effect / refund /
         # coupon_release / late_payment / order_notification 均可跨重启恢复。
+        if row.aggregate_type == "feedback_learning":
+            try:
+                import app.services.feedback_service  # noqa: F401
+            except Exception as exc:
+                logger.exception(
+                    "Failed to import feedback-learning handler agg=%s event=%s",
+                    row.aggregate_type,
+                    row.event_kind,
+                )
+                await db.rollback()
+                await _mark_failed(
+                    db, row, f"handler_module_import_failed: {type(exc).__name__}", wid=wid
+                )
+                return True
+
         if row.aggregate_type in {
             "paid_side_effect", "refund", "order", "late_payment", "order_notification"
         }:
