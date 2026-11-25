@@ -190,6 +190,7 @@ async def test_gross_and_refund_helpers_can_be_forced_to_use_ledger(monkeypatch)
     from app.services import revenue_stats
 
     db = MagicMock()
+    db.scalar = AsyncMock()
     ledger_gross = AsyncMock(return_value=Decimal("80.00"))
     ledger_refund = AsyncMock(return_value=Decimal("15.00"))
     monkeypatch.setattr(revenue_stats, "ledger_gross_since", ledger_gross)
