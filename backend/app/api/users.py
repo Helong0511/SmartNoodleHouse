@@ -69,14 +69,14 @@ class UserCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=100)
     role_id: int
     store_id: int | None = None
-    status: int = 1
+    status: int = Field(default=1, ge=0, le=1)
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     role_id: int | None = None
     store_id: int | None = None
-    status: int | None = None
+    status: int | None = Field(default=None, ge=0, le=1)
     clear_store: bool = False
 
 
