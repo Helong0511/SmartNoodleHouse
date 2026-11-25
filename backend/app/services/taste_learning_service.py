@@ -54,6 +54,16 @@ def _logistic(raw: float) -> float:
 def _decay_factor(previous_at: datetime | None, now_at: datetime | None) -> float:
     if previous_at is None or now_at is None:
         return 1.0
+    # SQLite returns timezone-aware DateTime values as naive while freshly
+    # created ORM objects may still carry UTC tzinfo. Compare on one UTC basis.
+    if previous_at.tzinfo is None:
+        previous_at = previous_at.replace(tzinfo=timezone.utc)
+    else:
+        previous_at = previous_at.astimezone(timezone.utc)
+    if now_at.tzinfo is None:
+        now_at = now_at.replace(tzinfo=timezone.utc)
+    else:
+        now_at = now_at.astimezone(timezone.utc)
     delta = (now_at - previous_at).total_seconds()
     if delta <= 0:
         return 1.0

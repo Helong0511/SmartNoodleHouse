@@ -1,6 +1,6 @@
 """Track behavior-event learning per event instead of a timestamp-only watermark.
 
-Revision ID: 0055_behavior_event_learning_cursor
+Revision ID: 0055_cbe_learned_cursor
 Revises: 0054_flash_sale_claim_reason
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0055_behavior_event_learning_cursor"
+revision = "0055_cbe_learned_cursor"
 down_revision = "0054_flash_sale_claim_reason"
 branch_labels = None
 depends_on = None
