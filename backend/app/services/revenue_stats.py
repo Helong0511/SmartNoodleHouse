@@ -254,6 +254,7 @@ async def gross_revenue_since(
     until: datetime | None = None,
     store_id: int | None = None,
     channels: list[str] | None = None,
+    use_ledger: bool | None = None,
 ) -> Decimal:
     # 只要当前门店/周期已有账本分录，该周期所有报表组件都必须使用同一账本事实层。
     if use_ledger is True or (
@@ -285,6 +286,7 @@ async def refunded_since(
     until: datetime | None = None,
     store_id: int | None = None,
     channels: list[str] | None = None,
+    use_ledger: bool | None = None,
 ) -> Decimal:
     if use_ledger is True or (
         use_ledger is None
