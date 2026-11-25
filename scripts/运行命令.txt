@@ -276,6 +276,8 @@ npm install
 npm run build
 npm run dev -- --host 0.0.0.0 --port 5173
 
+cd E:\SmartNoodleHouse\frontend; npm run dev -- --host 0.0.0.0 --port 5173
+
 # ---- 以下勿再粘贴真实密钥 / 手机号 / 付款码 ----
 # 应用公钥 / 应用私钥 / 支付宝公钥：仅保存在本地 .env，勿写入本文件。
 # 粘贴 PKCS8 私钥内容到 .env 的 ALIPAY_PRIVATE_KEY，勿提交真实密钥。
