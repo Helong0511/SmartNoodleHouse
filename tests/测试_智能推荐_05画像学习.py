@@ -245,7 +245,7 @@ async def test_event_learning_cursor_handles_late_same_timestamp_events(db_sessi
     db = db_session
     _, _, p = await _setup_product(db)
     c = await make_customer(db)
-    same_time = utcnow()
+    same_time = utcnow().replace(tzinfo=None)
     db.add_all([
         _raw_event(c.id, "CLICK", p.id, when=same_time)
         for _ in range(3)
