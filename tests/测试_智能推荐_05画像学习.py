@@ -235,3 +235,36 @@ async def test_learn_recent_customers_scheduler_sweep(db_session):
     assert stats["events"] == 1
     rows = await _rows(db, c.id)
     assert ("PRODUCT", str(p.id)) in rows
+
+
+
+@pytest.mark.asyncio
+async def test_event_learning_cursor_handles_late_same_timestamp_events(db_session):
+    db = db_session
+    _, _, p = await _setup_product(db)
+    c = await make_customer(db)
+    same_time = utcnow()
+    db.add_all([
+        _raw_event(c.id, "CLICK", p.id, when=same_time)
+        for _ in range(3)
+    ])
+    await db.flush()
+
+    # A deliberately tiny batch simulates the boundary that the old timestamp
+    # watermark could not represent.
+    assert await TasteLearningService.learn_from_events(db, c.id, limit=1) == 1
+
+    # An event arriving later with the exact same created_at must still be pending.
+    late = _raw_event(c.id, "CLICK", p.id, when=same_time)
+    db.add(late)
+    await db.flush()
+
+    assert await TasteLearningService.learn_from_events(db, c.id, limit=1) == 1
+    assert await TasteLearningService.learn_from_events(db, c.id, limit=10) == 2
+
+    rows = await _rows(db, c.id)
+    assert rows[("PRODUCT", str(p.id))].event_count == 4
+    persisted = list((await db.execute(
+        select(CustomerBehaviorEvent).where(CustomerBehaviorEvent.customer_id == c.id)
+    )).scalars().all())
+    assert all(event.learned_at is not None for event in persisted)

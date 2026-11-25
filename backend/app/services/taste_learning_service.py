@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -250,15 +250,24 @@ class TasteLearningService:
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         rows = await TasteLearningService._load_rows(db, customer_id)
-        watermark = max((r.last_event_at for r in rows.values() if r.last_event_at), default=None)
-        q = select(CustomerBehaviorEvent).where(
-            CustomerBehaviorEvent.customer_id == customer_id
-        ).order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id).with_for_update()
-        if watermark is not None:
-            q = q.where(CustomerBehaviorEvent.created_at > watermark)
+        # Timestamp-only profile watermarks can skip late-arriving events that share
+        # the same DB timestamp. Persist consumption on each event in this transaction.
+        q = (
+            select(CustomerBehaviorEvent)
+            .where(
+                CustomerBehaviorEvent.customer_id == customer_id,
+                CustomerBehaviorEvent.learned_at.is_(None),
+            )
+            .order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id)
+            .with_for_update()
+        )
         events = list((await db.execute(q.limit(limit))).scalars().all())
         if not events:
             return 0
+
+        learned_at = datetime.now(timezone.utc)
+        for event in events:
+            event.learned_at = learned_at
 
         pids = {int(e.product_id) for e in events if e.product_id}
         products, cat_names, keys_by_product = await TasteLearningService._product_signals(db, pids)

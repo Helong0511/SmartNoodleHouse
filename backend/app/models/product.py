@@ -252,6 +252,13 @@ class CustomerBehaviorEvent(Base):
         UniqueConstraint("event_id", name="uq_cbe_event_id"),
         Index("ix_cbe_created_at_customer_id", "created_at", "customer_id"),
         Index("ix_cbe_created_at_event_type_store", "created_at", "event_type", "store_id"),
+        Index(
+            "ix_cbe_customer_learned_created",
+            "customer_id",
+            "learned_at",
+            "created_at",
+            "id",
+        ),
     )
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"),
@@ -276,6 +283,8 @@ class CustomerBehaviorEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+    # Set in the same transaction as the derived profile fold; NULL means pending.
+    learned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ProductFeedback(Base, TimestampMixin):
