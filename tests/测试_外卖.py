@@ -333,6 +333,7 @@ async def test_duplicate_delivery_refund_callback_does_not_regress_terminal_summ
     db.execute = AsyncMock(side_effect=[
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
         MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=123)),  # duplicate refund event
     ])
     db.flush = AsyncMock()
 
@@ -362,7 +363,7 @@ async def test_duplicate_delivery_refund_callback_does_not_regress_terminal_summ
 
     assert result is order
     assert delivery_order.refund_status == "APPROVED"
-    db.add.assert_called_once()
+    db.add.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -381,6 +382,8 @@ async def test_new_delivery_refund_callback_sets_pending_summary(monkeypatch):
     db.execute = AsyncMock(side_effect=[
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
         MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # not a duplicate
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no active refunds
     ])
     db.flush = AsyncMock()
 
@@ -939,3 +942,41 @@ async def test_meituan_side_effect_conflicting_success_and_error_is_uncertain(mo
     with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
         with pytest.raises(DeliveryPlatformResultUnknown):
             await MeituanProvider()._request("/api/v1/order/cancel", {"order_id": "O1"})
+
+
+@pytest.mark.asyncio
+async def test_delivery_refund_callback_rejects_cumulative_over_refund(monkeypatch):
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.core.exceptions import AppException
+    from app.services.delivery_service import DeliveryService
+
+    delivery_order = SimpleNamespace(id=188, order_id=199, platform="MEITUAN", refund_status="APPROVED")
+    order = SimpleNamespace(id=199, total_amount=Decimal("30.00"))
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
+            Decimal("20.00"), Decimal("5.00"),
+        ])))),
+    ])
+    db.flush = AsyncMock()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=delivery_order)
+    )
+
+    with pytest.raises(AppException) as exc:
+        await DeliveryService._handle_refund(
+            db,
+            "MEITUAN",
+            {"platform_order_id": "PLATFORM-ORDER-OVER", "refund_amount": "6.00", "refund_id": "RF-OVER"},
+            {"refund_amount": "6.00", "refund_id": "RF-OVER"},
+        )
+
+    assert exc.value.code == 40063
+    assert "累计退款" in exc.value.message
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
