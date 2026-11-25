@@ -605,7 +605,7 @@ async def update_user(
                 target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
     if data.role_id is not None:
         role = await _get_role(db, data.role_id)
-        _assert_can_assign_role(user, role)
+        await _assert_can_assign_role(db, user, role)
         if role.id != target.role_id:
             perm_changes["role_id"] = {"from": target.role_id, "to": role.id, "role_code": role.code}
             target.role_id = role.id
