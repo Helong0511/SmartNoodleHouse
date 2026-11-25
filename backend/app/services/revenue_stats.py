@@ -254,7 +254,16 @@ async def gross_revenue_since(
     until: datetime | None = None,
     store_id: int | None = None,
     channels: list[str] | None = None,
+    use_ledger: bool | None = None,
 ) -> Decimal:
+    # 只要当前门店/周期已有账本分录，该周期所有报表组件都必须使用同一账本事实层。
+    if use_ledger is True or (
+        use_ledger is None
+        and await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id)
+    ):
+        return await ledger_gross_since(
+            db, since=since, until=until, store_id=store_id, channels=channels
+        )
     pay_q = select(func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.status.in_(_PAID_PAYMENT),
         Payment.paid_at >= since,
@@ -277,7 +286,15 @@ async def refunded_since(
     until: datetime | None = None,
     store_id: int | None = None,
     channels: list[str] | None = None,
+    use_ledger: bool | None = None,
 ) -> Decimal:
+    if use_ledger is True or (
+        use_ledger is None
+        and await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id)
+    ):
+        return await ledger_refunded_since(
+            db, since=since, until=until, store_id=store_id, channels=channels
+        )
     refund_q = select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
         PaymentRefund.status == "SUCCESS",
         func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) >= since,
@@ -510,30 +527,56 @@ async def store_period_breakdown(
     order_q = select(Order.store_id, func.count()).group_by(Order.store_id)
     order_rows = dict((await db.execute(_order_created_filter(order_q, since, until))).all())
 
-    gross_q = (
-        select(Order.store_id, func.coalesce(func.sum(Payment.amount), 0))
-        .join(Order, Order.id == Payment.order_id)
-        .where(Payment.status.in_(_PAID_PAYMENT), Payment.paid_at >= since)
-        .group_by(Order.store_id)
-    )
-    if until is not None:
-        gross_q = gross_q.where(Payment.paid_at < until)
-    gross_rows = dict((await db.execute(gross_q)).all())
+    from app.models import FinancialLedger
 
-    refund_q = (
-        select(Order.store_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
-        .join(Order, Order.id == PaymentRefund.order_id)
-        .where(
-            PaymentRefund.status == "SUCCESS",
-            func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) >= since,
+    use_ledger = await _ledger_has_entries_since(db, since=since, until=until)
+    if use_ledger:
+        ledger_gross_q = (
+            select(FinancialLedger.store_id, func.coalesce(func.sum(FinancialLedger.amount), 0))
+            .where(
+                FinancialLedger.entry_type == "SALE",
+                FinancialLedger.created_at >= since,
+            )
+            .group_by(FinancialLedger.store_id)
         )
-        .group_by(Order.store_id)
-    )
-    if until is not None:
-        refund_q = refund_q.where(
-            func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) < until
+        ledger_refund_q = (
+            select(FinancialLedger.store_id, func.coalesce(func.sum(FinancialLedger.amount), 0))
+            .where(
+                FinancialLedger.entry_type == "REFUND",
+                FinancialLedger.created_at >= since,
+            )
+            .group_by(FinancialLedger.store_id)
         )
-    refund_rows = dict((await db.execute(refund_q)).all())
+        if until is not None:
+            ledger_gross_q = ledger_gross_q.where(FinancialLedger.created_at < until)
+            ledger_refund_q = ledger_refund_q.where(FinancialLedger.created_at < until)
+        gross_rows = dict((await db.execute(ledger_gross_q)).all())
+        refund_rows = dict((await db.execute(ledger_refund_q)).all())
+    else:
+        gross_q = (
+            select(Order.store_id, func.coalesce(func.sum(Payment.amount), 0))
+            .join(Order, Order.id == Payment.order_id)
+            .where(Payment.status.in_(_PAID_PAYMENT), Payment.paid_at >= since)
+            .group_by(Order.store_id)
+        )
+        if until is not None:
+            gross_q = gross_q.where(Payment.paid_at < until)
+        gross_rows = dict((await db.execute(gross_q)).all())
+
+        refund_q = (
+            select(Order.store_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
+            .join(Order, Order.id == PaymentRefund.order_id)
+            .where(
+                PaymentRefund.status == "SUCCESS",
+                func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) >= since,
+            )
+            .group_by(Order.store_id)
+        )
+        if until is not None:
+            refund_q = refund_q.where(
+                func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) < until
+            )
+        refund_rows = dict((await db.execute(refund_q)).all())
 
     paid_q = (
         select(Order.store_id, func.count())
@@ -614,6 +657,7 @@ async def store_period_breakdown(
                 "gross_revenue": str(gross),
                 "net_revenue": str(net),
                 "refunded_amount": str(refunded),
+                "revenue_source": "financial_ledger" if use_ledger else "payments",
                 "subtotal": str(money(Decimal(str(sub)))),
                 "member_discount": str(mem),
                 "coupon_discount": str(coup),
@@ -638,13 +682,21 @@ async def daily_series(
     days = max(1, min(days, 31))
     now = now_local()
     series: list[dict] = []
+    first_day = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    series_use_ledger = await _ledger_has_entries_since(
+        db, since=first_day, until=now + timedelta(microseconds=1), store_id=store_id
+    )
     for offset in range(days - 1, -1, -1):
         day_start = (now - timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
         placed = await placed_order_count_since(db, since=day_start, until=day_end, store_id=store_id)
         paid = await paid_order_count_since(db, since=day_start, until=day_end, store_id=store_id)
-        gross = await gross_revenue_since(db, since=day_start, until=day_end, store_id=store_id)
-        refunded = await refunded_since(db, since=day_start, until=day_end, store_id=store_id)
+        gross = await gross_revenue_since(
+            db, since=day_start, until=day_end, store_id=store_id, use_ledger=series_use_ledger
+        )
+        refunded = await refunded_since(
+            db, since=day_start, until=day_end, store_id=store_id, use_ledger=series_use_ledger
+        )
         net = money(gross - refunded)
         amounts = await order_amount_stats_since(db, since=day_start, until=day_end, store_id=store_id)
         series.append(
@@ -656,6 +708,7 @@ async def daily_series(
                 "gross_revenue": str(gross),
                 "net_revenue": str(net),
                 "refunded_amount": str(refunded),
+                "revenue_source": "financial_ledger" if series_use_ledger else "payments",
                 "total_discount": str(amounts["total_discount"]),
             }
         )
@@ -677,56 +730,95 @@ async def payment_channel_stats(
     until: datetime | None = None,
     store_id: int | None = None,
 ) -> list[dict]:
-    pay_q = (
-        select(
-            Payment.provider,
-            func.count().label("cnt"),
-            func.coalesce(func.sum(Payment.amount), 0).label("gross"),
-        )
-        .where(Payment.status.in_(_PAID_PAYMENT), Payment.paid_at >= since)
-        .group_by(Payment.provider)
-    )
-    if until is not None:
-        pay_q = pay_q.where(Payment.paid_at < until)
-    if store_id is not None:
-        pay_q = pay_q.join(Order, Order.id == Payment.order_id).where(Order.store_id == store_id)
-    pay_rows = {str(p): (int(c), Decimal(str(g))) for p, c, g in (await db.execute(pay_q)).all()}
+    from app.models import FinancialLedger
 
-    refund_q = (
-        select(
-            Payment.provider,
-            func.coalesce(func.sum(PaymentRefund.amount), 0).label("refunded"),
+    use_ledger = await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id)
+    if use_ledger:
+        sale_q = (
+            select(
+                FinancialLedger.provider,
+                func.count().label("cnt"),
+                func.coalesce(func.sum(FinancialLedger.amount), 0).label("gross"),
+            )
+            .where(
+                FinancialLedger.entry_type == "SALE",
+                FinancialLedger.created_at >= since,
+            )
+            .group_by(FinancialLedger.provider)
         )
-        .join(Payment, Payment.id == PaymentRefund.payment_id)
-        .where(
-            PaymentRefund.status == "SUCCESS",
-            func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) >= since,
+        refund_q = (
+            select(
+                FinancialLedger.provider,
+                func.coalesce(func.sum(FinancialLedger.amount), 0).label("refunded"),
+            )
+            .where(
+                FinancialLedger.entry_type == "REFUND",
+                FinancialLedger.created_at >= since,
+            )
+            .group_by(FinancialLedger.provider)
         )
-        .group_by(Payment.provider)
-    )
-    if until is not None:
-        refund_q = refund_q.where(
-            func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) < until
+        if until is not None:
+            sale_q = sale_q.where(FinancialLedger.created_at < until)
+            refund_q = refund_q.where(FinancialLedger.created_at < until)
+        if store_id is not None:
+            sale_q = sale_q.where(FinancialLedger.store_id == store_id)
+            refund_q = refund_q.where(FinancialLedger.store_id == store_id)
+        pay_rows = {str(p or "UNKNOWN"): (int(c), Decimal(str(g))) for p, c, g in (await db.execute(sale_q)).all()}
+        refund_rows = {str(p or "UNKNOWN"): Decimal(str(a)) for p, a in (await db.execute(refund_q)).all()}
+    else:
+        pay_q = (
+            select(
+                Payment.provider,
+                func.count().label("cnt"),
+                func.coalesce(func.sum(Payment.amount), 0).label("gross"),
+            )
+            .where(Payment.status.in_(_PAID_PAYMENT), Payment.paid_at >= since)
+            .group_by(Payment.provider)
         )
-    if store_id is not None:
-        refund_q = refund_q.join(Order, Order.id == PaymentRefund.order_id).where(
-            Order.store_id == store_id
-        )
-    refund_rows = {str(p): Decimal(str(a)) for p, a in (await db.execute(refund_q)).all()}
+        if until is not None:
+            pay_q = pay_q.where(Payment.paid_at < until)
+        if store_id is not None:
+            pay_q = pay_q.join(Order, Order.id == Payment.order_id).where(Order.store_id == store_id)
+        pay_rows = {str(p): (int(c), Decimal(str(g))) for p, c, g in (await db.execute(pay_q)).all()}
 
+        refund_q = (
+            select(
+                Payment.provider,
+                func.coalesce(func.sum(PaymentRefund.amount), 0).label("refunded"),
+            )
+            .join(Payment, Payment.id == PaymentRefund.payment_id)
+            .where(
+                PaymentRefund.status == "SUCCESS",
+                func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) >= since,
+            )
+            .group_by(Payment.provider)
+        )
+        if until is not None:
+            refund_q = refund_q.where(
+                func.coalesce(PaymentRefund.succeeded_at, PaymentRefund.created_at) < until
+            )
+        if store_id is not None:
+            refund_q = refund_q.join(Order, Order.id == PaymentRefund.order_id).where(
+                Order.store_id == store_id
+            )
+        refund_rows = {str(p): Decimal(str(a)) for p, a in (await db.execute(refund_q)).all()}
+
+    labels = dict(_PAYMENT_CHANNELS)
+    provider_codes = list(dict.fromkeys([code for code, _ in _PAYMENT_CHANNELS] + sorted(set(pay_rows) | set(refund_rows))))
     items: list[dict] = []
-    for code, label in _PAYMENT_CHANNELS:
+    for code in provider_codes:
         cnt, gross = pay_rows.get(code, (0, Decimal("0")))
         refunded = refund_rows.get(code, Decimal("0"))
         net = money(gross - refunded)
         items.append(
             {
                 "provider": code,
-                "label": label,
+                "label": labels.get(code, code.replace("_", " ").title()),
                 "count": cnt,
                 "gross_amount": str(money(gross)),
                 "refunded_amount": str(money(refunded)),
                 "net_amount": str(net),
+                "revenue_source": "financial_ledger" if use_ledger else "payments",
             }
         )
     return items

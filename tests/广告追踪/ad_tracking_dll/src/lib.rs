@@ -920,6 +920,10 @@ mod tests {
 
     #[test]
     fn strict_schema_rejects_unknown_fields() {
+        // This test shares the process-global key state with other parallel Rust tests.
+        // Initialize it explicitly so the assertion exercises schema validation,
+        // not whichever test happens to initialize the key ring first.
+        init();
         let payload = serde_json::json!({
             "offer_id": 10001, "campaign_id": 20001, "publisher_id": 30001, "advertiser_id": 40001,
             "unknown_field": "x"

@@ -183,3 +183,80 @@ async def test_delivery_kpi_status_counts_live_snapshot_without_until():
         stmts = [call.args[0] for call in db.scalar.call_args_list if call.args]
         status_stmt = str(stmts[1])
         assert "created_at" not in status_stmt
+
+
+@pytest.mark.asyncio
+async def test_gross_and_refund_helpers_can_be_forced_to_use_ledger(monkeypatch):
+    from app.services import revenue_stats
+
+    db = MagicMock()
+    db.scalar = AsyncMock()
+    ledger_gross = AsyncMock(return_value=Decimal("80.00"))
+    ledger_refund = AsyncMock(return_value=Decimal("15.00"))
+    monkeypatch.setattr(revenue_stats, "ledger_gross_since", ledger_gross)
+    monkeypatch.setattr(revenue_stats, "ledger_refunded_since", ledger_refund)
+
+    gross = await revenue_stats.gross_revenue_since(
+        db, since=MagicMock(), use_ledger=True
+    )
+    refunded = await revenue_stats.refunded_since(
+        db, since=MagicMock(), use_ledger=True
+    )
+
+    assert gross == Decimal("80.00")
+    assert refunded == Decimal("15.00")
+    ledger_gross.assert_awaited_once()
+    ledger_refund.assert_awaited_once()
+    db.scalar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_daily_series_uses_one_source_for_entire_range(monkeypatch):
+    from app.services import revenue_stats
+
+    db = MagicMock()
+    monkeypatch.setattr(revenue_stats, "now_local", lambda: datetime(2026, 8, 29, 12, 0, tzinfo=_TZ))
+    monkeypatch.setattr(revenue_stats, "_ledger_has_entries_since", AsyncMock(return_value=True))
+    monkeypatch.setattr(revenue_stats, "placed_order_count_since", AsyncMock(return_value=0))
+    monkeypatch.setattr(revenue_stats, "paid_order_count_since", AsyncMock(return_value=0))
+    gross = AsyncMock(return_value=Decimal("10.00"))
+    refunded = AsyncMock(return_value=Decimal("1.00"))
+    monkeypatch.setattr(revenue_stats, "gross_revenue_since", gross)
+    monkeypatch.setattr(revenue_stats, "refunded_since", refunded)
+    monkeypatch.setattr(
+        revenue_stats,
+        "order_amount_stats_since",
+        AsyncMock(return_value={"total_discount": Decimal("0.00")}),
+    )
+
+    result = await revenue_stats.daily_series(db, days=3, store_id=7)
+
+    assert len(result) == 3
+    assert {row["revenue_source"] for row in result} == {"financial_ledger"}
+    assert all(row["net_revenue"] == "9.00" for row in result)
+    assert all(call.kwargs["use_ledger"] is True for call in gross.await_args_list)
+    assert all(call.kwargs["use_ledger"] is True for call in refunded.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_payment_channel_stats_includes_ledger_platform_provider(monkeypatch):
+    from app.services import revenue_stats
+
+    db = MagicMock()
+    db.scalar = AsyncMock(return_value=1)
+    sale_rows = MagicMock()
+    sale_rows.all.return_value = [("MEITUAN", 2, Decimal("120.00"))]
+    refund_rows = MagicMock()
+    refund_rows.all.return_value = [("MEITUAN", Decimal("20.00"))]
+    db.execute = AsyncMock(side_effect=[sale_rows, refund_rows])
+
+    result = await revenue_stats.payment_channel_stats(
+        db, since=MagicMock(), store_id=3
+    )
+
+    meituan = next(row for row in result if row["provider"] == "MEITUAN")
+    assert meituan["count"] == 2
+    assert meituan["gross_amount"] == "120.00"
+    assert meituan["refunded_amount"] == "20.00"
+    assert meituan["net_amount"] == "100.00"
+    assert meituan["revenue_source"] == "financial_ledger"
