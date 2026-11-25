@@ -5,7 +5,7 @@
   ORDER_PAID 3×qty / REORDER +1(=4) / 评价 POSITIVE +2、NEGATIVE -3。
 - 时间衰减：30 天半衰期，新事件 fold 前对该行 raw_weight 乘 2^(-Δ天/30)。
 - 归一化：score = logistic(raw / SCALE)，落在 0..1，负反馈可把分压到 0.5 以下。
-- 增量水位：顾客全部画像行的 MAX(last_event_at)；只 fold 更晚的事件，天然幂等。
+- 事件级消费标记：只 fold learned_at 为空的事件，批次边界与同时间戳事件均可幂等续跑。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.models import (
     Customer,
@@ -474,7 +474,15 @@ class TasteLearningService:
             for r in (
                 await db.execute(
                     select(CustomerBehaviorEvent.customer_id)
-                    .where(CustomerBehaviorEvent.created_at >= since)
+                    # Recent events wake the normal sweep; pending events are
+                    # included regardless of age so a capped batch cannot strand
+                    # old backlog when no newer event arrives.
+                    .where(
+                        or_(
+                            CustomerBehaviorEvent.created_at >= since,
+                            CustomerBehaviorEvent.learned_at.is_(None),
+                        )
+                    )
                     .distinct()
                     .limit(limit)
                 )

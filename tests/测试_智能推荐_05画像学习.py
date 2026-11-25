@@ -228,7 +228,9 @@ async def test_learn_recent_customers_scheduler_sweep(db_session):
     db = db_session
     _, _, p = await _setup_product(db)
     c = await make_customer(db)
-    db.add(_raw_event(c.id, "CLICK", p.id))
+    # Old pending events must still be discovered after the recent-event window;
+    # otherwise a customer whose last event is old can be stranded forever.
+    db.add(_raw_event(c.id, "CLICK", p.id, when=utcnow() - timedelta(days=2)))
     await db.flush()
     stats = await TasteLearningService.learn_recent_customers(db, since=utcnow() - timedelta(minutes=15))
     assert stats["customers"] == 1
