@@ -19,7 +19,7 @@ from app.services.preference_service import PreferenceService
 from app.services.feedback_service import FeedbackService
 from app.services.customer_merge_service import CustomerMergeService, _lock_merge_scope
 from reco_factories import make_category, make_customer, make_paid_order, make_product, make_store
-from app.api import miniprogram_menu
+from app.api import miniprogram_menu, favorites as favorites_api
 
 
 @pytest.mark.asyncio
@@ -1127,3 +1127,67 @@ async def test_customer_merge_unions_favorite_products_and_keeps_target_duplicat
         )
     ) == 0
     assert stats == {"favorite_products_moved": 1, "favorite_products_merged": 1}
+
+
+
+@pytest.mark.asyncio
+async def test_add_favorite_acquires_active_customer_gate(monkeypatch):
+    customer = Customer(id=990, customer_no="FAV-990", status=1, account_status="ACTIVE")
+    calls = []
+
+    async def lock_active(_db, customer_id):
+        calls.append(customer_id)
+        return customer
+
+    class Result:
+        def scalar_one_or_none(self):
+            return None
+
+    class Session:
+        added = None
+
+        async def get(self, model, product_id):
+            from app.models import Product
+            assert model is Product
+            assert product_id == 991
+            return SimpleNamespace(id=991, status="ON_SALE", store_id=1)
+
+        async def execute(self, _statement):
+            return Result()
+
+        def add(self, row):
+            self.added = row
+
+        async def flush(self):
+            return None
+
+    monkeypatch.setattr(favorites_api, "lock_active_customer_for_write", lock_active)
+    session = Session()
+    await favorites_api.add_favorite(991, None, session, customer)
+
+    assert calls == [990]
+    assert session.added.customer_id == 990
+    assert session.added.product_id == 991
+
+
+@pytest.mark.asyncio
+async def test_remove_favorite_acquires_active_customer_gate(monkeypatch):
+    customer = Customer(id=992, customer_no="FAV-992", status=1, account_status="ACTIVE")
+    calls = []
+
+    async def lock_active(_db, customer_id):
+        calls.append(customer_id)
+        return customer
+
+    class Result:
+        def scalar_one_or_none(self):
+            return None
+
+    class Session:
+        async def execute(self, _statement):
+            return Result()
+
+    monkeypatch.setattr(favorites_api, "lock_active_customer_for_write", lock_active)
+    await favorites_api.remove_favorite(993, None, Session(), customer)
+
+    assert calls == [992]
