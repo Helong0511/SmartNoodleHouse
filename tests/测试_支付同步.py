@@ -775,24 +775,31 @@ async def test_immediate_amount_mismatch_persists_unknown_and_status_history(mon
 
 
 @pytest.mark.asyncio
-async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks():
-    recharge = SimpleNamespace(id=113, status="PENDING")
-    payment = SimpleNamespace(id=114, status="PENDING")
+async def test_recharge_amount_mismatch_uses_customer_gate_then_parent_current_locks():
+    recharge = SimpleNamespace(id=113, customer_id=1, status="PENDING")
+    payment = SimpleNamespace(id=114, recharge_order_id=113, status="PENDING")
+    owner_result = MagicMock()
+    owner_result.scalar_one_or_none.return_value = 1
     recharge_result = MagicMock()
     recharge_result.scalar_one_or_none.return_value = recharge
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
     db = AsyncMock()
+    db.scalar = AsyncMock(return_value=1)
     db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
 
     with patch(
+        "app.services.payment_service.lock_customer_write_gates", new_callable=AsyncMock
+    ) as gate, patch(
         "app.services.payment_service.record_payment_status", new_callable=AsyncMock
     ) as history:
         returned = await PaymentService._mark_recharge_payment_unknown_after_amount_mismatch(db, 113, 114)
 
     assert returned is payment
     assert payment.status == "UNKNOWN"
+    gate.assert_awaited_once_with(db, [1])
     history.assert_awaited_once()
+    assert db.scalar.await_count == 1
     assert db.execute.await_count == 2
     for call in db.execute.await_args_list:
         stmt = call.args[0]
