@@ -33,6 +33,7 @@ from app.models import (
     Customer,
     CustomerAlipayAccount,
     CustomerCoupon,
+    CustomerFavoriteProduct,
     CustomerIdentity,
     CustomerPreference,
     CustomerSocialIdentity,
@@ -194,6 +195,8 @@ class CustomerMergeService:
             "alipay_dropped": 0,
             "identities_moved": 0,
             "dining_sessions": 0,
+            "favorite_products_moved": 0,
+            "favorite_products_merged": 0,
             "orders": 0,
             "payments": 0,
             "coupons_moved": 0,
@@ -232,6 +235,7 @@ class CustomerMergeService:
         await cls._merge_platform_accounts(db, source.id, target.id, stats)
         await cls._merge_identities(db, source.id, target.id, stats)
         await cls._merge_dining_sessions(db, source.id, target.id, stats)
+        await cls._merge_favorite_products(db, source.id, target.id, stats)
         await cls._reassign_orders_payments(db, source.id, target.id, stats)
         await cls._merge_coupons(db, source.id, target.id, stats)
         await cls._merge_preferences_for_consent(db, source, target, stats)
@@ -405,6 +409,46 @@ class CustomerMergeService:
             for stale in active[1:]:
                 stale.status = "CANCELLED"
                 stale.ended_at = stale.ended_at or ended_at
+        await db.flush()
+
+    @classmethod
+    async def _merge_favorite_products(
+        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+    ) -> None:
+        """Union source favorites into target; keep the target row on duplicates."""
+        rows = list(
+            (
+                await db.execute(
+                    select(CustomerFavoriteProduct)
+                    .where(CustomerFavoriteProduct.customer_id.in_((source_id, target_id)))
+                    .order_by(
+                        CustomerFavoriteProduct.customer_id,
+                        CustomerFavoriteProduct.product_id,
+                        CustomerFavoriteProduct.id,
+                    )
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        target_products = {
+            int(row.product_id)
+            for row in rows
+            if int(row.customer_id) == int(target_id)
+        }
+        for row in rows:
+            if int(row.customer_id) != int(source_id):
+                continue
+            if int(row.product_id) in target_products:
+                await db.delete(row)
+                stats["favorite_products_merged"] = int(
+                    stats.get("favorite_products_merged", 0)
+                ) + 1
+            else:
+                row.customer_id = int(target_id)
+                target_products.add(int(row.product_id))
+                stats["favorite_products_moved"] = int(
+                    stats.get("favorite_products_moved", 0)
+                ) + 1
         await db.flush()
 
     @classmethod
