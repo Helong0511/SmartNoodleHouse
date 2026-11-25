@@ -400,10 +400,12 @@ async def get_customer_lifecycle(
     from app.services.lifecycle_service import LifecycleService
     from app.services.store_scope import require_bound_store
 
-    require_bound_store(user, None)
+    effective_store = require_bound_store(user, None)
     customer = await db.get(Customer, int(customer_id))
     if not customer:
         raise AppException(40401, "顾客不存在")
+    if effective_store is not None:
+        await _assert_customer_in_store(db, int(customer_id), effective_store)
     data = await LifecycleService.get_payload(db, int(customer_id))
     return success(data, request=request)
 
@@ -483,8 +485,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
     birthday_benefit = await CustomerService.birthday_benefit_payload(
         db, effective_store, customer
     )
-    return success(
-        {
+    payload = {
             "id": customer.id,
             "customer_no": customer.customer_no,
             **CustomerService.identity_name_payload(customer),
@@ -575,9 +576,15 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             "birthday_benefit": birthday_benefit,
             "recommend_opt_in": int(customer.recommend_opt_in or 0),
             "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),
-        },
-        request=request,
+        }
+    from app.api.deps import get_user_permissions
+    from app.services.field_policy import apply_customer_detail_policy
+
+    permissions = await get_user_permissions(db, user.role_id, user_id=user.id)
+    payload = apply_customer_detail_policy(
+        payload, permissions, is_super_admin=user.role.code == "SUPER_ADMIN"
     )
+    return success(payload, request=request)
 
 
 @router.patch("/{customer_id}", dependencies=[require_permission("customer:write")])
