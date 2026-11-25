@@ -255,3 +255,4 @@ from app.services.outbox_worker import register_outbox_handler
 
 register_outbox_handler("feedback_learning", "taste_learning")(
     _handle_feedback_taste_learning
+)
