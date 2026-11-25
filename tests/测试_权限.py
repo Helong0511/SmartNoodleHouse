@@ -278,3 +278,29 @@ async def test_store_admin_can_access_reconcile_archive_delegate(db_session):
                 assert res_del.status_code == 200, res_del.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_user_create_rejects_invalid_status():
+    from pydantic import ValidationError
+    from app.api.users import UserCreate
+
+    with pytest.raises(ValidationError):
+        UserCreate(username="staff01", password="secret1", display_name="员工", role_id=2, status=2)
+
+
+def test_user_update_rejects_invalid_status():
+    from pydantic import ValidationError
+    from app.api.users import UserUpdate
+
+    with pytest.raises(ValidationError):
+        UserUpdate(status=-1)
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_user_status_accepts_supported_values(status):
+    from app.api.users import UserCreate, UserUpdate
+
+    create = UserCreate(username="staff01", password="secret1", display_name="员工", role_id=2, status=status)
+    update = UserUpdate(status=status)
+    assert create.status == status
+    assert update.status == status
