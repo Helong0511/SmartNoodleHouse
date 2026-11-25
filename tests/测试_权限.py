@@ -294,6 +294,8 @@ def test_user_update_rejects_invalid_status():
 
     with pytest.raises(ValidationError):
         UserUpdate(status=-1)
+    with pytest.raises(ValidationError):
+        UserUpdate(status=True)
 
 
 @pytest.mark.parametrize("status", [0, 1])
