@@ -12,7 +12,7 @@ Merge policy
 5. 偏好 UNIQUE(customer, category, option_code)：冲突保留更高 preference_score
    （同分保留目标，累加 order_count）。
 6. FaceProfile：全部挂到目标后，仅保留最新一份 AUTHORIZED，其余 REVOKED。
-7. Order / Payment 的 customer_id 改挂目标；PaymentRefund 无 customer_id 列故跳过。
+7. Order / Payment / ProductFeedback 的 customer_id 改挂目标；PaymentRefund 无 customer_id 列故跳过。
 8. WelcomeLog / PointLedger 改挂目标；last_order_at 取两者较新。
 9. 储值：本金/赠送金并入目标，写 MERGE 流水；balance_ledger / recharge_orders 改挂目标。
 10. 公益身份 CustomerSocialIdentity / 核销台账 social_benefit_redemptions 改挂目标；
