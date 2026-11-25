@@ -183,10 +183,75 @@ class FeedbackService:
                         )
                 except Exception:
                     logger.exception(
-                        "评价画像学习失败 order_id=%s product_id=%s customer_id=%s",
+                        "评价画像学习失败，写入 Outbox 补偿 order_id=%s product_id=%s customer_id=%s",
                         order.id,
                         pid,
                         order.customer_id,
                     )
+                    # 评价已经 flush；补偿事件必须与评价处于同一外层事务。
+                    # 若 Outbox 入队失败则向调用方传播，避免提交一条永远不会补学的评价。
+                    from app.services.outbox_worker import enqueue_outbox
+
+                    await enqueue_outbox(
+                        db,
+                        aggregate_type="feedback_learning",
+                        aggregate_id=int(fb.id),
+                        event_kind="taste_learning",
+                        payload={"feedback_id": int(fb.id)},
+                    )
 
         return {"saved": saved, "skipped_existing": skipped}
+
+
+async def _handle_feedback_taste_learning(db: AsyncSession, row) -> None:
+    """按当前订单归属与授权状态补学评价；画像 fold 与 Outbox DONE 同事务提交。"""
+    from app.models import ProductFeedback
+    from app.services.taste_learning_service import TasteLearningService
+
+    feedback_snapshot = (
+        await db.execute(
+            select(ProductFeedback).where(
+                ProductFeedback.id == int(row.aggregate_id)
+            )
+        )
+    ).scalar_one_or_none()
+    if feedback_snapshot is None:
+        return
+
+    # 初始评价读取只用于取得 order_id；权威顾客归属必须在 Gate → Order → Customer 后刷新。
+    order, customer = await TasteLearningService._lock_order_customer_for_learning(
+        db, int(feedback_snapshot.order_id)
+    )
+    if order is None or customer is None:
+        return
+
+    feedback = (
+        await db.execute(
+            select(ProductFeedback)
+            .where(ProductFeedback.id == int(row.aggregate_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if feedback is None:
+        return
+    if (
+        feedback.order_id != order.id
+        or feedback.customer_id != order.customer_id
+    ):
+        raise RuntimeError(
+            "feedback ownership changed while acquiring recommendation gate; retry outbox"
+        )
+    if not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        return
+
+    await TasteLearningService.learn_from_feedback(
+        db, feedback, locked_customer=customer
+    )
+
+
+# Worker imports this module after restart when it claims feedback-learning events.
+from app.services.outbox_worker import register_outbox_handler
+
+register_outbox_handler("feedback_learning", "taste_learning")(
+    _handle_feedback_taste_learning
