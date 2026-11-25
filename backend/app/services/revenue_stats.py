@@ -256,7 +256,10 @@ async def gross_revenue_since(
     channels: list[str] | None = None,
 ) -> Decimal:
     # 只要当前门店/周期已有账本分录，该周期所有报表组件都必须使用同一账本事实层。
-    if await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id):
+    if use_ledger is True or (
+        use_ledger is None
+        and await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id)
+    ):
         return await ledger_gross_since(
             db, since=since, until=until, store_id=store_id, channels=channels
         )
@@ -283,7 +286,10 @@ async def refunded_since(
     store_id: int | None = None,
     channels: list[str] | None = None,
 ) -> Decimal:
-    if await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id):
+    if use_ledger is True or (
+        use_ledger is None
+        and await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id)
+    ):
         return await ledger_refunded_since(
             db, since=since, until=until, store_id=store_id, channels=channels
         )
@@ -674,13 +680,21 @@ async def daily_series(
     days = max(1, min(days, 31))
     now = now_local()
     series: list[dict] = []
+    first_day = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    series_use_ledger = await _ledger_has_entries_since(
+        db, since=first_day, until=now + timedelta(microseconds=1), store_id=store_id
+    )
     for offset in range(days - 1, -1, -1):
         day_start = (now - timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
         placed = await placed_order_count_since(db, since=day_start, until=day_end, store_id=store_id)
         paid = await paid_order_count_since(db, since=day_start, until=day_end, store_id=store_id)
-        gross = await gross_revenue_since(db, since=day_start, until=day_end, store_id=store_id)
-        refunded = await refunded_since(db, since=day_start, until=day_end, store_id=store_id)
+        gross = await gross_revenue_since(
+            db, since=day_start, until=day_end, store_id=store_id, use_ledger=series_use_ledger
+        )
+        refunded = await refunded_since(
+            db, since=day_start, until=day_end, store_id=store_id, use_ledger=series_use_ledger
+        )
         net = money(gross - refunded)
         amounts = await order_amount_stats_since(db, since=day_start, until=day_end, store_id=store_id)
         series.append(
@@ -692,6 +706,7 @@ async def daily_series(
                 "gross_revenue": str(gross),
                 "net_revenue": str(net),
                 "refunded_amount": str(refunded),
+                "revenue_source": "financial_ledger" if series_use_ledger else "payments",
                 "total_discount": str(amounts["total_discount"]),
             }
         )
