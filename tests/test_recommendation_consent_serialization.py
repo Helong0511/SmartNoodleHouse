@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects import mysql
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Customer, CustomerBehaviorEvent, CustomerPreference, CustomerTasteProfile, Order
+from app.models import Customer, CustomerBehaviorEvent, CustomerPreference, CustomerTasteProfile, Order, ProductFeedback
 from app.services import behavior_event_service
 from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
@@ -18,7 +18,7 @@ from app.services.taste_learning_service import TasteLearningService
 from app.services.preference_service import PreferenceService
 from app.services.feedback_service import FeedbackService
 from app.services.customer_merge_service import CustomerMergeService, _lock_merge_scope
-from reco_factories import make_customer
+from reco_factories import make_category, make_customer, make_paid_order, make_product, make_store
 from app.api import miniprogram_menu
 
 
@@ -1036,3 +1036,40 @@ async def test_feedback_learning_outbox_rechecks_current_consent_before_folding(
         Session(),
         SimpleNamespace(aggregate_id=501),
     )
+
+
+
+@pytest.mark.asyncio
+async def test_customer_merge_reassigns_product_feedback_with_order(db_session):
+    source = await make_customer(db_session, recommend_opt_in=1)
+    target = await make_customer(db_session, recommend_opt_in=1)
+    store = await make_store(db_session)
+    category = await make_category(db_session, int(store.id))
+    product = await make_product(db_session, int(store.id), int(category.id))
+    order = await make_paid_order(
+        db_session, int(source.id), int(store.id), [(product, 1, [])]
+    )
+    feedback = ProductFeedback(
+        order_id=int(order.id),
+        product_id=int(product.id),
+        customer_id=int(source.id),
+        store_id=int(store.id),
+        verdicts=["TASTY"],
+        sentiment="POSITIVE",
+    )
+    db_session.add(feedback)
+    await db_session.flush()
+    feedback_id = int(feedback.id)
+
+    stats = {}
+    await CustomerMergeService._reassign_orders_payments(
+        db_session, int(source.id), int(target.id), stats
+    )
+
+    await db_session.refresh(order)
+    await db_session.refresh(feedback)
+    assert int(order.customer_id) == int(target.id)
+    assert int(feedback.customer_id) == int(target.id)
+    assert stats["orders"] == 1
+    assert stats["product_feedback"] == 1
+    assert feedback.id == feedback_id
