@@ -997,3 +997,42 @@ async def test_ab_assignment_integrity_race_keeps_outer_customer_gate_transactio
     assert returned_experiment is experiment
     assert session.transaction_active is True
     assert isinstance(session.added, AbAssignment)
+
+
+@pytest.mark.asyncio
+async def test_feedback_learning_outbox_rechecks_current_consent_before_folding(monkeypatch):
+    from types import SimpleNamespace
+    from app.services.feedback_service import _handle_feedback_taste_learning
+
+    feedback = SimpleNamespace(
+        id=501, order_id=601, customer_id=701, product_id=801,
+        sentiment="POSITIVE", created_at=None,
+    )
+    order = SimpleNamespace(id=601, customer_id=701)
+    opted_out_customer = SimpleNamespace(id=701, recommend_opt_in=0)
+
+    class Result:
+        def scalar_one_or_none(self):
+            return feedback
+
+    class Session:
+        async def execute(self, _statement):
+            return Result()
+
+    async def locked_order_customer(_db, order_id):
+        assert order_id == 601
+        return order, opted_out_customer
+
+    async def must_not_fold(*_args, **_kwargs):
+        raise AssertionError("opted-out feedback must not be folded")
+
+    monkeypatch.setattr(
+        TasteLearningService, "_lock_order_customer_for_learning",
+        locked_order_customer,
+    )
+    monkeypatch.setattr(TasteLearningService, "learn_from_feedback", must_not_fold)
+
+    await _handle_feedback_taste_learning(
+        Session(),
+        SimpleNamespace(aggregate_id=501),
+    )
