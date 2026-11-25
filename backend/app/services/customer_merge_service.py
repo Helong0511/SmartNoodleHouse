@@ -42,6 +42,7 @@ from app.models import (
     FlashSaleClaim,
     Order,
     Payment,
+    ProductFeedback,
     PointLedger,
     RechargeOrder,
     SocialBenefitRedemption,
@@ -345,6 +346,15 @@ class CustomerMergeService:
             update(Payment).where(Payment.customer_id == source_id).values(customer_id=target_id)
         )
         stats["payments"] = int(r2.rowcount or 0)
+        # Feedback rows are owned by the same customer as their order. Move them
+        # with the order so delayed feedback-learning outbox work can validate
+        # the current order/feedback ownership after a customer merge.
+        r3 = await db.execute(
+            update(ProductFeedback)
+            .where(ProductFeedback.customer_id == source_id)
+            .values(customer_id=target_id)
+        )
+        stats["product_feedback"] = int(r3.rowcount or 0)
         await db.flush()
 
     @classmethod
