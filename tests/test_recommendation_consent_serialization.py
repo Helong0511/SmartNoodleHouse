@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects import mysql
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import Customer, CustomerBehaviorEvent, CustomerPreference, CustomerTasteProfile, Order, ProductFeedback
+from app.models import Customer, CustomerBehaviorEvent, CustomerFavoriteProduct, CustomerPreference, CustomerTasteProfile, Order, ProductFeedback
 from app.services import behavior_event_service
 from app.services.audit_service import AuditService
 from app.services.privacy_service import PrivacyService
@@ -1073,3 +1073,57 @@ async def test_customer_merge_reassigns_product_feedback_with_order(db_session):
     assert stats["orders"] == 1
     assert stats["product_feedback"] == 1
     assert feedback.id == feedback_id
+
+
+
+@pytest.mark.asyncio
+async def test_customer_merge_unions_favorite_products_and_keeps_target_duplicate(db_session):
+    source = await make_customer(db_session)
+    target = await make_customer(db_session)
+    store = await make_store(db_session)
+    category = await make_category(db_session, int(store.id))
+    shared_product = await make_product(db_session, int(store.id), int(category.id))
+    source_only_product = await make_product(db_session, int(store.id), int(category.id))
+    target_favorite = CustomerFavoriteProduct(
+        customer_id=int(target.id),
+        product_id=int(shared_product.id),
+        store_id=int(store.id),
+    )
+    source_duplicate = CustomerFavoriteProduct(
+        customer_id=int(source.id),
+        product_id=int(shared_product.id),
+        store_id=int(store.id),
+    )
+    source_only = CustomerFavoriteProduct(
+        customer_id=int(source.id),
+        product_id=int(source_only_product.id),
+        store_id=int(store.id),
+    )
+    db_session.add_all([target_favorite, source_duplicate, source_only])
+    await db_session.flush()
+
+    stats = {"favorite_products_moved": 0, "favorite_products_merged": 0}
+    await CustomerMergeService._merge_favorite_products(
+        db_session, int(source.id), int(target.id), stats
+    )
+
+    rows = list(
+        (
+            await db_session.execute(
+                select(CustomerFavoriteProduct)
+                .where(CustomerFavoriteProduct.customer_id == int(target.id))
+                .order_by(CustomerFavoriteProduct.product_id)
+            )
+        ).scalars().all()
+    )
+    assert {int(row.product_id) for row in rows} == {
+        int(shared_product.id), int(source_only_product.id)
+    }
+    assert len(rows) == 2
+    assert target_favorite.id in {row.id for row in rows}
+    assert await db_session.scalar(
+        select(func.count()).select_from(CustomerFavoriteProduct).where(
+            CustomerFavoriteProduct.customer_id == int(source.id)
+        )
+    ) == 0
+    assert stats == {"favorite_products_moved": 1, "favorite_products_merged": 1}
