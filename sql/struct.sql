@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS `customer_behavior_events` (
   `ab_bucket` varchar(80) NULL DEFAULT NULL COMMENT '命中的 A/B 桶，如 reco_algo:v2',
   `payload` json NULL COMMENT '事件附加属性（不含手机号/昵称等 PII）',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '事件发生时间',
+  `learned_at` datetime(3) NULL DEFAULT NULL COMMENT '画像学习消费时间；NULL=待学习',
   `learned_at` datetime(3) NULL DEFAULT NULL COMMENT '画像学习消费时间；NULL=待处理',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_cbe_event_id`(`event_id` ASC) USING BTREE,
@@ -266,6 +267,7 @@ CREATE TABLE IF NOT EXISTS `customer_behavior_events` (
     `created_at` ASC
   ) USING BTREE,
   INDEX `idx_cbe_created`(`created_at` ASC) USING BTREE,
+  INDEX `ix_cbe_customer_learned_created`(`customer_id` ASC, `learned_at` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   INDEX `idx_cbe_customer_learned_created`(`customer_id` ASC, `learned_at` ASC, `created_at` ASC, `id` ASC) USING BTREE,
   CONSTRAINT `fk_cbe_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客行为事件表' ROW_FORMAT = Dynamic;
