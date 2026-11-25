@@ -69,8 +69,10 @@ async def test_handle_refund_without_refund_id_inserts_directly():
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[
-        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
-        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # lock Order
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # lock DeliveryOrder
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no duplicate refund
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no active refunds
     ])
     db.add = MagicMock()
     db.flush = AsyncMock()
