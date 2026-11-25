@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, DbSession, get_user_permissions, require_permission
+from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.orm_safe import orm_attr_loaded
 from app.core.response import calc_pages, success, serialize_dt
