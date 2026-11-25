@@ -778,8 +778,6 @@ async def test_immediate_amount_mismatch_persists_unknown_and_status_history(mon
 async def test_recharge_amount_mismatch_uses_customer_gate_then_parent_current_locks():
     recharge = SimpleNamespace(id=113, customer_id=1, status="PENDING")
     payment = SimpleNamespace(id=114, recharge_order_id=113, status="PENDING")
-    owner_result = MagicMock()
-    owner_result.scalar_one_or_none.return_value = 1
     recharge_result = MagicMock()
     recharge_result.scalar_one_or_none.return_value = recharge
     payment_result = MagicMock()
