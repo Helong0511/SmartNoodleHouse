@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.customer_write_gate import lock_customer_write_gates
 from app.models import (
     Customer,
     CustomerBehaviorEvent,
@@ -33,13 +34,39 @@ CONSENT_VERSION = "1.0"
 
 class PrivacyService:
     @staticmethod
+    async def lock_customer_for_recommendation(db: AsyncSession, customer_id: int) -> Customer | None:
+        """Serialize consent changes, event ingestion and profile writes per customer.
+
+        populate_existing is essential: callers may already hold a stale Customer
+        instance loaded before waiting for this row lock.
+        """
+        await lock_customer_write_gates(db, [int(customer_id)])
+        result = await db.execute(
+            select(Customer)
+            .where(Customer.id == int(customer_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_privacy_settings(db: AsyncSession, customer: Customer) -> dict[str, Any]:
-        """返回个性化推荐开关 + 同意版本/时间。"""
+        """返回个性化推荐开关 + 同意版本/时间；与撤回操作串行读取。"""
+        locked_customer = await PrivacyService.lock_customer_for_recommendation(
+            db, int(customer.id)
+        )
+        if locked_customer is None:
+            return {
+                "recommend_opt_in": 0,
+                "consent_version": None,
+                "consented_at": None,
+                "retention_days": DEFAULT_RETENTION_DAYS,
+            }
         return {
-            "recommend_opt_in": int(customer.recommend_opt_in or 0),
-            "consent_version": customer.consent_version,
-            "consented_at": serialize_dt(customer.recommend_consent_at)
-            if customer.recommend_consent_at
+            "recommend_opt_in": int(locked_customer.recommend_opt_in or 0),
+            "consent_version": locked_customer.consent_version,
+            "consented_at": serialize_dt(locked_customer.recommend_consent_at)
+            if locked_customer.recommend_consent_at
             else None,
             "retention_days": DEFAULT_RETENTION_DAYS,
         }
@@ -53,6 +80,10 @@ class PrivacyService:
         request: Any = None,
     ) -> dict[str, Any]:
         """更新个性化推荐开关；关闭时立即丢弃未入库的事件队列（前端职责），后端 ingest 已拒收。"""
+        locked_customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+        if locked_customer is None:
+            raise ValueError("customer not found while updating recommendation consent")
+        customer = locked_customer
         opt_in = 1 if opt_in else 0
         old = int(customer.recommend_opt_in or 0)
         customer.recommend_opt_in = opt_in
@@ -60,9 +91,15 @@ class PrivacyService:
             # 顾客主动点击授权后调用；每次重新开启均记录新的同意时间与政策版本。
             customer.consent_version = CONSENT_VERSION
             customer.recommend_consent_at = datetime.now(timezone.utc)
+            if old != 1:
+                # Redis outage may have delayed the opt-out invalidation Outbox.
+                # Fence any pre-revocation cache before personalized reads resume.
+                from app.services.reco_cache import defer_invalidate_customer
+
+                defer_invalidate_customer(db, int(customer.id))
         else:
             # 撤回授权后立即清除派生画像与行为数据；订单及财务凭证不删除。
-            await cls.clear_taste_profile(db, customer, request=request)
+            await cls.clear_taste_profile(db, customer, request=request, acquire_lock=False)
         await db.flush()
         await AuditService.log(
             db,
@@ -81,13 +118,15 @@ class PrivacyService:
         cls, db: AsyncSession, customer: Customer
     ) -> dict[str, Any]:
         """口味画像可读视图：仅对已授权顾客返回派生画像。"""
-        if not int(getattr(customer, "recommend_opt_in", 0) or 0):
-            return {"customer_id": int(customer.id), "dimensions": {"CATEGORY": [], "PRODUCT": [], "TASTE_TAG": []}, "spec_preferences": []}
+        customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+            return {"customer_id": int(getattr(customer, "id", 0) or 0), "dimensions": {"CATEGORY": [], "PRODUCT": [], "TASTE_TAG": []}, "spec_preferences": []}
         profiles = (
             await db.execute(
                 select(CustomerTasteProfile)
                 .where(CustomerTasteProfile.customer_id == int(customer.id))
                 .order_by(CustomerTasteProfile.score.desc())
+                .with_for_update()
             )
         ).scalars().all()
 
@@ -116,6 +155,7 @@ class PrivacyService:
                 .where(CustomerPreference.customer_id == int(customer.id))
                 .order_by(CustomerPreference.preference_score.desc())
                 .limit(20)
+                .with_for_update()
             )
         ).scalars().all()
         spec_prefs = [
@@ -142,13 +182,19 @@ class PrivacyService:
         db: AsyncSession,
         customer: Customer,
         request: Any = None,
+        acquire_lock: bool = True,
     ) -> dict[str, Any]:
         """清除画像派生数据：行为事件 + 画像 + 评价 + customer_preferences。
         订单本体保留；写审计日志。"""
+        if acquire_lock:
+            locked_customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+            if locked_customer is None:
+                return {"cleared": False, "events_deleted": 0, "tables": []}
+            customer = locked_customer
         cid = int(customer.id)
         events_n = (
             await db.execute(
-                select(CustomerBehaviorEvent.id).where(CustomerBehaviorEvent.customer_id == cid)
+                select(CustomerBehaviorEvent.id).where(CustomerBehaviorEvent.customer_id == cid).with_for_update()
             )
         ).all()
         events_count = len(events_n)
@@ -211,12 +257,23 @@ class PrivacyService:
         request: Any = None,
     ) -> dict[str, Any]:
         """记录版本化同意留痕。"""
+        locked_customer = await cls.lock_customer_for_recommendation(db, int(customer.id))
+        if locked_customer is None:
+            raise ValueError("customer not found while recording recommendation consent")
+        customer = locked_customer
         ver = (version or CONSENT_VERSION).strip()[:40]
         now = datetime.now(timezone.utc)
         old_ver = customer.consent_version
+        old_opt_in = int(getattr(customer, "recommend_opt_in", 0) or 0)
         customer.consent_version = ver
         customer.recommend_consent_at = now
         customer.recommend_opt_in = 1
+        if old_opt_in != 1:
+            # Re-consent must fence caches left behind by a delayed opt-out
+            # invalidation while Redis was unavailable.
+            from app.services.reco_cache import defer_invalidate_customer
+
+            defer_invalidate_customer(db, int(customer.id))
         await db.flush()
 
         await AuditService.log(

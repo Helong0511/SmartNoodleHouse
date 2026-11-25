@@ -44,3 +44,19 @@ def test_refund_ui_persists_same_request_key_before_network_call() -> None:
     assert "readRefundAttempt(String(row.payment_no))" in source
     assert "sessionStorage.setItem" in source
     assert "sessionStorage.removeItem" in source
+
+
+def test_refund_idempotency_race_preserves_outer_customer_gate_transaction() -> None:
+    source = (ROOT / "backend/app/services/payment_service.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    refund = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "refund"
+    )
+    segment = ast.get_source_segment(source, refund)
+    assert segment is not None
+    race_at = segment.index("except IntegrityError:")
+    recovery = segment[race_at:segment.index("if pos_refund_request_id is not None:", race_at)]
+    assert "db.begin_nested()" in segment
+    assert "await db.rollback()" not in recovery

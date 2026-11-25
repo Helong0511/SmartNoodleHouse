@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -53,7 +54,7 @@ class CustomerSegmentMember(Base):
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
     segment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customer_segments.id", ondelete="CASCADE"))
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -124,7 +125,7 @@ class MarketingTask(Base, TimestampMixin):
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
     campaign_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE"))
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"))
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     action_type: Mapped[str] = mapped_column(String(30), default="ISSUE_COUPON")
     payload_json: Mapped[dict | None] = mapped_column(JSON, default=None)
@@ -151,7 +152,7 @@ class MarketingMessageLog(Base, TimestampMixin):
     campaign_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("marketing_campaigns.id"), default=None
     )
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"))
     channel: Mapped[str] = mapped_column(String(20), default="WECHAT")
     template_key: Mapped[str] = mapped_column(String(64))
     template_id: Mapped[str | None] = mapped_column(String(120), default=None)
@@ -174,7 +175,7 @@ class CampaignAttribution(Base, TimestampMixin):
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
     campaign_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE"))
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"))
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
     attribution_type: Mapped[str] = mapped_column(String(20), default="COUPON")
@@ -273,11 +274,12 @@ class FlashSaleClaim(Base, TimestampMixin):
         BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE")
     )
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"))
-    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
+    customer_id: Mapped[int] = mapped_column(MySQLBigInteger(unsigned=True), ForeignKey("customers.id", ondelete="CASCADE"))
     unit_no: Mapped[int] = mapped_column(Integer, default=1)
     claim_no: Mapped[str] = mapped_column(String(40))
-    # CLAIMED=待核销；USED=已核销；EXPIRED=超时失效；CANCELLED=活动终止
+    # CLAIMED=待核销；USED=已核销；EXPIRED=超时失效；CANCELLED=终态取消
     status: Mapped[str] = mapped_column(String(20), default="CLAIMED")
+    status_reason: Mapped[str | None] = mapped_column(String(40), default=None)
     claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     verify_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

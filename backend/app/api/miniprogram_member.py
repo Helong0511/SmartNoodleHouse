@@ -21,6 +21,7 @@ from app.models import Customer
 from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_active_customer_for_write
 from app.services.private_media import sign_private_avatar_url
 from app.utils.upload import fetch_and_save_remote_image, read_upload_limited, save_upload
 
@@ -227,6 +228,7 @@ async def patch_member_profile(
 
     同时接受 PATCH/PUT：微信/支付宝小程序对 PATCH 支持不一致，客户端优先 PUT。
     """
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
     from app.utils.birthday import (
@@ -380,6 +382,7 @@ async def upload_member_avatar(
             name = "avatar.jpg"
         file.filename = name
     url = await save_upload(file, subdir="avatars")
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     channel = _customer_channel_from_request(request, "wechat")
     # 游客也可上传头像（仅写资料，不激活会员）
     await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url, completed=True)
@@ -420,6 +423,7 @@ async def import_member_avatar_from_url(
 ):
     """chooseAvatar 在支付宝真机常返回 CDN 地址，无法作为 uploadFile 的 filePath，改由服务端拉取转存。"""
     url = await fetch_and_save_remote_image(data.source_url, subdir="avatars")
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     channel = _customer_channel_from_request(request, "wechat")
     await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url, completed=True)
     customer.avatar_url = url

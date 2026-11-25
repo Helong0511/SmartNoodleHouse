@@ -6,6 +6,7 @@ from app.api.deps import CurrentCustomer, DbSession
 from app.core.exceptions import AppException
 from app.core.response import money, success
 from app.models import CustomerFavoriteProduct, Product
+from app.services.customer_write_gate import lock_active_customer_for_write
 
 router = APIRouter(prefix="/miniprogram", tags=["收藏"])
 
@@ -47,6 +48,7 @@ async def list_favorites(
 @router.post("/favorites/{product_id}")
 async def add_favorite(product_id: int, request: Request, db: DbSession, customer: CurrentCustomer):
     """收藏菜品：餐品须存在且上架；已收藏直接返回（幂等）。"""
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     product = await db.get(Product, product_id)
     if not product or product.status != "ON_SALE":
         raise AppException(40404, "餐品不存在或已下架")
@@ -73,6 +75,7 @@ async def add_favorite(product_id: int, request: Request, db: DbSession, custome
 @router.delete("/favorites/{product_id}")
 async def remove_favorite(product_id: int, request: Request, db: DbSession, customer: CurrentCustomer):
     """取消收藏：不存在也返回成功（幂等）。"""
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     fav = (
         await db.execute(
             select(CustomerFavoriteProduct).where(

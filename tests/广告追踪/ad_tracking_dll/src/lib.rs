@@ -920,6 +920,9 @@ mod tests {
 
     #[test]
     fn strict_schema_rejects_unknown_fields() {
+        // Tests run concurrently; do not rely on another test initializing the
+        // process-global signing key before this validation-only assertion.
+        init();
         let payload = serde_json::json!({
             "offer_id": 10001, "campaign_id": 20001, "publisher_id": 30001, "advertiser_id": 40001,
             "unknown_field": "x"

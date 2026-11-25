@@ -5,6 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_customer_gate_for_payment_unit_mocks(monkeypatch):
+    """These tests exercise payment behavior with fake sessions, not Gate SQL."""
+    monkeypatch.setattr(
+        "app.services.payment_service.lock_customer_write_gates",
+        AsyncMock(),
+    )
+
+
 from app.core.exceptions import AppException
 from app.services.payment_service import PaymentService
 from app.services.wechat_pay_client import build_jsapi_pay_params
@@ -537,7 +546,18 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
     winner_result = MagicMock()
     winner_result.scalar_one_or_none.return_value = winner
 
+    class Savepoint:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            # Roll back the savepoint but propagate IntegrityError to the service handler.
+            return False
+
     db = AsyncMock()
+    # begin_nested() is synchronous and returns an async context manager.
+    # Model that SQLAlchemy contract instead of AsyncMock's coroutine result.
+    db.begin_nested = MagicMock(return_value=Savepoint())
     # AsyncSession.add() is synchronous; keep it a normal mock to avoid an
     # un-awaited coroutine warning that can hide real async lifecycle bugs.
     db.add = MagicMock()
@@ -572,7 +592,8 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
 
     assert returned is winner
     assert getattr(returned, "_idempotent_replay", False) is True
-    db.rollback.assert_awaited_once()
+    db.begin_nested.assert_called_once_with()
+    db.rollback.assert_not_awaited()
     db.commit.assert_not_awaited()
 
 @pytest.mark.asyncio
@@ -633,6 +654,7 @@ async def test_lock_order_then_payment_refreshes_locked_payment_from_database():
     peek_result = MagicMock()
     peek_result.first.return_value = (99, None)
     order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = SimpleNamespace(id=99, customer_id=None)
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
     db = AsyncMock()
@@ -753,24 +775,29 @@ async def test_immediate_amount_mismatch_persists_unknown_and_status_history(mon
 
 
 @pytest.mark.asyncio
-async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks():
-    recharge = SimpleNamespace(id=113, status="PENDING")
-    payment = SimpleNamespace(id=114, status="PENDING")
+async def test_recharge_amount_mismatch_uses_customer_gate_then_parent_current_locks():
+    recharge = SimpleNamespace(id=113, customer_id=1, status="PENDING")
+    payment = SimpleNamespace(id=114, recharge_order_id=113, status="PENDING")
     recharge_result = MagicMock()
     recharge_result.scalar_one_or_none.return_value = recharge
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
     db = AsyncMock()
+    db.scalar = AsyncMock(return_value=1)
     db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
 
     with patch(
+        "app.services.payment_service.lock_customer_write_gates", new_callable=AsyncMock
+    ) as gate, patch(
         "app.services.payment_service.record_payment_status", new_callable=AsyncMock
     ) as history:
         returned = await PaymentService._mark_recharge_payment_unknown_after_amount_mismatch(db, 113, 114)
 
     assert returned is payment
     assert payment.status == "UNKNOWN"
+    gate.assert_awaited_once_with(db, [1])
     history.assert_awaited_once()
+    assert db.scalar.await_count == 1
     assert db.execute.await_count == 2
     for call in db.execute.await_args_list:
         stmt = call.args[0]
@@ -783,10 +810,10 @@ async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks
 async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     stale_recharge = SimpleNamespace(id=121, status="PENDING")
     stale_payment = SimpleNamespace(id=122, status="PENDING")
-    current_recharge = SimpleNamespace(id=121, status="PAID")
+    current_recharge = SimpleNamespace(id=121, customer_id=1, status="PAID")
     current_payment = SimpleNamespace(id=122, status="PAID")
     recharge_result = MagicMock()
-    recharge_result.scalar_one.return_value = current_recharge
+    recharge_result.scalar_one_or_none.return_value = current_recharge
     payment_result = MagicMock()
     payment_result.scalar_one.return_value = current_payment
     db = AsyncMock()

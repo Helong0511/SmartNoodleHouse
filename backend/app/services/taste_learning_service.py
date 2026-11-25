@@ -5,18 +5,19 @@
   ORDER_PAID 3×qty / REORDER +1(=4) / 评价 POSITIVE +2、NEGATIVE -3。
 - 时间衰减：30 天半衰期，新事件 fold 前对该行 raw_weight 乘 2^(-Δ天/30)。
 - 归一化：score = logistic(raw / SCALE)，落在 0..1，负反馈可把分压到 0.5 以下。
-- 增量水位：顾客全部画像行的 MAX(last_event_at)；只 fold 更晚的事件，天然幂等。
+- 事件级消费标记：只 fold learned_at 为空的事件，批次边界与同时间戳事件均可幂等续跑。
 """
 from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.models import (
+    Customer,
     CustomerBehaviorEvent,
     CustomerTasteProfile,
     Order,
@@ -53,6 +54,16 @@ def _logistic(raw: float) -> float:
 def _decay_factor(previous_at: datetime | None, now_at: datetime | None) -> float:
     if previous_at is None or now_at is None:
         return 1.0
+    # SQLite returns timezone-aware DateTime values as naive while freshly
+    # created ORM objects may still carry UTC tzinfo. Compare on one UTC basis.
+    if previous_at.tzinfo is None:
+        previous_at = previous_at.replace(tzinfo=timezone.utc)
+    else:
+        previous_at = previous_at.astimezone(timezone.utc)
+    if now_at.tzinfo is None:
+        now_at = now_at.replace(tzinfo=timezone.utc)
+    else:
+        now_at = now_at.astimezone(timezone.utc)
     delta = (now_at - previous_at).total_seconds()
     if delta <= 0:
         return 1.0
@@ -65,6 +76,52 @@ def _quantize(v: float) -> float:
 
 class TasteLearningService:
     """全部为无状态类方法；db 会话由调用方管理（API/ outbox / scheduler 统一提交）。"""
+
+    @staticmethod
+    async def _lock_order_customer_for_learning(db, order_id: int):
+        """按 Gate → Order → Customer 锁序读取订单的当前顾客归属。
+
+        Outbox 任务可能在订单被合并迁移后才执行；不能把任务开始时缓存的
+        Order.customer_id 当作权威归属。归属在等待 Gate 期间变化时抛错，
+        让事务回滚并由 Outbox 使用新归属重试。
+        """
+        order_snapshot = await db.get(Order, int(order_id))
+        if order_snapshot is None or order_snapshot.customer_id is None:
+            return None, None
+        observed_customer_id = int(order_snapshot.customer_id)
+
+        from app.services.customer_write_gate import lock_customer_write_gates
+
+        # Match the repository-wide order: Gate → operation parent (Order) →
+        # Customer. CustomerMergeService locks all affected Orders before its
+        # Customer rows, so learning must not invert that order.
+        await lock_customer_write_gates(db, [observed_customer_id])
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            return None, None
+        current_customer_id = (
+            int(order.customer_id) if order.customer_id is not None else None
+        )
+        if current_customer_id != observed_customer_id:
+            raise RuntimeError(
+                "order customer changed while acquiring recommendation gate; retry outbox"
+            )
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == observed_customer_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        return order, customer
 
     # ---------- 信号键展开 ----------
 
@@ -154,7 +211,7 @@ class TasteLearningService:
     @staticmethod
     async def _load_rows(db, customer_id: int) -> dict[tuple[str, str], CustomerTasteProfile]:
         result = await db.execute(
-            select(CustomerTasteProfile).where(CustomerTasteProfile.customer_id == customer_id)
+            select(CustomerTasteProfile).where(CustomerTasteProfile.customer_id == customer_id).with_for_update()
         )
         return {(r.dim_type, r.target_key): r for r in result.scalars().all()}
 
@@ -190,22 +247,37 @@ class TasteLearningService:
     # ---------- 主入口 ----------
 
     @staticmethod
-    async def learn_from_events(db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT) -> int:
+    async def learn_from_events(
+        db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT, locked_customer=None
+    ) -> int:
         """仅对明确同意个性化推荐的顾客增量 fold 行为事件。"""
-        from app.models import Customer
-        customer = await db.get(Customer, customer_id)
+        if locked_customer is None:
+            from app.services.privacy_service import PrivacyService
+
+            customer = await PrivacyService.lock_customer_for_recommendation(db, customer_id)
+        else:
+            customer = locked_customer
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         rows = await TasteLearningService._load_rows(db, customer_id)
-        watermark = max((r.last_event_at for r in rows.values() if r.last_event_at), default=None)
-        q = select(CustomerBehaviorEvent).where(
-            CustomerBehaviorEvent.customer_id == customer_id
-        ).order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id)
-        if watermark is not None:
-            q = q.where(CustomerBehaviorEvent.created_at > watermark)
+        # Timestamp-only profile watermarks can skip late-arriving events that share
+        # the same DB timestamp. Persist consumption on each event in this transaction.
+        q = (
+            select(CustomerBehaviorEvent)
+            .where(
+                CustomerBehaviorEvent.customer_id == customer_id,
+                CustomerBehaviorEvent.learned_at.is_(None),
+            )
+            .order_by(CustomerBehaviorEvent.created_at, CustomerBehaviorEvent.id)
+            .with_for_update()
+        )
         events = list((await db.execute(q.limit(limit))).scalars().all())
         if not events:
             return 0
+
+        learned_at = datetime.now(timezone.utc)
+        for event in events:
+            event.learned_at = learned_at
 
         pids = {int(e.product_id) for e in events if e.product_id}
         products, cat_names, keys_by_product = await TasteLearningService._product_signals(db, pids)
@@ -231,12 +303,18 @@ class TasteLearningService:
         return len(events)
 
     @staticmethod
-    async def learn_from_feedback(db, feedback) -> None:
+    async def learn_from_feedback(db, feedback, *, locked_customer=None) -> None:
         """轻量评价直接 fold（评价明细已独立入库；此处分流口味信号）。"""
         from datetime import timezone
 
-        from app.models import Customer
-        customer = await db.get(Customer, int(feedback.customer_id))
+        if locked_customer is None:
+            from app.services.privacy_service import PrivacyService
+
+            customer = await PrivacyService.lock_customer_for_recommendation(
+                db, int(feedback.customer_id)
+            )
+        else:
+            customer = locked_customer
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return
         sentiment = (feedback.sentiment or "NEUTRAL").upper()
@@ -274,12 +352,16 @@ class TasteLearningService:
         以事件表 event_id 幂等 + 水位增量 fold，outbox 重试安全；部分退款不在此处理
         （既有 PreferenceService.PARTIAL_REFUND_WEIGHT 已覆盖规格偏好降权）。
         """
-        order = await db.get(Order, order_id)
-        if not order or not order.customer_id or (order.payment_status or "") != "REFUNDED":
-            return 0
-        from app.models import Customer
-        customer = await db.get(Customer, int(order.customer_id))
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        order, customer = await TasteLearningService._lock_order_customer_for_learning(
+            db, int(order_id)
+        )
+        if (
+            not order
+            or not order.customer_id
+            or (order.payment_status or "") != "REFUNDED"
+            or not customer
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
@@ -296,7 +378,7 @@ class TasteLearningService:
                         CustomerBehaviorEvent.event_id.in_(
                             [f"order_refund:{order_id}:{pid}" for pid in pids]
                         ),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         }
@@ -316,7 +398,9 @@ class TasteLearningService:
         if new_events:
             db.add_all(new_events)
             await db.flush()
-        return await TasteLearningService.learn_from_events(db, int(order.customer_id))
+        return await TasteLearningService.learn_from_events(
+            db, int(order.customer_id), locked_customer=customer
+        )
 
     # ---------- 支付 outbox 挂接 ----------
 
@@ -327,13 +411,15 @@ class TasteLearningService:
         由 paid_side_effects 的 taste_learning handler 调用；outbox 重试安全：
         重复事件被唯一约束去重，学习以水位增量 fold。
         """
-        from app.models import Customer
-
-        order = await db.get(Order, order_id)
-        if not order or not order.customer_id:
-            return 0
-        customer = await db.get(Customer, int(order.customer_id))
-        if customer and not int(getattr(customer, "recommend_opt_in", 1) or 0):
+        order, customer = await TasteLearningService._lock_order_customer_for_learning(
+            db, int(order_id)
+        )
+        if (
+            not order
+            or not order.customer_id
+            or not customer
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
@@ -354,7 +440,7 @@ class TasteLearningService:
                         CustomerBehaviorEvent.event_id.in_(
                             [f"order_paid:{order_id}:{pid}" for pid in qty_by_product]
                         ),
-                    )
+                    ).with_for_update()
                 )
             ).all()
         }
@@ -374,7 +460,9 @@ class TasteLearningService:
         if new_events:
             db.add_all(new_events)
             await db.flush()
-        return await TasteLearningService.learn_from_events(db, int(order.customer_id))
+        return await TasteLearningService.learn_from_events(
+            db, int(order.customer_id), locked_customer=customer
+        )
 
     # ---------- scheduler 兜底 ----------
 
@@ -386,7 +474,15 @@ class TasteLearningService:
             for r in (
                 await db.execute(
                     select(CustomerBehaviorEvent.customer_id)
-                    .where(CustomerBehaviorEvent.created_at >= since)
+                    # Recent events wake the normal sweep; pending events are
+                    # included regardless of age so a capped batch cannot strand
+                    # old backlog when no newer event arrives.
+                    .where(
+                        or_(
+                            CustomerBehaviorEvent.created_at >= since,
+                            CustomerBehaviorEvent.learned_at.is_(None),
+                        )
+                    )
                     .distinct()
                     .limit(limit)
                 )

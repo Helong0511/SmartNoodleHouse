@@ -92,6 +92,8 @@ async def test_settle_cash_round_down_applied():
     exec_result = MagicMock()
     exec_result.scalar_one_or_none.return_value = locked
     db.execute = AsyncMock(return_value=exec_result)
+    # Anonymous order: no Customer Gate is needed; confirm it exists.
+    db.scalar = AsyncMock(side_effect=[None, order.id])
     db.flush = AsyncMock()
     db.add = MagicMock()
 

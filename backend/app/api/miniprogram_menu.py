@@ -123,6 +123,27 @@ def _reco_cache_fingerprint(fingerprint: str, limit: int) -> str:
     return f"{fingerprint}:limit={int(limit)}"
 
 
+async def _latest_reco_cache_epoch(db, customer_id: int) -> int:
+    """从持久化 Outbox 读取顾客最新画像失效序号，补足 Redis 代际故障窗口。
+
+    必须使用 current locking read：OptionalCustomer 可能已在本事务建立
+    REPEATABLE READ 快照，而撤权/重授权事务可能在等待 Customer Gate 时提交。
+    """
+    from app.models import OutboxEvent
+
+    result = await db.execute(
+        select(OutboxEvent.id)
+        .where(
+            OutboxEvent.aggregate_type == "reco_cache",
+            OutboxEvent.aggregate_id == int(customer_id),
+        )
+        .order_by(OutboxEvent.id.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    return int(result.scalar_one_or_none() or 0)
+
+
 def _serialize_reco(ranked, state, meta, ab_bucket, ab_status=None):
     items = []
     for r in ranked:
@@ -185,6 +206,51 @@ async def get_recommendations(
     # limit 会改变排序截断结果，必须参与缓存隔离，避免 5 条请求污染 20 条请求。
     cache_fingerprint = _reco_cache_fingerprint(fingerprint, limit)
     cid = customer.id if customer else None
+
+    if cid is not None:
+        # Cache hits are recommendation reads too: serialize them with consent
+        # revocation, otherwise a request can return an old-generation profile
+        # payload in the interval between the DB commit and Redis invalidation.
+        from app.services.privacy_service import PrivacyService
+
+        locked_customer = await PrivacyService.lock_customer_for_recommendation(
+            db, int(cid)
+        )
+        if (
+            locked_customer is None
+            or int(getattr(locked_customer, "status", 1) or 0) != 1
+            or str(getattr(locked_customer, "account_status", "ACTIVE") or "ACTIVE").upper()
+            != "ACTIVE"
+        ):
+            # The optional-auth object may have become disabled/merged while this
+            # request was starting. Do not use its customer-scoped cache identity.
+            cid = None
+            customer = None
+        else:
+            customer = locked_customer
+            if not int(getattr(locked_customer, "recommend_opt_in", 0) or 0):
+                # Never consult a customer-scoped cache after opt-out. Its
+                # generation bump is durable via Outbox but intentionally happens
+                # after commit; this cold path closes that short invalidation gap.
+                ranked, state, meta = await RecommendationService.recommend(
+                    db,
+                    store_id,
+                    customer_id=int(cid),
+                    scene=scene,
+                    limit=limit,
+                    exclude_ids=exclude_ids,
+                    weight_override=None,
+                )
+                payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
+                payload["cache_hit"] = False
+                return success(payload, request=request)
+
+            # Redis generation keys can be unavailable during an outage while old
+            # cache payloads survive. Include the latest durable Outbox event id
+            # in the cache identity so a re-consent cannot revive pre-revocation
+            # data before the retry worker advances the Redis generation.
+            cache_epoch = await _latest_reco_cache_epoch(db, int(cid))
+            cache_fingerprint = f"{cache_fingerprint}:epoch={cache_epoch}"
 
     if cid is not None:
         ab_bucket, ab_params, ab_exp = await AbService.assign(db, cid, DEFAULT_EXPERIMENT_KEY)
@@ -292,6 +358,10 @@ async def submit_order_feedback(
         result = await FeedbackService.submit_order_feedback(
             db, order, [it.model_dump() for it in data.items]
         )
+    except RuntimeError as e:
+        if "order customer changed" not in str(e):
+            raise
+        raise AppException(40901, "订单归属已变更，请刷新后重试", status_code=409) from e
     except ValueError as e:
         raise AppException(40060, str(e)) from e
     return success(result, request=request)

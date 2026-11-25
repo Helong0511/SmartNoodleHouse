@@ -379,12 +379,15 @@ class OrderCreateService:
         if hasattr(Order, "operator_id") and operator_id is not None:
             order_kwargs["operator_id"] = operator_id
         order = Order(**order_kwargs)
-        db.add(order)
         try:
-            await db.flush()
+            # Order creation callers may already hold the customer's lifecycle gate.
+            # Keep a unique-key race inside a SAVEPOINT so the outer gate transaction
+            # remains active while the winning idempotent order is re-read.
+            async with db.begin_nested():
+                db.add(order)
+                await db.flush()
         except IntegrityError:
-            # 并发幂等：唯一约束冲突后返回已有订单
-            await db.rollback()
+            # 并发幂等：仅回滚本次 INSERT，保留外层事务与 Customer Gate。
             if scoped_key:
                 existing = await db.execute(select(Order).where(Order.idempotency_key == scoped_key))
                 order = existing.scalar_one_or_none()

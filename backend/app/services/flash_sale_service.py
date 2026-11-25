@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import BIZ_OT, BIZ_PF, TABLE_TAKEAWAY, generate_no
 from app.core.exceptions import AppException
+from app.core.error_codes import ACCOUNT_DISABLED
 from app.core.response import naive_local_now
 from app.models import (
     Customer,
@@ -31,10 +32,16 @@ from app.models import (
     Store,
 )
 from app.services.marketing_service import MarketingService
+from app.services.customer_write_gate import lock_active_customer_for_write, lock_customer_write_gates
 from app.services.stock_service import deduct_stock
 from app.utils.campaign_schedule import campaign_in_schedule_window
 
 logger = logging.getLogger(__name__)
+
+
+async def _lock_active_customer(db: AsyncSession, customer_id: int) -> Customer:
+    """Acquire lifecycle gate before current-reading the customer row."""
+    return await lock_active_customer_for_write(db, int(customer_id))
 
 STATUS_CLAIMED = "CLAIMED"
 STATUS_USED = "USED"
@@ -309,8 +316,9 @@ class FlashSaleService:
         ):
             raise AppException(40011, "本店未配置可用的抢购餐品")
 
-        # 顾客行锁：串行化同一顾客的并发抢购，保证限购计数与 unit_no 正确
-        await db.execute(select(Customer.id).where(Customer.id == cid).with_for_update())
+        # Current-read the full row: an authenticated request may have become stale
+        # while customer merge disabled this account in another transaction.
+        await _lock_active_customer(db, cid)
 
         request_id = (client_request_id or "").strip() or None
         if request_id:
@@ -346,9 +354,10 @@ class FlashSaleService:
         if held is not None:
             if held.expires_at and held.expires_at > now:
                 return await cls._claim_payload(db, held, already_claimed=True)
-            # 超时未核销：名额作废（不返还库存）
-            held.status = STATUS_EXPIRED
-            await db.flush()
+            # Keep the expired row CLAIMED while checks that may raise are running.
+            # CLAIMED is already in _CONSUMED_STATUSES, so the quota count below
+            # still reserves this unit. Persist EXPIRED only after stock deduction
+            # succeeds and the replacement claim can be committed with it.
 
         used = int(
             await db.scalar(
@@ -387,6 +396,12 @@ class FlashSaleService:
         )
         if not deducted.rowcount:
             raise AppException(40011, "本店名额已抢完")
+
+        # Do not flush EXPIRED before the quota/stock checks above: those checks
+        # intentionally raise and the request transaction would roll this state
+        # transition back. The previous CLAIMED row already counted as consumed.
+        if held is not None and held.expires_at and held.expires_at <= now:
+            held.status = STATUS_EXPIRED
 
         expiry = cls._resolve_expiry(cfg, camp, now)
         claim = FlashSaleClaim(
@@ -506,13 +521,24 @@ class FlashSaleService:
         if not code:
             raise AppException(40008, "请填写核销码")
         now = naive_local_now()
+        # Discover the owner without locking the claim. The gate must precede
+        # the claim row to preserve the global lifecycle lock order.
+        owner_id = await db.scalar(
+            select(FlashSaleClaim.customer_id).where(FlashSaleClaim.claim_no == code)
+        )
+        if owner_id is None:
+            raise AppException(40404, "抢购资格不存在")
+        await lock_customer_write_gates(db, [int(owner_id)])
         claim = await db.scalar(
             select(FlashSaleClaim)
             .where(FlashSaleClaim.claim_no == code)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not claim:
             raise AppException(40404, "抢购资格不存在")
+        if int(claim.customer_id) != int(owner_id):
+            raise AppException(40906, "抢购资格归属已变化，请重试", status_code=409)
         # store_id 由后端门店范围决定（非超管强制本店），不接受前端指定他店
         if store_id is not None and int(claim.store_id) != int(store_id):
             raise AppException(40300, "无权核销其他门店的抢购资格", status_code=403)
@@ -553,6 +579,9 @@ class FlashSaleService:
             raise AppException(40013, "该资格已取消")
         if claim.status != STATUS_CLAIMED:
             raise AppException(40012, "该资格已失效")
+        # Terminal entitlements remain auditable/idempotent after their owner is merged.
+        # Only a still-CLAIMED entitlement needs an active customer to proceed.
+        await lock_active_customer_for_write(db, int(owner_id))
         if claim.expires_at and claim.expires_at <= now:
             # 核销时发现超时：落库失效（名额不返还），再返回失败
             claim.status = STATUS_EXPIRED

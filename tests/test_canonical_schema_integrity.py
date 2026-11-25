@@ -104,6 +104,9 @@ def test_alembic_created_tables_pin_mysql_utf8mb4_options():
         "backend/alembic/versions/0045_leader_fencing_epoch.py": {
             "leader_fencing_state",
         },
+        "backend/alembic/versions/0052_customer_write_gates.py": {
+            "customer_write_gates",
+        },
     }
     for relative_path, expected_tables in expected.items():
         source = (ROOT / relative_path).read_text(encoding="utf-8")

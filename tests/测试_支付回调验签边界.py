@@ -10,6 +10,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_customer_gate_for_payment_unit_mocks(monkeypatch):
+    """These tests exercise payment behavior with fake sessions, not Gate SQL."""
+    monkeypatch.setattr(
+        "app.services.payment_service.lock_customer_write_gates",
+        AsyncMock(),
+    )
+
+
 from app.core.exceptions import AppException
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.payment_service import AlipayProvider, PaymentService
@@ -438,6 +447,9 @@ class _RefundCallbackDB:
     async def get(self, model, row_id):
         return self.payment
 
+    async def scalar(self, statement):
+        return None
+
 
 @pytest.mark.asyncio
 async def test_alipay_provider_preserves_actual_refund_status_instead_of_synthesizing_success():
@@ -760,6 +772,9 @@ class _SyncRefundDB:
     async def get(self, model, row_id):
         return self.payment
 
+    async def scalar(self, statement):
+        return None
+
     async def execute(self, statement):
         result = MagicMock()
         result.scalar_one_or_none.return_value = self.refund
@@ -967,7 +982,7 @@ async def test_wechat_refund_query_uses_official_out_refund_no_path(monkeypatch)
 @pytest.mark.asyncio
 async def test_refund_finalization_locks_order_before_payment():
     """退款成功入账的锁顺序必须与支付回调一致：Order → Payment。"""
-    order = SimpleNamespace(id=11)
+    order = SimpleNamespace(id=11, customer_id=None)
     payment = SimpleNamespace(id=22, order_id=11)
     statements = []
 
@@ -979,6 +994,9 @@ async def test_refund_finalization_locks_order_before_payment():
             return self.value
 
     class _DB:
+        async def scalar(self, statement):
+            return None
+
         async def execute(self, statement):
             sql = str(statement).lower()
             statements.append(sql)
@@ -1000,7 +1018,7 @@ async def test_refund_finalization_locks_order_before_payment():
 
 @pytest.mark.asyncio
 async def test_refund_finalization_rejects_cross_order_payment_binding():
-    order = SimpleNamespace(id=11)
+    order = SimpleNamespace(id=11, customer_id=None)
     payment = SimpleNamespace(id=22, order_id=12)
 
     class _Result:
@@ -1011,6 +1029,9 @@ async def test_refund_finalization_rejects_cross_order_payment_binding():
             return self.value
 
     class _DB:
+        async def scalar(self, statement):
+            return None
+
         async def execute(self, statement):
             sql = str(statement).lower()
             if "from orders" in sql:

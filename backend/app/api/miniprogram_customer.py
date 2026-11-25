@@ -44,6 +44,11 @@ async def list_my_vouchers(request: Request, db: DbSession, customer: CurrentCus
 @router.get("/customers/me")
 async def get_my_profile(request: Request, db: DbSession, customer: CurrentCustomer):
     """小程序会员中心：档案 + 等级 + 积分进度 + 人脸状态。"""
+    # resolve_channel_profile may backfill missing channel nickname/avatar fields.
+    # Acquire the lifecycle gate first so this GET-side repair cannot race a merge.
+    from app.services.customer_write_gate import lock_active_customer_for_write
+
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     profile = await CustomerService.build_member_profile(db, customer)
     channel = _customer_channel_from_request(request, "wechat")
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)
@@ -102,6 +107,7 @@ async def get_my_preferences(
             Customer.recommend_opt_in == 1,
         )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+        .with_for_update()
     )
     prefs["all"] = [
         {
@@ -169,7 +175,12 @@ async def clear_my_taste_profile(request: Request, db: DbSession, customer: Curr
     """清除画像派生数据（行为事件/画像/评价/customer_preferences），订单本体保留；写审计。"""
     from app.services.privacy_service import PrivacyService
 
-    result = await PrivacyService.clear_taste_profile(db, customer, request=request)
+    locked_customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer.id))
+    if locked_customer is None:
+        raise ValueError("customer not found while clearing recommendation profile")
+    result = await PrivacyService.clear_taste_profile(
+        db, locked_customer, request=request, acquire_lock=False
+    )
     await db.commit()
     return success(result, request=request)
 

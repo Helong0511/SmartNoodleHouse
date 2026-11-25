@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
-from app.models import Customer, CustomerPreference, Order, OrderItem, OrderItemOption
+from app.models import CustomerPreference, Order, OrderItem, OrderItemOption
 
 logger = logging.getLogger(__name__)
 
@@ -65,35 +65,47 @@ class PreferenceService:
 
     @staticmethod
     async def update_from_order(db: AsyncSession, order_id: int) -> None:
-        order = await db.get(Order, order_id)
-        # 仅在支付成功当下触发（order_lifecycle 在 target=PAID 时调用）
-        if not order or not order.customer_id or order.status != "PAID":
-            return
-        await PreferenceService.recompute_for_customer(db, order.customer_id)
-        customer = await db.get(Customer, order.customer_id)
-        if customer:
-            customer.last_order_at = now_local()
-            # 刚消费过的授权会员优先进人人脸热集，避免被定容踢出后进店认不出
-            try:
-                from app.services.face_service import face_embedding_cache
+        # 订单可能在支付后异步处理前被顾客合并迁移。必须先按 Gate →
+        # Order → Customer 锁序取得当前归属，不能信任任务开始时缓存的 ORM 对象。
+        from app.services.taste_learning_service import TasteLearningService
 
-                await face_embedding_cache.promote(db, int(order.customer_id))
-            except Exception:
-                logger.debug(
-                    "支付后提升人脸热集失败 customer_id=%s",
-                    order.customer_id,
-                    exc_info=True,
-                )
+        order, customer = await TasteLearningService._lock_order_customer_for_learning(
+            db, int(order_id)
+        )
+        # 仅在支付成功当下触发（order_lifecycle 在 target=PAID 时调用）
+        if not order or not order.customer_id or order.status != "PAID" or not customer:
+            return
+        customer_id = int(order.customer_id)
+        await PreferenceService.recompute_for_customer(db, customer_id, locked_customer=customer)
+        customer.last_order_at = now_local()
+        # 刚消费过的授权会员优先进人人脸热集，避免被定容踢出后进店认不出
+        try:
+            from app.services.face_service import face_embedding_cache
+
+            await face_embedding_cache.promote(db, customer_id)
+        except Exception:
+            logger.debug(
+                "支付后提升人脸热集失败 customer_id=%s",
+                customer_id,
+                exc_info=True,
+            )
 
     @staticmethod
-    async def recompute_for_customer(db: AsyncSession, customer_id: int) -> None:
+    async def recompute_for_customer(
+        db: AsyncSession, customer_id: int, *, locked_customer=None
+    ) -> None:
         """根据顾客近期已付订单重算全部口味偏好（分析 + 修正）。"""
         if not customer_id:
             return
-        customer = await db.get(Customer, customer_id)
+        if locked_customer is None:
+            from app.services.privacy_service import PrivacyService
+
+            customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
+        else:
+            customer = locked_customer
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             # 未明确同意：不构建画像，并清除可能残留的规格偏好。
-            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id))).scalars().all()
+            stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update())).scalars().all()
             for pref in stale:
                 await db.delete(pref)
             return
@@ -111,13 +123,14 @@ class PreferenceService:
                         Order.id.desc(),
                     )
                     .limit(PreferenceService.RECENCY_WINDOW)
+                    .with_for_update()
                 )
             ).scalars().all()
         )
         if not orders:
             existing = (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update()
                 )
             ).scalars().all()
             for pref in existing:
@@ -187,7 +200,7 @@ class PreferenceService:
             (p.category, p.option_code): p
             for p in (
                 await db.execute(
-                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id)
+                    select(CustomerPreference).where(CustomerPreference.customer_id == customer_id).with_for_update()
                 )
             ).scalars().all()
         }
@@ -227,7 +240,9 @@ class PreferenceService:
         store_id: int | None = None,
         apply_scene: bool = True,
     ) -> dict:
-        customer = await db.get(Customer, customer_id)
+        from app.services.privacy_service import PrivacyService
+
+        customer = await PrivacyService.lock_customer_for_recommendation(db, int(customer_id))
         if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return {"preferences": [], "scene": {"enabled": False, "scene_enabled": False, "weather_active": False, "weather_reason": "顾客未授权个性化推荐", "label": None}}
         prefs_result = await db.execute(
@@ -237,6 +252,7 @@ class PreferenceService:
                 CustomerPreference.order_count >= PreferenceService.MIN_ORDER_COUNT,
             )
             .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
         )
         prefs = list(prefs_result.scalars().all())
         # 若无达到阈值的，退回全部（首单也能出推荐）
@@ -247,6 +263,7 @@ class PreferenceService:
                         select(CustomerPreference)
                         .where(CustomerPreference.customer_id == customer_id)
                         .order_by(CustomerPreference.preference_score.desc())
+                        .with_for_update()
                     )
                 ).scalars().all()
             )

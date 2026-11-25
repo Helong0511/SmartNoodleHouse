@@ -30,6 +30,7 @@ from app.models.member import (  # noqa: F401
 )
 from app.models.customer import (  # noqa: F401
     Customer,
+    CustomerWriteGate,
     CustomerIdentity,
     DiningSession,
     TableParty,
@@ -143,6 +144,7 @@ __all__ = [
     "FinancialLedger",
     "PointExchangeOption",
     "Customer",
+    "CustomerWriteGate",
     "CustomerIdentity",
     "DiningSession",
     "TableParty",

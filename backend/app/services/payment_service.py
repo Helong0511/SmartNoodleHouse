@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.services import alipay_client, wechat_pay_client
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_customer_write_gates
 from app.services.order_lifecycle import apply_order_status
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.status_history import record_payment_status
@@ -852,6 +853,20 @@ class PaymentService:
         extra: dict | None = None,
         amount: Decimal | None = None,
     ) -> tuple[Payment, dict]:
+        # Discover the current owner without locking, then acquire its lifecycle
+        # gate before the Order row. Merge uses the same gate -> Order lock order.
+        observed_owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == int(order.id))
+        )
+        if observed_owner_id is None and order.customer_id is not None:
+            # A nullable owner is valid for anonymous POS orders; this branch only
+            # distinguishes a missing Order from a row with no customer.
+            exists = await db.scalar(select(Order.id).where(Order.id == int(order.id)))
+            if exists is None:
+                raise AppException(40402, "订单不存在")
+        if observed_owner_id is not None:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
+
         locked = (
             await db.execute(
                 select(Order)
@@ -863,6 +878,12 @@ class PaymentService:
         if not locked:
             raise AppException(40402, "订单不存在")
         order = locked
+        locked_owner_id = int(order.customer_id) if order.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "订单顾客归属在加锁期间发生变化，请重试", status_code=409)
+        if customer_id is not None and int(customer_id) != locked_owner_id:
+            raise AppException(40906, "订单顾客归属已变化，请重新发起支付", status_code=409)
 
         if order.payment_status == "PAID":
             raise AppException(40010, "订单已支付")
@@ -940,15 +961,16 @@ class PaymentService:
             reused = True
             if operator_id is not None:
                 payment.operator_id = operator_id
-            if customer_id is not None:
-                payment.customer_id = customer_id
+            # The locked Order is the ownership authority. Never use a
+            # request-scoped customer ID after the order lock has refreshed state.
+            payment.customer_id = order.customer_id
         else:
             t_no, t_ph = await _order_table_parts(db, order)
             sno = await _order_store_no(db, order)
             payment = Payment(
                 payment_no=generate_no(payment_biz(provider_u), sno, t_no, table_placeholder=t_ph),
                 order_id=order.id,
-                customer_id=customer_id or order.customer_id,
+                customer_id=order.customer_id,
                 operator_id=operator_id,
                 provider=provider_u,
                 channel=channel,
@@ -963,7 +985,7 @@ class PaymentService:
 
         # 余额支付：本事务内扣款并结清，不走第三方
         if provider_u == "BALANCE":
-            cid = customer_id or order.customer_id
+            cid = order.customer_id
             if not cid:
                 raise AppException(40040, "余额支付需绑定顾客")
             # 游客/匿名会话不得使用储值财产能力
@@ -1083,7 +1105,7 @@ class PaymentService:
                 payment = Payment(
                     payment_no=generate_no(payment_biz(provider_u), sno, t_no, table_placeholder=t_ph),
                     order_id=order.id,
-                    customer_id=customer_id or order.customer_id,
+                    customer_id=order.customer_id,
                     operator_id=operator_id,
                     provider=provider_u,
                     channel=channel,
@@ -1137,11 +1159,26 @@ class PaymentService:
         """储值充值：微信/支付宝实付入账后写入本金+赠送金。"""
         from types import SimpleNamespace
 
+        # Read owner without locking, acquire its lifecycle gate, then lock the
+        # RechargeOrder. Merge uses the same gate-before-parent order.
+        observed_owner_id = await db.scalar(
+            select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge.id))
+        )
+        if observed_owner_id is None:
+            raise AppException(40491, "充值单不存在")
+        await lock_customer_write_gates(db, [int(observed_owner_id)])
         locked = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == int(recharge.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40491, "充值单不存在")
+        if int(locked.customer_id) != int(observed_owner_id):
+            raise AppException(40906, "充值单顾客归属已变化，请重试", status_code=409)
         recharge = locked
         if recharge.status == "PAID":
             raise AppException(40010, "充值单已支付")
@@ -1178,14 +1215,16 @@ class PaymentService:
                 )
                 .order_by(Payment.id.desc())
                 .limit(1)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         reused = False
         if pending and pending.provider == provider_u and pending.channel == channel:
             payment = pending
             reused = True
-            if customer_id is not None:
-                payment.customer_id = customer_id
+            # The locked RechargeOrder is authoritative after a possible customer merge.
+            # Never reattach a reused payment to a stale request-scoped customer_id.
+            payment.customer_id = int(recharge.customer_id)
         else:
             if pending:
                 raise AppException(
@@ -1199,7 +1238,7 @@ class PaymentService:
                 payment_no=generate_no(payment_biz(provider_u), sno, "00"),
                 order_id=None,
                 recharge_order_id=recharge.id,
-                customer_id=customer_id or recharge.customer_id,
+                customer_id=int(recharge.customer_id),
                 provider=provider_u,
                 channel=channel,
                 amount=pay_amount,
@@ -1295,16 +1334,28 @@ class PaymentService:
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
 
-        # 统一充值单锁序：RechargeOrder → Payment，与 _lock_order_then_payment 一致。
-        # 回调入口可能已持有充值单锁；反向先锁 Payment 会与并发结算形成死锁环。
+        # Gate 必须早于 RechargeOrder：merge 与所有充值结算采用同一顺序。
+        # 先观察 owner，再锁 Gate，最后 current-read 锁充值单并核验 owner；
+        # 若 merge 在观察与加锁之间完成，则 fail closed 并由调用方重试。
+        recharge_id = int(recharge.id)
+        observed_owner_id = await db.scalar(
+            select(RechargeOrder.customer_id).where(RechargeOrder.id == recharge_id)
+        )
+        if observed_owner_id is None:
+            raise AppException(40491, "充值单不存在")
+        await lock_customer_write_gates(db, [int(observed_owner_id)])
         locked_r = (
             await db.execute(
                 select(RechargeOrder)
-                .where(RechargeOrder.id == recharge.id)
+                .where(RechargeOrder.id == recharge_id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if locked_r is None:
+            raise AppException(40491, "充值单不存在")
+        if int(locked_r.customer_id) != int(observed_owner_id):
+            raise AppException(40906, "充值单顾客归属已变化，请重试", status_code=409)
         locked_p = (
             await db.execute(
                 select(Payment)
@@ -1452,7 +1503,7 @@ class PaymentService:
     async def _lock_order_then_payment(
         cls, db: AsyncSession, payment_id: int
     ) -> Payment | None:
-        """统一锁序：先 Order（若有）再 Payment，降低与关单路径的死锁概率。"""
+        """统一锁序：先 Customer Gate，再 Order/RechargeOrder，最后 Payment。"""
         peek = (
             await db.execute(
                 select(Payment.order_id, Payment.recharge_order_id).where(Payment.id == int(payment_id))
@@ -1462,19 +1513,51 @@ class PaymentService:
             return None
         order_id, recharge_id = peek[0], peek[1]
         if order_id:
-            await db.execute(
-                select(Order)
-                .where(Order.id == int(order_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
+            owner_id = await db.scalar(
+                select(Order.customer_id).where(Order.id == int(order_id))
             )
+            owner_id = int(owner_id) if isinstance(owner_id, int) and not isinstance(owner_id, bool) else None
+            if owner_id is not None:
+                await lock_customer_write_gates(db, [owner_id])
+            locked_order = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == int(order_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if locked_order is None:
+                raise AppException(40402, "支付关联订单不存在")
+            # A merge may have completed between the unlocked owner peek and
+            # acquiring the old owner's gate. Never continue with only that
+            # stale gate; abort so the caller retries under the new owner gate.
+            locked_owner_id = getattr(locked_order, "customer_id", None)
+            if (owner_id is None) != (locked_owner_id is None) or (
+                isinstance(owner_id, int) and int(owner_id) != int(locked_owner_id)
+            ):
+                raise AppException(40906, "订单顾客归属在加锁期间发生变化，请重试", status_code=409)
         elif recharge_id:
-            await db.execute(
-                select(RechargeOrder)
-                .where(RechargeOrder.id == int(recharge_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
+            owner_id = await db.scalar(
+                select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
             )
+            if owner_id is not None:
+                await lock_customer_write_gates(db, [int(owner_id)])
+            locked_recharge = (
+                await db.execute(
+                    select(RechargeOrder)
+                    .where(RechargeOrder.id == int(recharge_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if locked_recharge is None:
+                raise AppException(40402, "支付关联充值单不存在")
+            locked_owner_id = getattr(locked_recharge, "customer_id", None)
+            if (owner_id is None) != (locked_owner_id is None) or (
+                isinstance(owner_id, int) and int(owner_id) != int(locked_owner_id)
+            ):
+                raise AppException(40906, "充值单顾客归属在加锁期间发生变化，请重试", status_code=409)
         # FOR UPDATE 是当前读；populate_existing 同步刷新当前 Session 中可能已加载的旧 ORM 快照。
         return (
             await db.execute(
@@ -1497,6 +1580,14 @@ class PaymentService:
         order_id = int(refund.order_id) if refund.order_id is not None else 0
         if order_id <= 0:
             raise AppException(40302, "退款记录缺少有效订单关联")
+        # Match merge/payment settlement lock order: Customer Gate → Order → Payment.
+        # A plain owner peek chooses the gate without taking the parent lock; the
+        # subsequent current read detects a merge/rebind that won the race.
+        observed_owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == order_id)
+        )
+        if observed_owner_id is not None:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
         order = (
             await db.execute(
                 select(Order)
@@ -1507,6 +1598,10 @@ class PaymentService:
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "退款关联订单不存在")
+        locked_owner_id = int(order.customer_id) if order.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "退款订单顾客归属在加锁期间发生变化，请重试", status_code=409)
         payment = (
             await db.execute(
                 select(Payment)
@@ -1659,13 +1754,9 @@ class PaymentService:
             return
         # 储值充值单：无餐饮 order_id
         if getattr(payment, "recharge_order_id", None) and not getattr(payment, "order_id", None):
-            recharge = (
-                await db.execute(
-                    select(RechargeOrder).where(RechargeOrder.id == payment.recharge_order_id).with_for_update()
-                )
-            ).scalar_one_or_none()
-            if not recharge:
-                raise AppException(40491, "充值单不存在")
+            # _settle_recharge_payment owns the Gate → RechargeOrder lock sequence.
+            from types import SimpleNamespace
+            recharge = SimpleNamespace(id=int(payment.recharge_order_id))
             await cls._settle_recharge_payment(
                 db,
                 payment=payment,
@@ -1812,6 +1903,12 @@ class PaymentService:
         cls, db: AsyncSession, recharge_id: int, payment_id: int
     ) -> Payment:
         """充值即时金额不匹配时按 RechargeOrder→Payment 当前读收敛，保留并发成功回调。"""
+        # Match merge/settlement lock order: Customer Gate → RechargeOrder → Payment.
+        observed_owner_id = await db.scalar(
+            select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
+        )
+        if observed_owner_id is not None:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
         recharge = (
             await db.execute(
                 select(RechargeOrder)
@@ -1820,6 +1917,12 @@ class PaymentService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+        if recharge is None:
+            raise AppException(40491, "充值单或支付单不存在")
+        locked_owner_id = int(recharge.customer_id) if recharge.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "充值单顾客归属在加锁期间发生变化，请重试", status_code=409)
         payment = (
             await db.execute(
                 select(Payment)
@@ -1828,7 +1931,7 @@ class PaymentService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if recharge is None or payment is None:
+        if payment is None or payment.recharge_order_id is None or int(payment.recharge_order_id) != int(recharge.id):
             raise AppException(40491, "充值单或支付单不存在")
         if recharge.status == "PAID" or payment.status in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
             await db.commit()
@@ -1938,6 +2041,19 @@ class PaymentService:
         round_down: bool = False,
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
+        # Cash settlement must follow the same Customer Gate → Order lock
+        # order as electronic payment and customer merge. Anonymous POS orders
+        # have no gate, but still use the current-read Order lock below.
+        observed_owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == int(order.id))
+        )
+        if observed_owner_id is None:
+            exists = await db.scalar(select(Order.id).where(Order.id == int(order.id)))
+            if exists is None:
+                raise AppException(40402, "订单不存在")
+        else:
+            await lock_customer_write_gates(db, [int(observed_owner_id)])
+
         locked = (
             await db.execute(
                 select(Order)
@@ -1948,6 +2064,10 @@ class PaymentService:
         ).scalar_one_or_none()
         if not locked:
             raise AppException(40402, "订单不存在")
+        locked_owner_id = int(locked.customer_id) if locked.customer_id is not None else None
+        observed_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+        if locked_owner_id != observed_owner_id:
+            raise AppException(40906, "订单顾客归属在加锁期间发生变化，请重试", status_code=409)
         order = locked
 
         if order.payment_status == "PAID" or order.status in (
@@ -2450,15 +2570,9 @@ class PaymentService:
             raise AppException(40302, "支付金额不匹配")
 
         if parsed["status"] == "PAID":
-            recharge = (
-                await db.execute(
-                    select(RechargeOrder)
-                    .where(RechargeOrder.id == payment.recharge_order_id)
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
-            if not recharge:
-                raise AppException(40491, "充值单不存在")
+            # Defer the parent lock until after the customer Gate is acquired.
+            from types import SimpleNamespace
+            recharge = SimpleNamespace(id=int(payment.recharge_order_id))
             payment.callback_raw = {"receipt": receipt}
             await cls._settle_recharge_payment(
                 db,
@@ -2993,13 +3107,14 @@ class PaymentService:
             operator_id=operator_id,
             idempotency_key=idem_key,
         )
-        db.add(row)
         try:
-            await db.flush()
+            # _lock_order_then_payment() may hold the Customer Gate. Keep a
+            # duplicate-idempotency race inside a SAVEPOINT, not the outer txn.
+            async with db.begin_nested():
+                db.add(row)
+                await db.flush()
         except IntegrityError:
-            # 不同支付单并发复用同一幂等键时，先由唯一索引裁决；
-            # 回滚失败事务后重新读取胜出的退款单，匹配参数则安全返回原单。
-            await db.rollback()
+            # 仅回滚本次退款单 INSERT；保留 Order/Payment 锁与 Customer Gate。
             if idem_key is not None:
                 winner = (
                     await db.execute(

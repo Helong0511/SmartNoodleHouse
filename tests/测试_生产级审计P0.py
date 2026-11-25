@@ -63,8 +63,13 @@ def test_guest_is_not_member():
 
 
 @pytest.mark.asyncio
-async def test_balance_debit_rejects_guest():
+async def test_balance_debit_rejects_guest(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.services import balance_service
     from app.services.balance_service import BalanceService
+
+    gate_lock = AsyncMock()
+    monkeypatch.setattr(balance_service, "lock_customer_write_gates", gate_lock)
 
     guest = MagicMock()
     guest.member_status = "GUEST"
@@ -88,6 +93,7 @@ async def test_balance_debit_rejects_guest():
             store_id=1,
         )
     assert ei.value.code == 40320
+    gate_lock.assert_awaited_once_with(db, [1])
 
 
 def test_baseline_reads_struct_sql_canonical_section():

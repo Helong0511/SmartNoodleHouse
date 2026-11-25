@@ -10,6 +10,7 @@ from app.models import Customer, DeliveryOrder, DiningTable, Order, OrderItem, O
 from app.schemas.order import OrderCreate
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService, OrderCreateService
+from app.services.customer_write_gate import lock_active_customer_for_write
 from app.services.store_scope import assert_order_store_access, require_bound_store
 from app.services.websocket_manager import ws_manager
 
@@ -59,6 +60,8 @@ async def create_order(
     if not (data.idempotency_key or "").strip():
         raise AppException(40010, "创建订单必须提供 idempotency_key，以便网络重试安全复用")
     channel = _resolve_customer_order_channel(request, data.channel)
+    # Serialize customer order creation with merge/revocation before any order rows are written.
+    await lock_active_customer_for_write(db, int(customer.id))
     order = await OrderCreateService.create_order(
         db,
         store_id=data.store_id,

@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.models import OutboxEvent
 from app.services import reco_cache
+from app.services.customer_merge_service import _defer_recommendation_cache_invalidation
 from app.services.outbox_policy import CACHE_INVALIDATION_MAX_ATTEMPTS
 from app.services.outbox_worker import OUTBOX_HANDLERS, _resolve_outbox_handler
 from reco_factories import make_customer
@@ -131,3 +132,31 @@ async def test_reco_invalidation_outbox_handler_raises_when_redis_is_unavailable
             OUTBOX_HANDLERS.pop(key, None)
         else:
             OUTBOX_HANDLERS[key] = previous
+
+
+@pytest.mark.asyncio
+async def test_customer_merge_invalidates_recommendation_cache_for_both_accounts(db_session):
+    source = await make_customer(db_session)
+    target = await make_customer(db_session)
+
+    _defer_recommendation_cache_invalidation(
+        db_session, int(source.id), int(target.id), int(source.id)
+    )
+    await db_session.flush()
+
+    rows = list(
+        (
+            await db_session.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.aggregate_type == "reco_cache",
+                    OutboxEvent.aggregate_id.in_((int(source.id), int(target.id))),
+                )
+            )
+        ).scalars().all()
+    )
+    assert {int(row.aggregate_id) for row in rows} == {
+        int(source.id),
+        int(target.id),
+    }
+    assert len(rows) == 2
+    assert all(row.status == "PENDING" for row in rows)

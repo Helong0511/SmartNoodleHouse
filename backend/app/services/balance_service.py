@@ -10,6 +10,7 @@ from app.core.biz_no import generate_no
 from app.core.exceptions import AppException
 from app.core.response import money
 from app.models import BalanceLedger, Customer, RechargeOrder, Store
+from app.services.customer_write_gate import lock_customer_write_gates
 
 
 def _wallet_total(c: Customer) -> Decimal:
@@ -46,8 +47,9 @@ class BalanceService:
         if not recharge or not recharge.customer_id:
             return None
         # 先锁顾客，再对流水做锁定读。普通 SELECT 用事务快照，并发入账会把已提交流水看成不存在。
+        await lock_customer_write_gates(db, [int(recharge.customer_id)])
         cust = (
-            await db.execute(select(Customer).where(Customer.id == recharge.customer_id).with_for_update())
+            await db.execute(select(Customer).where(Customer.id == recharge.customer_id).with_for_update().execution_options(populate_existing=True))
         ).scalar_one()
         existing = (
             await db.execute(
@@ -115,8 +117,9 @@ class BalanceService:
         if pay <= 0:
             raise AppException(40051, "余额扣款金额非法")
 
+        await lock_customer_write_gates(db, [int(customer_id)])
         cust = (
-            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update())
+            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update().execution_options(populate_existing=True))
         ).scalar_one_or_none()
         if not cust:
             raise AppException(40401, "顾客不存在")
@@ -205,8 +208,9 @@ class BalanceService:
         amt = money(amount)
         if amt <= 0:
             return None
+        await lock_customer_write_gates(db, [int(customer_id)])
         cust = (
-            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update())
+            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update().execution_options(populate_existing=True))
         ).scalar_one()
         existing = (
             await db.execute(
@@ -331,8 +335,9 @@ class BalanceService:
         dg = money(delta_gift)
         if dp == 0 and dg == 0:
             raise AppException(40051, "调账金额不能为 0")
+        await lock_customer_write_gates(db, [int(customer_id)])
         cust = (
-            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update())
+            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update().execution_options(populate_existing=True))
         ).scalar_one_or_none()
         if not cust:
             raise AppException(40401, "顾客不存在")

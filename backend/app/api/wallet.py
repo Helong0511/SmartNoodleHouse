@@ -16,6 +16,7 @@ from app.models import BalanceLedger, Customer, Order, RechargeOrder, RechargePa
 from app.services.audit_service import AuditService
 from app.services.balance_service import BalanceService
 from app.services.customer_service import CustomerService
+from app.services.customer_write_gate import lock_active_customer_for_write
 from app.services.scope_override import hq_override_warning, merge_store_over_hq
 from app.services.store_scope import assert_store_access, require_bound_store
 
@@ -554,6 +555,7 @@ async def create_recharge(
     """顾客选档充值并拉起微信/支付宝支付。"""
     from app.services.payment_service import PaymentService
 
+    customer = await lock_active_customer_for_write(db, int(customer.id))
     if not CustomerService.is_member(customer):
         raise AppException(40320, "请先开通会员后再充值", status_code=403)
 
@@ -646,7 +648,10 @@ async def create_recharge(
         extra=extra,
     )
     await db.refresh(ro)
-    cust = await db.get(Customer, customer.id)
+    # A merge may have reassigned this recharge while payment creation was in
+    # flight. Never expose the surviving target customer's wallet to a request
+    # authenticated as the source customer; return an empty snapshot instead.
+    cust = await db.get(Customer, customer.id) if int(ro.customer_id) == int(customer.id) else None
     wallet = BalanceService.snapshot(cust) if cust else {}
     out = {
         **_ro_ser(ro),

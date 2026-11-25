@@ -68,6 +68,10 @@ async def test_alipay_login_passes_table_record_to_dining_session(monkeypatch):
 
     monkeypatch.setattr(auth_api.AlipayMiniAuth, "auth_code2user", fake_auth_code2user)
     monkeypatch.setattr(auth_api.CustomerService, "get_or_create_by_alipay", fake_get_or_create)
+    # The endpoint's lifecycle-gate behavior is covered separately; keep this
+    # route-contract test focused on table/session wiring.
+    lock_customer = AsyncMock(return_value=customer)
+    monkeypatch.setattr(auth_api, "lock_active_customer_for_write", lock_customer)
     monkeypatch.setattr(auth_api.CustomerService, "remember_first_seen", remember)
     monkeypatch.setattr(auth_api, "_resolve_table_record", AsyncMock(return_value=table_record))
     monkeypatch.setattr(auth_api, "_table_payload", AsyncMock(return_value=table_payload))
@@ -83,6 +87,7 @@ async def test_alipay_login_passes_table_record_to_dining_session(monkeypatch):
         db,
     )
 
+    lock_customer.assert_awaited_once_with(db, customer.id)
     remember.assert_awaited_once_with(db, customer, "table-token", table=table_record)
     start_session.assert_awaited_once_with(
         db,

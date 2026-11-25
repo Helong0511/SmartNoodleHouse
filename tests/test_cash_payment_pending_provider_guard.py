@@ -12,6 +12,7 @@ async def test_cash_payment_rejects_pending_wechat_or_alipay_flow():
 
     order = SimpleNamespace(
         id=10,
+        customer_id=None,
         status="PENDING_PAYMENT",
         payment_status="PENDING",
     )
@@ -31,6 +32,13 @@ async def test_cash_payment_rejects_pending_wechat_or_alipay_flow():
     class FakeDB:
         def __init__(self):
             self.statements = []
+
+        async def scalar(self, statement):
+            # The order is anonymous: owner lookup is None, existence lookup confirms it.
+            if not hasattr(self, "_exists_checked"):
+                self._exists_checked = True
+                return None
+            return 10
 
         async def execute(self, statement):
             self.statements.append(str(statement).lower())

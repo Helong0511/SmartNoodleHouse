@@ -161,8 +161,20 @@ async def test_http_create_order_returns_40903_envelope():
     from app.core.security import create_customer_token
     from app.main import app
 
-    fake_customer = SimpleNamespace(id=1, status=1, token_version=0)
-    fake_db = AsyncMock()
+    fake_customer = SimpleNamespace(
+        id=1, status=1, account_status="ACTIVE", token_version=0
+    )
+    # SQLAlchemy AsyncSession.execute is awaitable, but Result.scalars() and
+    # Result.scalar_one_or_none() are synchronous once execute has completed.
+    gate_result = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [1])
+    )
+    customer_result = SimpleNamespace(
+        scalar_one_or_none=lambda: fake_customer
+    )
+    fake_db = SimpleNamespace(
+        execute=AsyncMock(side_effect=[gate_result, customer_result])
+    )
 
     async def override_db():
         yield fake_db

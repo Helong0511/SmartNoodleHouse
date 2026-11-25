@@ -6,6 +6,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _isolate_customer_gate_for_payment_unit_mocks(monkeypatch):
+    """These tests exercise payment behavior with fake sessions, not Gate SQL."""
+    monkeypatch.setattr(
+        "app.services.payment_service.lock_customer_write_gates",
+        AsyncMock(),
+    )
+
+
 from app.core.response import money
 
 
@@ -164,7 +173,7 @@ async def test_finalize_refund_marks_partial():
         yield
 
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=Decimal("40.00"))
+    db.scalar = AsyncMock(side_effect=[None, Decimal("40.00")])
     db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
 
     payment_result = MagicMock()
@@ -174,7 +183,7 @@ async def test_finalize_refund_marks_partial():
     db.execute = AsyncMock(side_effect=[order_result, payment_result])
     db.flush = AsyncMock()
 
-    with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
+    with patch("app.services.payment_service.lock_customer_write_gates", new_callable=AsyncMock), patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
         "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",
@@ -242,7 +251,7 @@ async def test_finalize_refund_deducts_points_for_customer():
         yield
 
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=Decimal("40.00"))
+    db.scalar = AsyncMock(side_effect=[42, Decimal("40.00")])
     db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
 
     payment_result = MagicMock()
@@ -252,7 +261,7 @@ async def test_finalize_refund_deducts_points_for_customer():
     db.execute = AsyncMock(side_effect=[order_result, payment_result])
     db.flush = AsyncMock()
 
-    with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
+    with patch("app.services.payment_service.lock_customer_write_gates", new_callable=AsyncMock), patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
         "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",
@@ -303,7 +312,7 @@ async def test_finalize_refund_queues_both_compensations_after_savepoint_failure
         callback_raw=None, provider_refund_no=None, succeeded_at=None,
     )
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=Decimal("40.00"))
+    db.scalar = AsyncMock(side_effect=[42, Decimal("40.00")])
     db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
     order_result = MagicMock()
     order_result.scalar_one_or_none.return_value = order
@@ -313,7 +322,7 @@ async def test_finalize_refund_queues_both_compensations_after_savepoint_failure
     db.flush = AsyncMock()
     enqueue = AsyncMock(return_value=(None, True))
 
-    with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
+    with patch("app.services.payment_service.lock_customer_write_gates", new_callable=AsyncMock), patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
         "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",
@@ -368,7 +377,7 @@ async def test_full_refund_always_enqueues_milestone_reclaim_after_commit():
         callback_raw=None, provider_refund_no=None, succeeded_at=None,
     )
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=Decimal("100.00"))
+    db.scalar = AsyncMock(side_effect=[42, Decimal("100.00")])
     db.begin_nested = MagicMock(side_effect=lambda: nested_transaction())
     order_result = MagicMock()
     order_result.scalar_one_or_none.return_value = order
@@ -378,7 +387,7 @@ async def test_full_refund_always_enqueues_milestone_reclaim_after_commit():
     db.flush = AsyncMock()
     enqueue = AsyncMock(return_value=(None, True))
 
-    with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
+    with patch("app.services.payment_service.lock_customer_write_gates", new_callable=AsyncMock), patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
         "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",

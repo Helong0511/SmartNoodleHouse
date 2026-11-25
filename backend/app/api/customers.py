@@ -292,12 +292,23 @@ async def list_customers(
     # 智能口味：列表与详情一致，返回全部偏好（按分数排序）
     pref_map: dict[int, list[dict]] = {i: [] for i in ids}
     if ids:
+        # Serialize this derived-data read with consent revocation and its cleanup.
+        # Lock page customers in a stable order to avoid inconsistent snapshots and
+        # reduce the chance of lock-order deadlocks between concurrent list requests.
+        await db.execute(
+            select(Customer)
+            .where(Customer.id.in_(ids))
+            .order_by(Customer.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         pref_rows = (
             await db.execute(
                 select(CustomerPreference)
                 .join(Customer, Customer.id == CustomerPreference.customer_id)
                 .where(CustomerPreference.customer_id.in_(ids), Customer.recommend_opt_in == 1)
                 .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+                .with_for_update()
             )
         ).scalars().all()
         for p in pref_rows:
@@ -454,6 +465,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             select(CustomerPreference)
             .where(CustomerPreference.customer_id == customer_id)
             .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .with_for_update()
         )).scalars().all())
         if int(getattr(customer, "recommend_opt_in", 0) or 0)
         else []
@@ -591,8 +603,16 @@ async def update_customer(
     """员工编辑顾客基础信息（昵称/展示名/手机/启用状态/生日/推荐开关）。"""
     from app.core.response import now_local
     from app.services.store_scope import require_bound_store
+    from app.services.customer_write_gate import lock_customer_write_gates
 
-    customer = await db.get(Customer, customer_id)
+    await lock_customer_write_gates(db, [int(customer_id)])
+    customer_result = await db.execute(
+        select(Customer)
+        .where(Customer.id == int(customer_id))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    customer = customer_result.scalar_one_or_none()
     if not customer:
         raise AppException(40401, "顾客不存在")
     effective_store = require_bound_store(user, None)
@@ -639,10 +659,9 @@ async def update_customer(
                     raise AppException(40002, "该手机号已被其他顾客使用")
             changes["phone"] = {"old": old_phone, "new": new_phone}
             customer.phone = new_phone
-            if new_phone:
-                customer.phone_verified = int(customer.phone_verified or 0)
-            else:
-                customer.phone_verified = 0
+            # Staff-entered or edited phone numbers are not official proof of
+            # ownership; verification only remains valid for the unchanged number.
+            customer.phone_verified = 0
     if "status" in fields and body.status is not None:
         old_status = int(customer.status or 0)
         new_status = int(body.status)
@@ -721,7 +740,7 @@ async def update_customer(
             customer.recommend_opt_in = new_opt
             if not new_opt:
                 from app.services.privacy_service import PrivacyService
-                await PrivacyService.clear_taste_profile(db, customer, request=request)
+                await PrivacyService.clear_taste_profile(db, customer, request=request, acquire_lock=False)
 
     if not changes:
         # 提交字段与现值相同：不写审计、不空刷渠道
@@ -811,6 +830,7 @@ async def get_preferences(
             Customer.recommend_opt_in == 1,
         )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+        .with_for_update()
     )
     prefs["all"] = [
         {

@@ -7,6 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_CU, generate_no
 from app.core.exceptions import AppException
 from app.core.response import money, now_local, serialize_dt
+from app.services.customer_write_gate import (
+    lock_active_customer_for_write,
+    lock_customer_write_gates,
+)
 from app.models import (
     Customer,
     CustomerAlipayAccount,
@@ -76,6 +80,26 @@ class CustomerService:
             raise AppException(40053, "手机号格式不正确")
         existing = await CustomerService.find_active_by_phone(db, phone)
         if existing is not None:
+            # POS may reuse an account while a merge is moving its identity/profile
+            # fields. Observe the candidate first, then serialize and current-read it.
+            observed_customer_id = int(existing.id)
+            await lock_customer_write_gates(db, [observed_customer_id])
+            locked = (
+                await db.execute(
+                    select(Customer)
+                    .where(
+                        Customer.id == observed_customer_id,
+                        Customer.status == 1,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if not locked or str(locked.phone or "").strip() != phone:
+                raise AppException(
+                    40907, "手机号关联状态已变化，请重新查询后重试", status_code=409
+                )
+            existing = locked
             if not getattr(existing, "registered_store_id", None):
                 existing.registered_store_id = int(store_id)
                 await db.flush()
@@ -515,12 +539,32 @@ class CustomerService:
         """
         if not order or not getattr(order, "id", None):
             return 0
-        # 锁订单再判态，避免与退款状态机竞态
+        # Outbox may run after a customer merge. Observe the owner without a row
+        # lock, acquire its lifecycle gate, then current-read the order before
+        # touching either the order or customer. Never take Order before Gate.
+        order_snapshot = await db.get(Order, int(order.id))
+        if not order_snapshot or not order_snapshot.customer_id:
+            return 0
+        observed_customer_id = int(order_snapshot.customer_id)
+        from app.services.customer_write_gate import lock_customer_write_gates
+
+        await lock_customer_write_gates(db, [observed_customer_id])
         locked_order = (
-            await db.execute(select(Order).where(Order.id == int(order.id)).with_for_update())
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
         if not locked_order or not locked_order.customer_id:
             return 0
+        if int(locked_order.customer_id) != observed_customer_id:
+            # The outbox event raced with merge/reassignment. Roll back and let
+            # the worker retry against the new owner rather than writing stale ownership.
+            raise RuntimeError(
+                "order customer changed while acquiring points-award gate; retry outbox"
+            )
         order = locked_order
         st = (order.status or "").upper()
         pay = (order.payment_status or "").upper()
@@ -731,9 +775,17 @@ class CustomerService:
         """
         from app.services.coupon_service import CouponService
 
+        # Point exchange mutates Customer.points; serialize it with merge,
+        # refund deductions and all other customer-owned writes.
+        from app.services.customer_write_gate import lock_customer_write_gates
+
+        await lock_customer_write_gates(db, [int(customer_id)])
         customer = (
             await db.execute(
-                select(Customer).where(Customer.id == int(customer_id)).with_for_update()
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not customer:
@@ -1123,25 +1175,27 @@ class CustomerService:
             raise AppException(40905, "微信身份数据冲突，请联系客服处理")
         identity_customer_id = openid_customer_id or union_customer_id
         if identity_customer_id:
+            customer = await lock_active_customer_for_write(db, int(identity_customer_id))
             await CustomerService._ensure_wechat_account(
                 db,
                 customer_id=identity_customer_id,
                 openid=openid,
                 unionid=unionid,
             )
-            return await db.get(Customer, identity_customer_id)
+            return customer
 
         account = (
             await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
         ).scalar_one_or_none()
         if account:
+            customer = await lock_active_customer_for_write(db, int(account.customer_id))
             await CustomerService._ensure_wechat_account(
                 db,
                 customer_id=account.customer_id,
                 openid=openid,
                 unionid=unionid,
             )
-            return await db.get(Customer, account.customer_id)
+            return customer
 
         # 兼容迁移前数据：仅 UnionID 这一微信官方强身份可复用既有 Customer。
         union_acc = None
@@ -1155,6 +1209,7 @@ class CustomerService:
                 )
             ).scalar_one_or_none()
         if union_acc:
+            customer = await lock_active_customer_for_write(db, int(union_acc.customer_id))
             await CustomerService._ensure_wechat_account(
                 db,
                 customer_id=union_acc.customer_id,
@@ -1162,7 +1217,7 @@ class CustomerService:
                 unionid=unionid,
                 copy_profile_from=union_acc,
             )
-            return await db.get(Customer, union_acc.customer_id)
+            return customer
 
         try:
             async with db.begin_nested():
@@ -1196,13 +1251,14 @@ class CustomerService:
                 raise AppException(40905, "微信身份数据冲突，请联系客服处理")
             winner_id = winner_id or union_winner_id
             if winner_id:
+                customer = await lock_active_customer_for_write(db, int(winner_id))
                 await CustomerService._ensure_wechat_account(
                     db,
                     customer_id=winner_id,
                     openid=openid,
                     unionid=unionid,
                 )
-                return await db.get(Customer, winner_id)
+                return customer
             raise AppException(40002, "微信登录冲突，请重试")
 
     @staticmethod
@@ -1221,6 +1277,7 @@ class CustomerService:
             )
         ).scalar_one_or_none()
         if identity_customer_id:
+            customer = await lock_active_customer_for_write(db, int(identity_customer_id))
             if account and int(account.customer_id) != int(identity_customer_id):
                 raise AppException(40905, "支付宝身份绑定冲突，请联系客服处理")
             if not account:
@@ -1231,15 +1288,16 @@ class CustomerService:
                     )
                 )
                 await db.flush()
-            return await db.get(Customer, identity_customer_id)
+            return customer
         if account:
+            customer = await lock_active_customer_for_write(db, int(account.customer_id))
             await CustomerService._claim_identity(
                 db,
                 customer_id=account.customer_id,
                 provider="ALIPAY_USER_ID",
                 provider_subject=alipay_user_id,
             )
-            return await db.get(Customer, account.customer_id)
+            return customer
         try:
             async with db.begin_nested():
                 customer = CustomerService._new_guest_customer()
@@ -1261,7 +1319,8 @@ class CustomerService:
                 db, "ALIPAY_USER_ID", alipay_user_id
             )
             if winner_id:
-                return await db.get(Customer, winner_id)
+                customer = await lock_active_customer_for_write(db, int(winner_id))
+                return customer
             again = (
                 await db.execute(
                     select(CustomerAlipayAccount).where(
@@ -1270,13 +1329,14 @@ class CustomerService:
                 )
             ).scalar_one_or_none()
             if again:
+                customer = await lock_active_customer_for_write(db, int(again.customer_id))
                 await CustomerService._claim_identity(
                     db,
                     customer_id=again.customer_id,
                     provider="ALIPAY_USER_ID",
                     provider_subject=alipay_user_id,
                 )
-                return await db.get(Customer, again.customer_id)
+                return customer
             raise AppException(40002, "支付宝登录冲突，请重试")
 
     @staticmethod
@@ -1448,6 +1508,7 @@ class CustomerService:
         phone = (phone or "").strip()
         if not phone:
             return customer
+        customer = await lock_active_customer_for_write(db, int(customer.id))
         if int(getattr(customer, "phone_verified", 0) or 0) == 1:
             if (customer.phone or "").strip() == phone:
                 return customer
@@ -1468,29 +1529,59 @@ class CustomerService:
         confirm_merge: bool = False,
         request=None,
     ) -> tuple[Customer, bool]:
-        """绑定官方验证手机号；号码已属其他账号时必须二次确认后完整合并。"""
+        """绑定官方验证手机号；先锁定所有候选顾客 Gate，再锁身份/合并记录。"""
         phone = (phone or "").strip()
         source = (verification_source or "").strip().upper()
         if source not in ("WECHAT", "ALIPAY"):
             raise AppException(40054, "手机号缺少可信验证来源")
 
+        source_customer_id = int(customer.id)
+        identity_stmt = select(CustomerIdentity).where(
+            CustomerIdentity.provider == "PHONE",
+            CustomerIdentity.provider_subject == phone,
+            CustomerIdentity.verified == 1,
+        )
+        observed_identity_owner = await db.scalar(
+            select(CustomerIdentity.customer_id).where(
+                CustomerIdentity.provider == "PHONE",
+                CustomerIdentity.provider_subject == phone,
+                CustomerIdentity.verified == 1,
+            )
+        )
+        observed_peer_ids = {
+            int(value)
+            for value in (
+                await db.scalars(
+                    select(Customer.id).where(
+                        Customer.status == 1,
+                        Customer.phone == phone,
+                        Customer.id != source_customer_id,
+                    )
+                )
+            ).all()
+        }
+        gate_ids = {source_customer_id, *observed_peer_ids}
+        if observed_identity_owner:
+            gate_ids.add(int(observed_identity_owner))
+        await lock_customer_write_gates(db, gate_ids)
+
+        # Re-read the identity only after all known owners' gates are held.
         identity = (
             await db.execute(
-                select(CustomerIdentity)
-                .where(
-                    CustomerIdentity.provider == "PHONE",
-                    CustomerIdentity.provider_subject == phone,
-                    CustomerIdentity.verified == 1,
-                )
-                .with_for_update()
+                identity_stmt.with_for_update().execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+        current_identity_owner = int(identity.customer_id) if identity else None
+        if current_identity_owner != (
+            int(observed_identity_owner) if observed_identity_owner else None
+        ):
+            raise AppException(40905, "手机号关联状态已变化，请重新查询后重试", status_code=409)
 
         if not identity:
             try:
                 async with db.begin_nested():
                     identity = CustomerIdentity(
-                        customer_id=customer.id,
+                        customer_id=source_customer_id,
                         provider="PHONE",
                         provider_subject=phone,
                         verified=1,
@@ -1498,20 +1589,28 @@ class CustomerService:
                     db.add(identity)
                     await db.flush()
             except IntegrityError:
-                identity = (
+                # The transaction already performed snapshot reads before the
+                # unique-key race. Use a locking current read here so MySQL
+                # REPEATABLE READ can see the transaction that won the insert.
+                winner = (
                     await db.execute(
-                        select(CustomerIdentity).where(
-                            CustomerIdentity.provider == "PHONE",
-                            CustomerIdentity.provider_subject == phone,
-                            CustomerIdentity.verified == 1,
+                        identity_stmt.with_for_update().execution_options(
+                            populate_existing=True
                         )
                     )
                 ).scalar_one_or_none()
-                if not identity:
-                    raise AppException(40905, "手机号绑定冲突，请重试", status_code=409)
+                if not winner:
+                    raise AppException(40905, "手机号绑定冲突，请重新查询后重试", status_code=409)
+                if int(winner.customer_id) not in gate_ids:
+                    raise AppException(
+                        40905,
+                        "手机号关联账号已变化，请重新查询后重试",
+                        status_code=409,
+                    )
+                identity = winner
 
         merged = False
-        if int(identity.customer_id) != int(customer.id):
+        if int(identity.customer_id) != source_customer_id:
             if not confirm_merge:
                 raise AppException(
                     40906,
@@ -1523,48 +1622,44 @@ class CustomerService:
             result = await CustomerMergeService.merge(
                 db,
                 target_customer_id=int(identity.customer_id),
-                source_customer_id=int(customer.id),
+                source_customer_id=source_customer_id,
                 reason=f"用户确认通过{source}官方手机号合并",
                 request=request,
             )
-            customer = await db.get(Customer, int(result["target_customer_id"]))
-            if not customer:
-                raise AppException(40905, "账号合并失败，请重试", status_code=409)
+            target_customer_id = int(result["target_customer_id"])
             merged = True
         else:
-            locked = (
-                await db.execute(
-                    select(Customer).where(Customer.id == customer.id).with_for_update()
-                )
-            ).scalar_one_or_none()
-            if not locked or int(locked.status or 0) != 1:
-                raise AppException(40102, "顾客不存在或已禁用", status_code=401)
-            customer = locked
+            target_customer_id = source_customer_id
 
-        customer.phone = phone
-        customer.phone_verified = 1
-        CustomerService.refresh_profile_status(customer)
-        await db.flush()
-
-        # 收银预留壳 / 其它同号未验证账号 → 并入当前官方绑号账号（积分、订单、公益身份）
-        phone_peers = list(
-            (
-                await db.execute(
-                    select(Customer)
+        # This must be a current locking read, not a REPEATABLE READ snapshot:
+        # a peer may have been inserted after the initial observation while this
+        # transaction waited for the known customer gates. Lock matching rows in
+        # stable order so no unseen peer can be merged without its gate.
+        current_peer_ids = {
+            int(value)
+            for value in (
+                await db.scalars(
+                    select(Customer.id)
                     .where(
                         Customer.status == 1,
                         Customer.phone == phone,
-                        Customer.id != int(customer.id),
+                        Customer.id != target_customer_id,
                     )
+                    .order_by(Customer.id)
                     .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
-            ).scalars().all()
-        )
-        if phone_peers:
+            ).all()
+        }
+        expected_peer_ids = observed_peer_ids - {target_customer_id}
+        if current_peer_ids != expected_peer_ids:
+            raise AppException(40907, "手机号关联账号已变化，请重新查询后重试", status_code=409)
+
+        if current_peer_ids:
             from app.services.customer_merge_service import CustomerMergeService
 
-            for peer in phone_peers:
-                has_platform = await CustomerService._customer_has_platform_login(db, int(peer.id))
+            for peer_id in sorted(current_peer_ids):
+                has_platform = await CustomerService._customer_has_platform_login(db, peer_id)
                 if has_platform and not confirm_merge:
                     raise AppException(
                         40906,
@@ -1573,20 +1668,27 @@ class CustomerService:
                     )
                 await CustomerMergeService.merge(
                     db,
-                    target_customer_id=int(customer.id),
-                    source_customer_id=int(peer.id),
+                    target_customer_id=target_customer_id,
+                    source_customer_id=peer_id,
                     reason=f"官方{source}绑号合并收银预留/同号账号",
                     request=request,
                 )
                 merged = True
-            customer = await db.get(Customer, int(customer.id))
-            if not customer:
-                raise AppException(40905, "账号合并失败，请重试", status_code=409)
-            customer.phone = phone
-            customer.phone_verified = 1
-            CustomerService.refresh_profile_status(customer)
-            await db.flush()
 
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == target_customer_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not customer or int(customer.status or 0) != 1:
+            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
+        customer.phone = phone
+        customer.phone_verified = 1
+        CustomerService.refresh_profile_status(customer)
+        await db.flush()
         return customer, merged
 
     @staticmethod
@@ -1649,13 +1751,9 @@ class CustomerService:
         幂等开通会员：仅首次 GUEST→MEMBER 返回 newly_activated=True（可发欢迎券等副作用）。
         已是 MEMBER 时只更新可选资料，不重复副作用。
         """
-        # 会员行锁覆盖状态迁移与调用方后续发券所在事务，避免双击并发均认为首次开通。
-        locked = (
-            await db.execute(select(Customer).where(Customer.id == customer.id).with_for_update())
-        ).scalar_one_or_none()
-        if not locked or int(locked.status or 0) != 1:
-            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
-        customer = locked
+        # Lifecycle gate → current Customer read: serialize activation with merge/revocation,
+        # and refresh a possibly stale authenticated ORM instance after waiting for the gate.
+        customer = await lock_active_customer_for_write(db, int(customer.id))
         newly = not CustomerService.is_member(customer)
         if newly:
             customer.member_status = "MEMBER"

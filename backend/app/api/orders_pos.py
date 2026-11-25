@@ -13,6 +13,7 @@ from app.models import Customer, DiningTable, Order, OrderItem, Product
 from app.schemas.order import PosAddItems, PosBindCustomer, PosOrderCreate
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService, OrderCreateService
+from app.services.customer_write_gate import lock_active_customer_for_write, lock_customer_write_gates
 from app.services.store_scope import assert_order_store_access, assert_store_access, require_bound_store
 from app.services.websocket_manager import ws_manager
 
@@ -66,9 +67,7 @@ async def create_pos_order(
     if data.customer_id:
         from app.api.customers import _assert_customer_in_store
 
-        cust = await db.get(Customer, int(data.customer_id))
-        if not cust or int(cust.status) != 1:
-            raise AppException(40406, "顾客不存在或已停用")
+        cust = await lock_active_customer_for_write(db, int(data.customer_id))
         await _assert_customer_in_store(db, int(data.customer_id), int(store_id), action="收银台绑客")
         pos_customer_id = int(data.customer_id)
 
@@ -336,9 +335,35 @@ async def bind_pos_customer(
     user: CurrentUser,
 ):
     """待支付 POS 单绑定/更换/清除会员；重算会员折扣与优惠券。"""
-    order = await db.get(Order, order_id)
+    # Discover both possible owners without locking. Acquire lifecycle gates
+    # first, then current-read the order and reject an owner change while waiting.
+    observed_owner_id = await db.scalar(
+        select(Order.customer_id).where(Order.id == int(order_id))
+    )
+    if observed_owner_id is None and data.customer_id is None:
+        gate_ids = []
+    else:
+        gate_ids = [
+            int(cid)
+            for cid in (observed_owner_id, data.customer_id)
+            if cid is not None
+        ]
+    await lock_customer_write_gates(db, gate_ids)
+    order = (
+        await db.execute(
+            select(Order)
+            .where(Order.id == int(order_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     if not order:
         raise AppException(40404, "订单不存在")
+    current_owner_id = int(order.customer_id) if order.customer_id is not None else None
+    expected_owner_id = int(observed_owner_id) if observed_owner_id is not None else None
+    if current_owner_id != expected_owner_id:
+        raise AppException(40906, "订单顾客归属已变化，请刷新后重试", status_code=409)
+
     assert_order_store_access(user, order)
     if order.channel != "POS":
         raise AppException(40009, "仅收银台订单可绑客")
@@ -349,8 +374,21 @@ async def bind_pos_customer(
     if new_cid:
         from app.api.customers import _assert_customer_in_store
 
-        cust = await db.get(Customer, new_cid)
-        if not cust or int(cust.status) != 1:
+        # Gate is already held before the Order lock; current-read and validate
+        # the selected customer only after the parent row is stable.
+        cust = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == new_cid)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            not cust
+            or int(cust.status or 0) != 1
+            or str(getattr(cust, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+        ):
             raise AppException(40406, "顾客不存在或已停用")
         await _assert_customer_in_store(db, new_cid, int(order.store_id), action="收银台绑客")
     order.customer_id = new_cid

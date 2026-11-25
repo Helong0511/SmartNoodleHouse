@@ -54,7 +54,7 @@ async def test_finalize_refund_keeps_order_when_other_tender_remains():
             MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
         ]
     )
-    db.scalar = AsyncMock(return_value=Decimal("50.00"))
+    db.scalar = AsyncMock(side_effect=[None, Decimal("50.00")])
     db.flush = AsyncMock()
 
     with patch("app.services.payment_service.record_payment_status", AsyncMock()):
