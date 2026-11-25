@@ -27,8 +27,10 @@ def upgrade() -> None:
             sa.Column("learned_at", sa.DateTime(timezone=True), nullable=True),
         )
 
-    # Preserve the existing profile watermark: events at or before the latest
-    # folded timestamp are treated as consumed, avoiding a one-time double fold.
+    # The old timestamp-only cursor cannot distinguish consumed events from
+    # late arrivals sharing the exact watermark timestamp. Mark only strictly
+    # older events consumed; replaying the boundary timestamp is at-least-once
+    # and avoids permanently losing same-timestamp events after this migration.
     conn.execute(sa.text("""
         UPDATE customer_behavior_events AS e
         SET learned_at = e.created_at
@@ -38,7 +40,7 @@ def upgrade() -> None:
               FROM customer_taste_profiles AS p
               WHERE p.customer_id = e.customer_id
                 AND p.last_event_at IS NOT NULL
-                AND e.created_at <= (
+                AND e.created_at < (
                     SELECT MAX(p2.last_event_at)
                     FROM customer_taste_profiles AS p2
                     WHERE p2.customer_id = e.customer_id
