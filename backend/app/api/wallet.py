@@ -490,12 +490,32 @@ async def search_customers_for_wallet(
     user: CurrentUser,
     keyword: str = Query(..., min_length=1, max_length=100, description="昵称/手机/顾客编号"),
     page_size: int = 20,
+    include_merged: bool = False,
 ):
-    """调账/流水筛选：按门店隔离搜索顾客。超管可搜全库。"""
+    """调账/流水筛选：按门店隔离搜索顾客；流水筛选可额外检索已合并的原账户。"""
     store_id = require_bound_store(user, None)
+    limit = min(max(1, int(page_size)), 50)
     rows, _total = await CustomerService.search_active_customers(
-        db, keyword, page=1, page_size=page_size, store_id=store_id
+        db, keyword, page=1, page_size=limit, store_id=store_id
     )
+    # 已合并源账户会被禁用并清空手机号，默认不出现在调账选择器；
+    # 只有历史流水筛选显式请求时，才按可见门店的 origin_customer_id 找回原账户。
+    if include_merged:
+        cond = CustomerService.keyword_condition(keyword)
+        q = (
+            select(Customer)
+            .join(BalanceLedger, BalanceLedger.origin_customer_id == Customer.id)
+            .where(Customer.status == 0, cond)
+            .distinct()
+            .order_by(Customer.id.desc())
+            .limit(limit)
+        )
+        if store_id is not None:
+            q = q.where(BalanceLedger.store_id == int(store_id))
+        merged_rows = list((await db.execute(q)).scalars().all())
+        seen = {int(c.id) for c in rows}
+        rows.extend(c for c in merged_rows if int(c.id) not in seen)
+        rows = rows[:limit]
     items = [
         {
             "id": c.id,
