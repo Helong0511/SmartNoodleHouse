@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from httpx import ASGITransport, AsyncClient
 
 from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReconcileDiff
