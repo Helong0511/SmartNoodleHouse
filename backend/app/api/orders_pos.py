@@ -60,7 +60,7 @@ async def create_pos_order(
 
     from app.services.pos_shift_service import PosShiftService
 
-    await PosShiftService.require_open_shift(db, user.id, store_id=int(store_id))
+    await PosShiftService.require_open_shift_for_update(db, user.id, store_id=int(store_id))
 
     pos_customer_id = None
     if data.customer_id:
