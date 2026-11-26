@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.dialects import mysql
 
 from app.services.balance_service import BalanceService
 
@@ -48,6 +49,8 @@ async def test_split_balance_refunds_cumulatively_restore_exact_gift_and_princip
     )
     assert first.delta_gift == Decimal("1.00")
     assert first.delta_principal == Decimal("2.33")
+    prior_query = db.execute.call_args_list[3].args[0]
+    assert "FOR UPDATE" in str(prior_query.compile(dialect=mysql.dialect())).upper()
 
     # 第二笔退款前，数据库中已有第一笔回补流水，累计赠送金目标应精确到 3.00。
     db.execute = AsyncMock(side_effect=[
