@@ -48,7 +48,6 @@ async def _aggregate_payments(
 ) -> dict[str, Decimal]:
     q = select(Payment.provider, func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.status == _PAID,
-        Payment.paid_at >= since,
     )
     if store_id is not None:
         # 订单收款与充值收款都按发生门店归集，避免收银员跨店后把别的门店流水算进本班
@@ -57,12 +56,15 @@ async def _aggregate_payments(
         ).where(
             or_(Order.store_id == int(store_id), RechargeOrder.store_id == int(store_id))
         )
-    if until is not None:
-        q = q.where(Payment.paid_at < until)
     if operator_id is not None:
         q = q.where(Payment.operator_id == int(operator_id))
-    if cashier_shift_id is not None:
-        # 新流水按明确班次归属；NULL 仅回退兼容迁移前的历史流水时间窗。
+    if cashier_shift_id is None:
+        q = q.where(Payment.paid_at >= since)
+        if until is not None:
+            q = q.where(Payment.paid_at < until)
+    else:
+        # 新流水按明确班次归属，允许交班后的迟到回调仍计入原班次；
+        # NULL 仅回退兼容迁移前的历史流水时间窗。
         legacy_window = [Payment.cashier_shift_id.is_(None), Payment.paid_at >= since]
         if until is not None:
             legacy_window.append(Payment.paid_at < until)
