@@ -104,6 +104,11 @@ class PointLedger(Base):
     __table_args__ = (Index("ix_pl_created_at_customer_id", "created_at", "customer_id"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    # Current owner can change during account merge; origin preserves the ledger's
+    # original account so historical balance_after snapshots remain interpretable.
+    origin_customer_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
     refund_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("payment_refunds.id"), unique=True, comment="退款幂等键：每单至多一条扣减", index=True
@@ -121,6 +126,11 @@ class BalanceLedger(Base):
     __table_args__ = (Index("ix_bl_created_at_customer_id", "created_at", "customer_id"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    # Current owner may be reassigned; this retains the account that produced
+    # principal_after/gift_after before a customer merge.
+    origin_customer_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), default=None)
     recharge_order_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
