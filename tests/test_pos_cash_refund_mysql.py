@@ -357,8 +357,41 @@ async def test_payment_service_binds_cash_refund_to_executing_shift_without_earl
             refund_ids.append(refund.id)
             assert refund.status == "SUCCESS"
             assert refund.cashier_shift_id == ids["shift_id"]
-            # The CASH path must not commit before the caller commits the refund/audit unit.
-            assert db.in_transaction()
-            await db.commit()
+            # The CASH path must retain the shift row lock until the caller commits
+            # the refund/audit unit. A second session's FOR UPDATE must wait.
+            async with maker() as competing:
+                lock_query_seen = asyncio.Event()
+                competing_conn = (await competing.connection()).sync_connection
+
+                def observe_competing_lock(conn, _cursor, statement, _parameters, _context, _many):
+                    normalized = statement.upper()
+                    if (
+                        conn is competing_conn
+                        and "CASHIER_SHIFTS" in normalized
+                        and "FOR UPDATE" in normalized
+                    ):
+                        lock_query_seen.set()
+
+                event.listen(db_session.bind.sync_engine, "before_cursor_execute", observe_competing_lock)
+                try:
+                    lock_task = asyncio.create_task(
+                        competing.execute(
+                            select(CashierShift)
+                            .where(CashierShift.id == ids["shift_id"])
+                            .with_for_update()
+                        )
+                    )
+                    await asyncio.wait_for(lock_query_seen.wait(), timeout=5)
+                    await asyncio.sleep(0.15)
+                    assert not lock_task.done(), "PaymentService.refund released shift lock before caller commit"
+                    await db.commit()
+                    await asyncio.wait_for(lock_task, timeout=5)
+                    await competing.rollback()
+                finally:
+                    event.remove(
+                        db_session.bind.sync_engine,
+                        "before_cursor_execute",
+                        observe_competing_lock,
+                    )
     finally:
         await _cleanup(maker, ids, payment_ids, refund_ids)
