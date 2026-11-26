@@ -281,9 +281,18 @@ class PosShiftService:
             await db.execute(
                 select(PaymentRefund.id)
                 .join(Payment, Payment.id == PaymentRefund.payment_id)
+                .join(Order, Order.id == PaymentRefund.order_id)
                 .where(
-                    PaymentRefund.cashier_shift_id == int(locked.id),
-                    Payment.provider == "CASH",
+                    or_(
+                        PaymentRefund.cashier_shift_id == int(locked.id),
+                        and_(
+                            PaymentRefund.cashier_shift_id.is_(None),
+                            Payment.provider == "CASH",
+                            Payment.channel == "POS",
+                            PaymentRefund.created_at >= ensure_local_aware(locked.opened_at),
+                            Order.store_id == int(locked.store_id),
+                        ),
+                    ),
                     PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
                 )
                 .with_for_update()
