@@ -434,6 +434,18 @@ class PosShiftService:
             until=end,
             store_id=store_id,
         )
+        cash_refunds = await db.scalar(
+            select(func.coalesce(func.sum(PaymentRefund.amount), 0))
+            .join(Payment, Payment.id == PaymentRefund.payment_id)
+            .join(CashierShift, CashierShift.id == PaymentRefund.cashier_shift_id)
+            .where(
+                CashierShift.operator_id == int(operator_id),
+                CashierShift.opened_at >= start,
+                CashierShift.opened_at < end,
+                Payment.provider == "CASH",
+                PaymentRefund.status == "SUCCESS",
+            )
+        ) or Decimal("0.00")
         return {
             "date": start.date().isoformat(),
             "operator_id": operator_id,
@@ -441,6 +453,7 @@ class PosShiftService:
             "shift_status": shift.status if shift else None,
             "shift_id": shift.id if shift else None,
             "total_cash": str(stats["total_cash"]),
+            "total_cash_refunds": str(_money(Decimal(str(cash_refunds)))),
             "total_wechat": str(stats["total_wechat"]),
             "total_alipay": str(stats["total_alipay"]),
             "total_amount": str(stats["total_amount"]),
