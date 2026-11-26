@@ -65,10 +65,21 @@ def downgrade() -> None:
         fk_name = f"fk_{table}_origin_customer"
         foreign_keys = {item.get("name") for item in inspector.get_foreign_keys(table)}
         # MySQL may use the FK-supporting index to enforce the reference. Drop
-        # the FK before the explicit index and column.
-        if fk_name in foreign_keys:
-            op.drop_constraint(fk_name, table, type_="foreignkey")
-        if index_name in indexes:
-            op.drop_index(index_name, table_name=table)
-        if "origin_customer_id" in columns:
-            op.drop_column(table, "origin_customer_id")
+        # the FK before the explicit index and column. SQLite needs batch mode
+        # to rebuild the table while dropping a foreign key.
+        if conn.dialect.name == "sqlite":
+            if fk_name in foreign_keys or index_name in indexes or "origin_customer_id" in columns:
+                with op.batch_alter_table(table, recreate="always") as batch:
+                    if fk_name in foreign_keys:
+                        batch.drop_constraint(fk_name, type_="foreignkey")
+                    if index_name in indexes:
+                        batch.drop_index(index_name)
+                    if "origin_customer_id" in columns:
+                        batch.drop_column("origin_customer_id")
+        else:
+            if fk_name in foreign_keys:
+                op.drop_constraint(fk_name, table, type_="foreignkey")
+            if index_name in indexes:
+                op.drop_index(index_name, table_name=table)
+            if "origin_customer_id" in columns:
+                op.drop_column(table, "origin_customer_id")
