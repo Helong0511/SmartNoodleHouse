@@ -6,6 +6,7 @@ Revises: 0053_pos_cash_refund_shift
 from __future__ import annotations
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
 from alembic import op
 
 revision = "0054_customer_ledger_origin"
@@ -25,8 +26,12 @@ def _add_origin_column(table: str) -> None:
             table,
             sa.Column(
                 "origin_customer_id",
-                sa.BigInteger(),
-                sa.ForeignKey("customers.id", ondelete="SET NULL"),
+                sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+                sa.ForeignKey(
+                    "customers.id",
+                    name=f"fk_{table}_origin_customer",
+                    ondelete="SET NULL",
+                ),
                 nullable=True,
                 comment="Original customer account that generated the ledger snapshot",
             ),
