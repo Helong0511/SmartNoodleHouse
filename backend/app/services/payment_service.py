@@ -851,6 +851,7 @@ class PaymentService:
         operator_id: int | None = None,
         extra: dict | None = None,
         amount: Decimal | None = None,
+        cashier_shift_id: int | None = None,
     ) -> tuple[Payment, dict]:
         locked = (
             await db.execute(
@@ -942,6 +943,8 @@ class PaymentService:
                 payment.operator_id = operator_id
             if customer_id is not None:
                 payment.customer_id = customer_id
+            if cashier_shift_id is not None:
+                payment.cashier_shift_id = int(cashier_shift_id)
         else:
             t_no, t_ph = await _order_table_parts(db, order)
             sno = await _order_store_no(db, order)
@@ -950,6 +953,7 @@ class PaymentService:
                 order_id=order.id,
                 customer_id=customer_id or order.customer_id,
                 operator_id=operator_id,
+                cashier_shift_id=int(cashier_shift_id) if cashier_shift_id is not None else None,
                 provider=provider_u,
                 channel=channel,
                 amount=pay_amount,
@@ -1932,6 +1936,7 @@ class PaymentService:
         order: Order,
         *,
         operator_id: int | None = None,
+        cashier_shift_id: int | None = None,
         amount: Decimal | None = None,
         received_amount: Decimal | None = None,
         change_amount: Decimal | None = None,
@@ -2049,6 +2054,7 @@ class PaymentService:
             provider="CASH",
             channel="POS",
             operator_id=operator_id,
+            cashier_shift_id=int(cashier_shift_id) if cashier_shift_id is not None else None,
             status="PENDING",
         )
         db.add(payment)
