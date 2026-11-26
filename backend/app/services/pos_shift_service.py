@@ -388,6 +388,7 @@ class PosShiftService:
         shifts = list((await db.execute(q.order_by(CashierShift.opened_at))).scalars().all())
         items = [await cls.shift_payload(db, s) for s in shifts]
         sum_cash = sum(Decimal(i["total_cash"]) for i in items)
+        sum_cash_refunds = sum(Decimal(i["total_cash_refunds"]) for i in items)
         sum_wechat = sum(Decimal(i["total_wechat"]) for i in items)
         sum_alipay = sum(Decimal(i["total_alipay"]) for i in items)
         sum_total = sum(Decimal(i["total_amount"]) for i in items)
@@ -398,6 +399,8 @@ class PosShiftService:
             "shift_count": len(items),
             "total_opening_float": str(_money(sum_float)),
             "total_cash": str(_money(sum_cash)),
+            "total_cash_refunds": str(_money(sum_cash_refunds)),
+            "expected_cash": str(_money(sum_float + sum_cash - sum_cash_refunds)),
             "total_wechat": str(_money(sum_wechat)),
             "total_alipay": str(_money(sum_alipay)),
             "total_amount": str(_money(sum_total)),
