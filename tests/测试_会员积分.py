@@ -135,7 +135,7 @@ async def test_zero_point_refund_marker_depends_on_original_order_earn(
     no_marker.scalar_one_or_none.return_value = None
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[customer_lock, no_marker, MagicMock(scalar_one_or_none=MagicMock(return_value=None))])
-    db.scalar = AsyncMock(side_effect=[earned_points, 0, 0])
+    db.scalar = AsyncMock(side_effect=[earned_points, 0, 0, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     monkeypatch.setattr(CustomerService, "recalculate_member_level", AsyncMock())
@@ -173,7 +173,7 @@ async def test_refund_with_zero_available_points_still_persists_idempotency_mark
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[customer_lock, no_marker, MagicMock(scalar_one_or_none=MagicMock(return_value=None))])
-    db.scalar = AsyncMock(side_effect=[100, 0, 0])
+    db.scalar = AsyncMock(side_effect=[100, 0, 0, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     monkeypatch.setattr(CustomerService, "recalculate_member_level", AsyncMock())
