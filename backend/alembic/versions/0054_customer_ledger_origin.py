@@ -62,6 +62,12 @@ def downgrade() -> None:
         columns = {item["name"] for item in inspector.get_columns(table)}
         index_name = f"ix_{table}_origin_customer_id"
         indexes = {item["name"] for item in inspector.get_indexes(table)}
+        fk_name = f"fk_{table}_origin_customer"
+        foreign_keys = {item.get("name") for item in inspector.get_foreign_keys(table)}
+        # MySQL may use the FK-supporting index to enforce the reference. Drop
+        # the FK before the explicit index and column.
+        if fk_name in foreign_keys:
+            op.drop_constraint(fk_name, table, type_="foreignkey")
         if index_name in indexes:
             op.drop_index(index_name, table_name=table)
         if "origin_customer_id" in columns:
