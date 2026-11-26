@@ -2899,7 +2899,7 @@ class PaymentService:
         # Cash POS refunds share the cashier-shift fence with checkout and shift close.
         # Acquire shift BEFORE Order/Payment locks to keep the global lock order consistent.
         cash_shift_id = None
-        if (payment.provider or "").upper() == "CASH" and payment.order_id is not None:
+        if (str(getattr(payment, "provider", None) or "").upper() == "CASH" and getattr(payment, "order_id", None) is not None):
             idem_preflight = str(idempotency_key or "").strip() or None
             if idem_preflight:
                 existing = (
