@@ -362,7 +362,10 @@ async function searchLedgerCustomers(q: string) {
   }
   ledgerCustomerSearching.value = true
   try {
-    ledgerCustomerOptions.value = await searchWalletCustomers(kw)
+    const res: any = await api.get('/wallet/customers/search', {
+      params: { keyword: kw, page_size: 20, include_merged: true },
+    })
+    ledgerCustomerOptions.value = res?.data?.items || []
   } catch {
     ledgerCustomerOptions.value = []
   } finally {
