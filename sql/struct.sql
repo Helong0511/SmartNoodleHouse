@@ -1012,6 +1012,7 @@ CREATE TABLE IF NOT EXISTS `payments` (
   `recharge_order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联充值单 → recharge_orders.id；餐饮支付可空',
   `customer_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '付款顾客 → customers.id',
   `operator_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '收银操作员 → users.id',
+  `cashier_shift_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '收银所属班次 → cashier_shifts.id',
   `provider` varchar(20) NOT NULL COMMENT '支付渠道：WECHAT | ALIPAY | CASH | BALANCE | MOCK',
   `channel` varchar(30) NOT NULL COMMENT '细分渠道，如 miniprogram、native、h5、BALANCE',
   `amount` decimal(10, 2) NOT NULL COMMENT '支付金额（元）',
@@ -1032,11 +1033,13 @@ CREATE TABLE IF NOT EXISTS `payments` (
   INDEX `idx_payments_paid_at`(`paid_at` ASC) USING BTREE,
   INDEX `idx_payments_status_paid`(`status` ASC, `paid_at` ASC) USING BTREE,
   INDEX `idx_payments_operator`(`operator_id` ASC, `paid_at` ASC) USING BTREE,
+  INDEX `ix_payments_cashier_shift_status`(`cashier_shift_id` ASC, `status` ASC) USING BTREE,
   INDEX `fk_payments_customer`(`customer_id` ASC) USING BTREE,
   CONSTRAINT `fk_payments_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_payments_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_payments_recharge` FOREIGN KEY (`recharge_order_id`) REFERENCES `recharge_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_payments_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_payments_cashier_shift_id` FOREIGN KEY (`cashier_shift_id`) REFERENCES `cashier_shifts` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `chk_payments_target` CHECK (
     (
       `order_id` is not null
