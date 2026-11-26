@@ -585,14 +585,12 @@ async def create_recharge(
         raise AppException(40092, "该档位不适用于当前门店")
 
     def _assert_same_recharge_intent(existed: RechargeOrder) -> None:
-        # 幂等键绑定完整充值意图，不能用同一 key 静默复用另一档位/门店/金额。
+        # 幂等键绑定不可变的顾客/档位/门店/渠道身份；充值金额以已创建订单快照为准，
+        # 档位后续编辑不能改变一次已发起支付的原始金额。
         if (
             int(existed.customer_id) != int(customer.id)
             or int(existed.package_id or 0) != int(pkg.id)
             or int(existed.store_id) != int(store_id)
-            or money(existed.pay_amount) != money(pkg.pay_amount)
-            or money(existed.credit_principal) != money(pkg.pay_amount)
-            or money(existed.credit_gift) != money(pkg.gift_amount)
             or (existed.channel or "").upper() != provider_u
         ):
             raise AppException(40909, "幂等键冲突：充值档位、门店、金额或支付渠道不一致", status_code=409)
