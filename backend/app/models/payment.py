@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -42,7 +43,9 @@ class Payment(Base, TimestampMixin):
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
     operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
     cashier_shift_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("cashier_shifts.id", name="fk_payments_cashier_shift_id", ondelete="SET NULL"), nullable=True
+        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        ForeignKey("cashier_shifts.id", name="fk_payments_cashier_shift_id", ondelete="SET NULL"),
+        nullable=True,
     )
     provider: Mapped[str] = mapped_column(String(20))
     channel: Mapped[str] = mapped_column(String(30))
