@@ -355,7 +355,7 @@ class CouponService:
                     select(CustomerCoupon.id)
                     .where(
                         CustomerCoupon.template_id == int(tmpl.id),
-                        CustomerCoupon.status == "AVAILABLE",
+                        CustomerCoupon.status.in_(("AVAILABLE", "RESERVED")),
                         CustomerCoupon.expires_at > now_local(),
                     )
                     .with_for_update()
@@ -364,7 +364,7 @@ class CouponService:
             if active_issued:
                 raise AppException(
                     40001,
-                    "该模板仍有未使用优惠券，不能修改券类型、优惠金额、使用门槛或门店范围；请新建模板",
+                    "该模板仍有未使用或已预占的有效优惠券，不能修改券类型、优惠金额、使用门槛或门店范围；请新建模板",
                 )
         schedule_keys = (
             "schedule_mode",
