@@ -13,8 +13,8 @@ Merge policy
    （同分保留目标，累加 order_count）。
 6. FaceProfile：全部挂到目标后，仅保留最新一份 AUTHORIZED，其余 REVOKED。
 7. Order / Payment 的 customer_id 改挂目标；PaymentRefund 无 customer_id 列故跳过。
-8. WelcomeLog / PointLedger 改挂目标；last_order_at 取两者较新。
-9. 储值：本金/赠送金并入目标，写 MERGE 流水；balance_ledger / recharge_orders 改挂目标。
+8. WelcomeLog 改挂目标；积分/储值流水保留原始快照归属，并记录当前资产归属与原账户。
+9. 储值：本金/赠送金并入目标，写 MERGE 流水；balance_ledger / recharge_orders 改挂目标；储值流水保留原始账户标识。
 10. 公益身份 CustomerSocialIdentity / 核销台账 social_benefit_redemptions 改挂目标；
     同 identity_code 若目标已有 ACTIVE 则源侧 ACTIVE/PENDING 改为 REVOKED，避免双生效。
 """
@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -174,7 +174,7 @@ class CustomerMergeService:
         await cls._reassign_simple(
             db, WelcomeLog, source.id, target.id, "welcome_logs", stats
         )
-        await cls._reassign_simple(
+        await cls._reassign_ledger(
             db, PointLedger, source.id, target.id, "point_ledgers", stats
         )
         await cls._merge_wallet(db, source, target, stats)
@@ -432,6 +432,23 @@ class CustomerMergeService:
         await db.flush()
 
     @classmethod
+    async def _reassign_ledger(
+        cls, db: AsyncSession, model, source_id: int, target_id: int,
+        stat_key: str, stats: dict,
+    ) -> None:
+        """Move current ownership while preserving the account behind old snapshots."""
+        result = await db.execute(
+            update(model)
+            .where(model.customer_id == int(source_id))
+            .values(
+                origin_customer_id=func.coalesce(model.origin_customer_id, model.customer_id),
+                customer_id=int(target_id),
+            )
+        )
+        stats[stat_key] = int(result.rowcount or 0)
+        await db.flush()
+
+    @classmethod
     async def _merge_wallet(
         cls, db: AsyncSession, source: Customer, target: Customer, stats: dict
     ) -> None:
@@ -460,7 +477,12 @@ class CustomerMergeService:
         moved_bl = await db.execute(
             update(BalanceLedger)
             .where(BalanceLedger.customer_id == source.id)
-            .values(customer_id=target.id)
+            .values(
+                origin_customer_id=func.coalesce(
+                    BalanceLedger.origin_customer_id, BalanceLedger.customer_id
+                ),
+                customer_id=target.id,
+            )
         )
         stats["balance_ledgers"] = int(moved_bl.rowcount or 0)
         moved_ro = await db.execute(
