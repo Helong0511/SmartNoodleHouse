@@ -68,3 +68,41 @@ async def test_list_shift_orders_empty():
     data = await PosShiftService.list_shift_orders(db, shift)
     assert data["total"] == 0
     assert data["items"] == []
+
+ 
+@pytest.mark.asyncio
+async def test_require_open_shift_for_update_locks_and_checks_store(monkeypatch):
+    shift = MagicMock()
+    shift.store_id = 4
+    monkeypatch.setattr(PosShiftService, "get_open_shift_for_update", AsyncMock(return_value=shift))
+    got = await PosShiftService.require_open_shift_for_update(
+        AsyncMock(), operator_id=9, store_id=4
+    )
+    assert got is shift
+
+
+@pytest.mark.asyncio
+async def test_close_shift_refuses_pending_barcode_payment():
+    from app.core.exceptions import AppException
+    from datetime import timezone
+
+    shift = MagicMock()
+    shift.id = 12
+    shift.operator_id = 9
+    shift.status = "OPEN"
+    shift.opened_at = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)
+
+    locked_result = MagicMock()
+    locked_result.scalar_one_or_none.return_value = shift
+    pending_result = MagicMock()
+    pending_result.scalars.return_value.all.return_value = [88]
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[locked_result, pending_result])
+
+    with pytest.raises(AppException) as exc:
+        await PosShiftService.close_shift(
+            db, shift, closing_cash=Decimal("0"), remark=None, closed_by=9
+        )
+
+    assert exc.value.status_code == 409
+    assert "待确认" in str(exc.value)
