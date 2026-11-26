@@ -209,3 +209,35 @@ async def test_delegation_service_never_grants_system_manage_even_for_super_admi
             starts_at=now_local(),
             ends_at=now_local() + timedelta(hours=1),
         )
+
+
+@pytest.mark.asyncio
+async def test_super_admin_can_delegate_registered_non_system_permission():
+    from datetime import timedelta
+
+    from app.core.response import now_local
+    from app.services.role_delegation_service import RoleDelegationService
+
+    grantor = SimpleNamespace(id=1, role_id=1, store_id=None, status=1)
+    delegatee = SimpleNamespace(id=2, role_id=20, store_id=7, status=1)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _service_user_result([grantor, delegatee]),
+        _permission_result(["order:read", "payment:refund"]),
+    ])
+    db.get = AsyncMock(return_value=SimpleNamespace(code="SUPER_ADMIN"))
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+
+    row = await RoleDelegationService.create(
+        db,
+        grantor_user_id=1,
+        delegatee_user_id=2,
+        permission_codes=["payment:refund"],
+        starts_at=now_local(),
+        ends_at=now_local() + timedelta(hours=1),
+    )
+
+    assert row.permission_codes == ["payment:refund"]
+    db.add.assert_called_once_with(row)
+    db.flush.assert_awaited_once()
