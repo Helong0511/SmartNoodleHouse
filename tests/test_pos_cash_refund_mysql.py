@@ -1,12 +1,13 @@
 """MySQL concurrency/accounting regressions for POS cash refunds."""
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, event
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.exceptions import AppException
@@ -216,3 +217,83 @@ async def test_shift_close_refuses_unresolved_cash_refund(db_session):
             await db.rollback()
     finally:
         await _cleanup(maker, ids, payment_ids, refund_ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_cash_refund_and_shift_close_serialize_on_shift_row(db_session):
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+    maker = async_sessionmaker(db_session.bind, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    ids = await _make_shift_graph(maker, suffix)
+    payment_ids: list[int] = []
+    refund_ids: list[int] = []
+    second_close_lock = asyncio.Event()
+    async with maker() as refund_session, maker() as close_session:
+        try:
+            locked = await PosShiftService.require_open_shift_for_update(
+                refund_session, ids["user_id"], store_id=ids["store_id"]
+            )
+            payment = Payment(
+                payment_no=f"CRS-{suffix[:28]}",
+                order_id=ids["order_id"],
+                operator_id=ids["user_id"],
+                cashier_shift_id=locked.id,
+                provider="CASH",
+                channel="POS",
+                amount="15.00",
+                status="PAID",
+                paid_at=now_local(),
+            )
+            refund_session.add(payment)
+            await refund_session.flush()
+            refund = PaymentRefund(
+                refund_no=f"CRSR-{suffix[:24]}",
+                payment_id=payment.id,
+                order_id=ids["order_id"],
+                cashier_shift_id=locked.id,
+                amount="5.00",
+                status="PENDING",
+                operator_id=ids["user_id"],
+            )
+            refund_session.add(refund)
+            await refund_session.flush()
+            payment_ids = [payment.id]
+            refund_ids = [refund.id]
+            stale_shift = await close_session.get(CashierShift, ids["shift_id"])
+            close_conn = (await close_session.connection()).sync_connection
+
+            def observe_close_lock(conn, _cursor, statement, _parameters, _context, _many):
+                normalized = statement.upper()
+                if (
+                    conn is close_conn
+                    and "CASHIER_SHIFTS" in normalized
+                    and "FOR UPDATE" in normalized
+                ):
+                    second_close_lock.set()
+
+            event.listen(db_session.bind.sync_engine, "before_cursor_execute", observe_close_lock)
+            try:
+                close_task = asyncio.create_task(
+                    PosShiftService.close_shift(
+                        close_session,
+                        stale_shift,
+                        closing_cash=Decimal("110.00"),
+                        remark=None,
+                        closed_by=ids["user_id"],
+                    )
+                )
+                await asyncio.wait_for(second_close_lock.wait(), timeout=10)
+                await refund_session.commit()
+                with pytest.raises(AppException) as exc:
+                    await asyncio.wait_for(close_task, timeout=15)
+                assert exc.value.code == 40910
+            finally:
+                event.remove(db_session.bind.sync_engine, "before_cursor_execute", observe_close_lock)
+                if refund_session.in_transaction():
+                    await refund_session.rollback()
+                if close_session.in_transaction():
+                    await close_session.rollback()
+        finally:
+            await _cleanup(maker, ids, payment_ids, refund_ids)
