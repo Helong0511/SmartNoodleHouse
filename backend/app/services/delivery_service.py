@@ -918,13 +918,53 @@ class DeliveryService:
             raise AppException(40063, "外卖退款金额超过订单金额或关联订单不存在")
         refund_type = "PARTIAL" if amount < money(order.total_amount) else "FULL"
 
+        # Order 行锁是同一订单所有退款意图的串行化点。先识别重复事件，
+        # 避免重放时把原退款再次计入累计金额；随后用锁定读计算已成功及未决退款。
+        fingerprint = None
+        if not refund_id:
+            fingerprint = _refund_event_fingerprint(
+                platform, d_order.id, amount, refund_type, raw
+            )
+        duplicate_query = select(DeliveryRefund.id).where(
+            DeliveryRefund.platform == platform.upper(),
+            (
+                DeliveryRefund.platform_refund_id == refund_id
+                if refund_id
+                else DeliveryRefund.event_fingerprint == fingerprint
+            ),
+        ).with_for_update()
+        duplicate_id = (await db.execute(duplicate_query)).scalar_one_or_none()
+        if duplicate_id is not None:
+            d_order.last_sync_at = now_local()
+            await db.flush()
+            return order
+
+        active_refunds = (
+            await db.execute(
+                select(DeliveryRefund.amount)
+                .where(
+                    DeliveryRefund.order_id == int(order.id),
+                    DeliveryRefund.status.in_(
+                        ("PENDING", "PROCESSING", "APPROVED_LEDGER_PENDING", "APPROVED")
+                    ),
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        already_refunded = sum(
+            (money(value) for value in active_refunds),
+            start=money(0),
+        )
+        if already_refunded + amount > money(order.total_amount):
+            raise AppException(
+                40063,
+                "外卖累计退款金额超过订单可退款金额，已拒绝登记本次退款",
+            )
+
         inserted = False
         if not refund_id:
             # 部分平台回调不提供退款单号。使用原始事件规范化内容生成稳定指纹，
             # 由数据库唯一约束兜底并发/重复投递；不把合成值伪装成平台退款编号。
-            fingerprint = _refund_event_fingerprint(
-                platform, d_order.id, amount, refund_type, raw
-            )
             from sqlalchemy.exc import IntegrityError as _IntegrityError
 
             try:

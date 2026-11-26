@@ -28,6 +28,8 @@ async def test_handle_refund_dedup_uses_savepoint_on_conflict():
     db.execute = AsyncMock(side_effect=[
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no duplicate refund event
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no active refunds
     ])
 
     # begin_nested 返回一个真正的 async context manager
@@ -67,8 +69,10 @@ async def test_handle_refund_without_refund_id_inserts_directly():
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[
-        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
-        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # lock Order
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # lock DeliveryOrder
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no duplicate refund
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no active refunds
     ])
     db.add = MagicMock()
     db.flush = AsyncMock()

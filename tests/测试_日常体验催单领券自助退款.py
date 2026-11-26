@@ -463,6 +463,9 @@ async def test_scheduled_pickup_validation_window():
 
 
 async def test_birthday_double_points(db_session):
+    # 显式固定本测试的业务配置，避免受环境/全局设置中的生日权益模式影响。
+    await _enable_setting(db_session, "birthday_benefit_mode", "POINTS")
+    await _enable_setting(db_session, "birthday_points_multiplier", "2")
     cust = await _seed_customer(db_session, birthday=datetime.now().date())
     store = await _seed_store(db_session)
     order = await _seed_order(db_session, store, cust, payment_status="PAID")
