@@ -615,8 +615,6 @@ async def create_recharge(
         await db.execute(
             select(RechargeOrder)
             .where(RechargeOrder.idempotency_key == data.idempotency_key)
-            .with_for_update()
-            .execution_options(populate_existing=True)
             .limit(1)
         )
     ).scalar_one_or_none()
