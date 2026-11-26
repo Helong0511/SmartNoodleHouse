@@ -818,7 +818,6 @@ class CouponService:
                 CustomerCoupon.customer_id == customer_id,
                 CustomerCoupon.status == "AVAILABLE",
                 CustomerCoupon.expires_at > now,
-                CouponTemplate.status == 1,
             )
             .order_by(CustomerCoupon.expires_at.asc())
         )
