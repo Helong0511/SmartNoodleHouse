@@ -329,11 +329,12 @@ async def pay_order_cash(
     if not order:
         raise AppException(40404, "订单不存在", status_code=404)
     assert_order_store_access(user, order)
-    await PosShiftService.require_open_shift(db, user.id, store_id=order.store_id)
+    shift = await PosShiftService.require_open_shift_for_update(db, user.id, store_id=order.store_id)
     payment, pay_data = await PaymentService.settle_cash_payment(
         db,
         order,
         operator_id=user.id,
+        cashier_shift_id=shift.id,
         amount=body.amount,
         received_amount=body.received_amount,
         change_amount=None,
@@ -407,7 +408,7 @@ async def create_pos_scan_payment(
     if not order:
         raise AppException(40404, "订单不存在", status_code=404)
     assert_order_store_access(user, order)
-    await PosShiftService.require_open_shift(db, user.id, store_id=order.store_id)
+    shift = await PosShiftService.require_open_shift_for_update(db, user.id, store_id=order.store_id)
     channel_type = "micropay" if provider == "WECHAT" else "barcode"
     payment, pay_data = await PaymentService.create_payment(
         db,
@@ -416,6 +417,7 @@ async def create_pos_scan_payment(
         channel_type,
         customer_id=None,
         operator_id=user.id,
+        cashier_shift_id=shift.id,
         extra={"auth_code": auth_code},
         amount=data.amount,
     )
