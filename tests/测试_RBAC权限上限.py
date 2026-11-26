@@ -145,6 +145,7 @@ async def test_delegation_service_rejects_disabled_delegatee():
     delegatee = SimpleNamespace(id=2, role_id=20, store_id=7, status=0)
     db = MagicMock()
     db.execute = AsyncMock(return_value=_service_user_result([grantor, delegatee]))
+    db.get = AsyncMock()
 
     with pytest.raises(ValueError, match="已停用"):
         await RoleDelegationService.create(
