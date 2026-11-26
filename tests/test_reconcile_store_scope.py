@@ -139,3 +139,92 @@ async def test_unbound_store_admin_cannot_use_reconcile_or_archive_lists(db_sess
                 assert archive.status_code == 403, archive.text
     finally:
         app.dependency_overrides.clear()
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_concurrent_first_reconcile_batch_avoids_innodb_gap_lock_deadlock(db_session):
+    """Two RR sessions can safely create the same first batch.
+
+    The second insert waits on the unique key, then reuses the winner's batch
+    through a locking/current read instead of deadlocking on missing-key gap locks.
+    """
+    import asyncio
+    import uuid
+
+    from sqlalchemy import event, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.models import PaymentReconcileBatch
+    from app.services.payment_reconcile_service import PaymentReconcileService
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    bill_day = date(2026, 11, 26)
+    insert_seen = asyncio.Event()
+
+    def observe_batch_insert(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("INSERT INTO PAYMENT_RECONCILE_BATCHES"):
+            insert_seen.set()
+
+    async with maker() as winner, maker() as loser:
+        key = (
+            PaymentReconcileBatch.channel == "WECHAT",
+            PaymentReconcileBatch.bill_date == bill_day,
+            PaymentReconcileBatch.scope_store_id == 0,
+        )
+        assert await winner.scalar(select(PaymentReconcileBatch.id).where(*key)) is None
+        assert await loser.scalar(select(PaymentReconcileBatch.id).where(*key)) is None
+
+        first = await PaymentReconcileService.run_batch(
+            winner,
+            channel="WECHAT",
+            bill_date=bill_day,
+            bill_csv="trade_no,amount\\n",
+            created_by=None,
+            source_filename=f"winner-{suffix[:12]}.csv",
+            scope_store_id=0,
+        )
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_batch_insert)
+        try:
+            task = asyncio.create_task(
+                PaymentReconcileService.run_batch(
+                    loser,
+                    channel="WECHAT",
+                    bill_date=bill_day,
+                    bill_csv="trade_no,amount\\n",
+                    created_by=None,
+                    source_filename=f"loser-{suffix[:12]}.csv",
+                    scope_store_id=0,
+                )
+            )
+            await asyncio.wait_for(insert_seen.wait(), timeout=10)
+            await winner.commit()
+            second = await asyncio.wait_for(task, timeout=15)
+            assert second.id == first.id
+            assert second.status == "DONE"
+            await loser.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_batch_insert)
+            if winner.in_transaction():
+                await winner.rollback()
+            if loser.in_transaction():
+                await loser.rollback()
+
+    async with maker() as cleanup:
+        await cleanup.execute(
+            PaymentReconcileBatch.__table__.delete().where(
+                PaymentReconcileBatch.channel == "WECHAT",
+                PaymentReconcileBatch.bill_date == bill_day,
+                PaymentReconcileBatch.scope_store_id == 0,
+                PaymentReconcileBatch.source_filename.in_(
+                    [f"winner-{suffix[:12]}.csv", f"loser-{suffix[:12]}.csv"]
+                ),
+            )
+        )
+        await cleanup.commit()
