@@ -19,7 +19,6 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -108,7 +107,7 @@ class PointLedger(Base):
     # Current owner can change during account merge; origin preserves the account
     # whose historical balance_after snapshot this row records.
     origin_customer_id: Mapped[int | None] = mapped_column(
-        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+        BigInteger, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     order_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
     refund_id: Mapped[int | None] = mapped_column(
