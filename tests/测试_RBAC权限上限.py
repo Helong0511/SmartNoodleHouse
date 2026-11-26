@@ -156,7 +156,7 @@ async def test_delegation_service_rejects_disabled_delegatee():
             ends_at=now_local() + timedelta(hours=1),
         )
 
-    db.get.assert_not_awaited()
+    assert db.get.await_count == 0
     db.add.assert_not_called()
 
 
