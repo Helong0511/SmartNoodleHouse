@@ -229,6 +229,8 @@ async def create_role(data: RoleCreate, request: Request, db: DbSession, user: C
     db.add(role)
     await db.flush()
     codes = sorted({c.strip() for c in data.permission_codes if c and c.strip()})
+    if "system:manage" in codes:
+        raise AppException(40315, "system:manage 仅可由超级管理员角色持有")
     if user.role.code != "SUPER_ADMIN":
         grantable_codes = await _role_permission_codes(db, user.role_id)
         if not set(codes).issubset(grantable_codes):
@@ -279,6 +281,8 @@ async def create_delegation(
             (await db.execute(select(Permission.code))).scalars().all()
         )
     requested_codes = {str(code).strip() for code in data.permission_codes if str(code).strip()}
+    if "system:manage" in requested_codes:
+        raise AppException(40315, "system:manage 不可通过临时委派授予")
     if not requested_codes.issubset(grantable_codes):
         raise AppException(40315, "不能委派自身角色未持有的权限")
     try:
