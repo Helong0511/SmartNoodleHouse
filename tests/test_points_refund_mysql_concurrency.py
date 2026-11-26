@@ -7,7 +7,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import delete, event, func, select
+from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import Customer, Order, Payment, PaymentRefund, PointLedger, Store
