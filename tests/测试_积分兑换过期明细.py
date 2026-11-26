@@ -578,3 +578,27 @@ async def test_exchange_rejects_coupon_template_outside_store_whitelist(db_sessi
         await CustomerService.exchange_points_for_coupon(db_session, customer.id, 9203)
     assert "不可兑换" in exc_info.value.message
     await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_exchange_rejects_restricted_template_without_customer_store(db_session):
+    from app.models import Store
+
+    await _enable_points_exchange(db_session)
+    allowed_store = Store(store_no="EX_WHITE_UNSCOPED", name="白名单限定门店")
+    db_session.add(allowed_store)
+    await db_session.flush()
+    template = await _mk_template(db_session, tid=9204, name="无门店顾客不可兑换")
+    template.store_whitelist = [int(allowed_store.id)]
+    await _mk_option(
+        db_session, oid=9204, template_id=9204, points_cost=10
+    )
+    customer = await _mk_customer(
+        db_session, no="CU_EX_UNSCOPED", points=100, registered_store_id=None
+    )
+    await db_session.commit()
+
+    with pytest.raises(AppException) as exc_info:
+        await CustomerService.exchange_points_for_coupon(db_session, customer.id, 9204)
+    assert "不可兑换" in exc_info.value.message
+    await db_session.rollback()
