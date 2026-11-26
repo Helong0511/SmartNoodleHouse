@@ -68,20 +68,8 @@ async def test_shift_close_waits_for_payment_creation_then_blocks_pending_and_co
         )
         setup.add(shift)
         await setup.flush()
-        payment = Payment(
-            payment_no=f"PSP-{suffix[:28]}",
-            order_id=order.id,
-            operator_id=user.id,
-            cashier_shift_id=shift.id,
-            provider="WECHAT",
-            channel="POS",
-            amount="10.00",
-            status="PENDING",
-        )
-        setup.add(payment)
-        await setup.flush()
         store_id, role_id, user_id = store.id, role.id, user.id
-        order_id, shift_id, payment_id = order.id, shift.id, payment.id
+        order_id, shift_id = order.id, shift.id
         await setup.commit()
 
     second_close_lock = asyncio.Event()
@@ -90,6 +78,19 @@ async def test_shift_close_waits_for_payment_creation_then_blocks_pending_and_co
             payment_session, user_id, store_id=store_id
         )
         assert locked_shift.id == shift_id
+        payment = Payment(
+            payment_no=f"PSP-{suffix[:28]}",
+            order_id=order_id,
+            operator_id=user_id,
+            cashier_shift_id=locked_shift.id,
+            provider="WECHAT",
+            channel="POS",
+            amount="10.00",
+            status="PENDING",
+        )
+        payment_session.add(payment)
+        await payment_session.flush()
+        payment_id = payment.id
         payment_conn = (await payment_session.connection()).sync_connection
         stale_shift = await close_session.get(CashierShift, shift_id)
         assert stale_shift is not None
