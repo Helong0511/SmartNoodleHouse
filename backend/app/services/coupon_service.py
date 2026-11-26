@@ -346,16 +346,21 @@ class CouponService:
             or ("store_whitelist" in patch and next_whitelist != getattr(tmpl, "store_whitelist", None))
         )
         if sensitive_changed:
-            active_issued = int(
-                await db.scalar(
-                    select(func.count(CustomerCoupon.id)).where(
+            # Use a locking/current read after the template row lock. Under
+            # MySQL REPEATABLE READ, a plain COUNT may reuse an older snapshot
+            # taken before waiting for the template lock and miss a just-issued
+            # coupon committed by the competing issuer.
+            active_issued = (
+                await db.execute(
+                    select(CustomerCoupon.id)
+                    .where(
                         CustomerCoupon.template_id == int(tmpl.id),
                         CustomerCoupon.status == "AVAILABLE",
                         CustomerCoupon.expires_at > now_local(),
                     )
+                    .with_for_update()
                 )
-                or 0
-            )
+            ).scalars().all()
             if active_issued:
                 raise AppException(
                     40001,
