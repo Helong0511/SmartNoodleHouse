@@ -52,7 +52,7 @@ def _add_origin_column(table: str) -> None:
             with op.batch_alter_table(table, recreate="always") as batch:
                 batch.add_column(_origin_column(table, customer_id_type))
         else:
-            op.add_column(table, _origin_column(table))
+            op.add_column(table, _origin_column(table, customer_id_type))
 
     indexes = {item["name"] for item in sa.inspect(conn).get_indexes(table)}
     index_name = f"ix_{table}_origin_customer_id"
