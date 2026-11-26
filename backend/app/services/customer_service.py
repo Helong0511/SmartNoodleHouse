@@ -764,6 +764,15 @@ class CustomerService:
         template = await db.get(CouponTemplate, int(option.template_id))
         if not template or int(template.status) != 1:
             raise AppException(40404, "兑换优惠券模板不存在或已停用")
+        # template_visible_to_store(None) is intentionally an HQ/admin
+        # visibility query and therefore cannot be used alone for a customer
+        # with no registered store: a store-bound template or a non-empty HQ
+        # whitelist must fail closed in this customer mutation path.
+        if store_id is None and (
+            template.store_id is not None
+            or bool(getattr(template, "store_whitelist", None))
+        ):
+            raise AppException(40404, "当前门店不可兑换此优惠券")
         if not CouponService.template_visible_to_store(template, store_id):
             raise AppException(40404, "当前门店不可兑换此优惠券")
         if int(customer.points or 0) < cost:
