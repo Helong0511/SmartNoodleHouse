@@ -730,6 +730,7 @@ class CustomerService:
         同月同选项重复请求不扣分、不重复发券。
         """
         from app.services.coupon_service import CouponService
+        from app.models import CouponTemplate
 
         customer = (
             await db.execute(
@@ -738,10 +739,40 @@ class CustomerService:
         ).scalar_one_or_none()
         if not customer:
             raise AppException(40404, "顾客不存在")
+
+        # Enforce the feature switch at the mutation boundary, not only in the
+        # options-list endpoint; clients can call POST directly.
+        from app.services.system_settings_service import SystemSettingsService
+
+        store_id = int(customer.registered_store_id) if customer.registered_store_id else None
+        enabled = await SystemSettingsService.effective_int(
+            db, "points_exchange_enabled", 0, store_id=store_id
+        )
+        if not enabled:
+            raise AppException(40001, "积分兑换功能暂未开放")
+
         option = await db.get(PointExchangeOption, int(option_id))
         if not option or int(option.status) != 1:
             raise AppException(40404, "兑换选项不存在或已停用")
-        cost = int(option.points_cost)
+        if option.store_id is not None and (
+            store_id is None or int(option.store_id) != store_id
+        ):
+            raise AppException(40404, "积分兑换选项不属于当前门店")
+        cost = int(option.points_cost or 0)
+        if cost <= 0:
+            raise AppException(40001, "积分兑换选项积分配置无效")
+        template = await db.get(CouponTemplate, int(option.template_id))
+        if not template or int(template.status) != 1:
+            raise AppException(40404, "兑换优惠券模板不存在或已停用")
+        if template.store_id is not None and (
+            store_id is None or int(template.store_id) != store_id
+        ):
+            raise AppException(40404, "兑换优惠券模板不属于当前门店")
+        whitelist = getattr(template, "store_whitelist", None)
+        if whitelist is not None and (
+            store_id is None or store_id not in {int(value) for value in whitelist}
+        ):
+            raise AppException(40404, "当前门店不可兑换此优惠券")
         if int(customer.points or 0) < cost:
             raise AppException(40010, "积分不足")
 
