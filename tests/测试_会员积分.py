@@ -49,7 +49,7 @@ async def test_recalculate_member_level_upgrades():
 @pytest.mark.asyncio
 async def test_deduct_points_for_refund_downgrades():
     customer = SimpleNamespace(id=1, points=150, member_level_id=2)
-    order = SimpleNamespace(customer_id=1, id=9)
+    order = SimpleNamespace(customer_id=1, id=9, total_amount=Decimal("60.00"))
     levels = [
         _level(1, "普通会员", 0, "1.0000"),
         _level(2, "银卡会员", 100, "0.9800"),
@@ -59,7 +59,7 @@ async def test_deduct_points_for_refund_downgrades():
     locked.scalar_one_or_none.return_value = customer
     db.execute = AsyncMock(return_value=locked)
     # EARN 合计 / 已 REFUND_DEDUCT 合计（本单净可扣上限）
-    db.scalar = AsyncMock(side_effect=[60, 0])
+    db.scalar = AsyncMock(side_effect=[60, 0, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
@@ -72,7 +72,7 @@ async def test_deduct_points_for_refund_downgrades():
 @pytest.mark.asyncio
 async def test_deduct_points_for_refund_clamps_at_zero():
     customer = SimpleNamespace(id=1, points=30, member_level_id=2)
-    order = SimpleNamespace(customer_id=1, id=9)
+    order = SimpleNamespace(customer_id=1, id=9, total_amount=Decimal("50.00"))
     levels = [
         _level(1, "普通会员", 0, "1.0000"),
         _level(2, "银卡会员", 100, "0.9800"),
@@ -81,7 +81,7 @@ async def test_deduct_points_for_refund_clamps_at_zero():
     locked = MagicMock()
     locked.scalar_one_or_none.return_value = customer
     db.execute = AsyncMock(return_value=locked)
-    db.scalar = AsyncMock(side_effect=[50, 0])
+    db.scalar = AsyncMock(side_effect=[50, 0, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
@@ -95,7 +95,7 @@ async def test_deduct_points_for_refund_clamps_at_zero():
 async def test_deduct_points_capped_by_order_net_earn():
     """退款扣分不超过本单净已发积分，避免跨单扣光。"""
     customer = SimpleNamespace(id=1, points=200, member_level_id=2)
-    order = SimpleNamespace(customer_id=1, id=9)
+    order = SimpleNamespace(customer_id=1, id=9, total_amount=Decimal("80.00"))
     levels = [
         _level(1, "普通会员", 0, "1.0000"),
         _level(2, "银卡会员", 100, "0.9800"),
@@ -104,7 +104,7 @@ async def test_deduct_points_capped_by_order_net_earn():
     locked = MagicMock()
     locked.scalar_one_or_none.return_value = customer
     db.execute = AsyncMock(return_value=locked)
-    db.scalar = AsyncMock(side_effect=[40, 0])  # 本单仅发过 40
+    db.scalar = AsyncMock(side_effect=[40, 0, 0])  # EARN、累计退款、已扣回
     db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
@@ -128,14 +128,14 @@ async def test_zero_point_refund_marker_depends_on_original_order_earn(
     from app.models import PointLedger
 
     customer = SimpleNamespace(id=31, points=25, member_level_id=1)
-    order = SimpleNamespace(customer_id=31, id=902)
+    order = SimpleNamespace(customer_id=31, id=902, total_amount=Decimal("100.00"))
     customer_lock = MagicMock()
     customer_lock.scalar_one_or_none.return_value = customer
     no_marker = MagicMock()
     no_marker.scalar_one_or_none.return_value = None
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[customer_lock, no_marker])
-    db.scalar = AsyncMock(return_value=earned_points)
+    db.execute = AsyncMock(side_effect=[customer_lock, no_marker, MagicMock(scalar_one_or_none=MagicMock(return_value=None))])
+    db.scalar = AsyncMock(side_effect=[earned_points, 0, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     monkeypatch.setattr(CustomerService, "recalculate_member_level", AsyncMock())
@@ -163,7 +163,7 @@ async def test_refund_with_zero_available_points_still_persists_idempotency_mark
     from app.models import PointLedger
 
     customer = SimpleNamespace(id=31, points=0, member_level_id=1)
-    order = SimpleNamespace(customer_id=31, id=901)
+    order = SimpleNamespace(customer_id=31, id=901, total_amount=Decimal("100.00"))
     customer_lock = MagicMock()
     customer_lock.scalar_one_or_none.return_value = customer
     no_marker = MagicMock()
@@ -172,8 +172,8 @@ async def test_refund_with_zero_available_points_still_persists_idempotency_mark
     existing_marker.scalar_one_or_none.return_value = 777
 
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[customer_lock, no_marker])
-    db.scalar = AsyncMock(side_effect=[100, 0])
+    db.execute = AsyncMock(side_effect=[customer_lock, no_marker, MagicMock(scalar_one_or_none=MagicMock(return_value=None))])
+    db.scalar = AsyncMock(side_effect=[100, 0, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     monkeypatch.setattr(CustomerService, "recalculate_member_level", AsyncMock())
