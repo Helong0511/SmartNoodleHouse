@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import (
+    BalanceLedger,
     CouponTemplate,
     Customer,
     CustomerAlipayAccount,
@@ -79,6 +80,30 @@ async def test_merge_moves_accounts_and_points(db_session):
     )
     await db_session.flush()
     _sqlite_auto_id(db_session, PointLedger, 7100)
+    _sqlite_auto_id(db_session, BalanceLedger, 7200)
+    source.balance_principal = Decimal("10.00")
+    source.balance_gift = Decimal("5.00")
+    original_points = PointLedger(
+        customer_id=source.id,
+        order_id=None,
+        refund_id=None,
+        delta=80,
+        balance_after=80,
+        entry_type="EARN",
+    )
+    original_wallet = BalanceLedger(
+        customer_id=source.id,
+        store_id=None,
+        entry_type="TOPUP",
+        delta_principal=Decimal("10.00"),
+        delta_gift=Decimal("5.00"),
+        principal_after=Decimal("10.00"),
+        gift_after=Decimal("5.00"),
+        biz_no="MG-ORIGIN-WALLET-1",
+        remark="源账户历史充值",
+    )
+    db_session.add_all([original_points, original_wallet])
+    await db_session.flush()
 
     with patch(
         "app.services.customer_merge_service.AuditService.log",
@@ -116,6 +141,19 @@ async def test_merge_moves_accounts_and_points(db_session):
     assert int(target.points) == 120
     assert int(target.member_level_id) == 2
     assert int(source.status) == 0
+    # The original ledger snapshots remain attributed to the source account,
+    # even though current ownership has moved to the surviving target.
+    await db_session.refresh(original_points)
+    await db_session.refresh(original_wallet)
+    assert original_points.customer_id == target.id
+    assert original_points.origin_customer_id == source.id
+    assert original_points.balance_after == 80
+    assert original_wallet.customer_id == target.id
+    assert original_wallet.origin_customer_id == source.id
+    assert original_wallet.principal_after == Decimal("10.00")
+    assert original_wallet.gift_after == Decimal("5.00")
+    assert Decimal(str(target.balance_principal)) == Decimal("10.00")
+    assert Decimal(str(target.balance_gift)) == Decimal("5.00")
     assert source.phone is None
 
     wx = (
