@@ -139,3 +139,75 @@ async def test_unbound_store_admin_cannot_use_reconcile_or_archive_lists(db_sess
                 assert archive.status_code == 403, archive.text
     finally:
         app.dependency_overrides.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_failed_payment_reconcile_batch_is_committed_before_http_error(db_session):
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    user = SimpleNamespace(
+        id=99103,
+        role_id=1,
+        role=SimpleNamespace(code="SUPER_ADMIN"),
+        store_id=None,
+        status=1,
+        token_version=0,
+    )
+
+    async def override_db():
+        yield db_session
+
+    async def override_user():
+        return user
+
+    async def fail_after_recording_batch(
+        db, *, channel, bill_date, bill_csv, created_by=None,
+        source_filename=None, scope_store_id=0,
+    ):
+        batch = PaymentReconcileBatch(
+            channel=channel.upper(),
+            bill_date=bill_date,
+            scope_store_id=scope_store_id,
+            status="FAILED",
+            created_by=created_by,
+            source_filename=source_filename,
+            error_message="渠道账单缺少交易号列",
+        )
+        db.add(batch)
+        await db.flush()
+        raise ValueError(batch.error_message)
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        permissions = {"reconcile:manage"}
+        with (
+            patch("app.api.deps.get_user_permissions", AsyncMock(return_value=permissions)),
+            patch(
+                "app.api.reconcile.PaymentReconcileService.run_batch",
+                side_effect=fail_after_recording_batch,
+            ),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/reconcile/payments/import",
+                    data={"channel": "WECHAT", "bill_date": "2026-11-26"},
+                    files={"file": ("invalid.csv", b"not,a,valid,bill", "text/csv")},
+                )
+        assert response.status_code == 400, response.text
+        persisted = (
+            await db_session.execute(
+                select(PaymentReconcileBatch).where(
+                    PaymentReconcileBatch.bill_date == date(2026, 11, 26),
+                    PaymentReconcileBatch.channel == "WECHAT",
+                    PaymentReconcileBatch.status == "FAILED",
+                )
+            )
+        ).scalar_one()
+        assert persisted.error_message == "渠道账单缺少交易号列"
+    finally:
+        app.dependency_overrides.clear()
