@@ -84,7 +84,11 @@ class PaymentRefund(Base, TimestampMixin):
 
 class CashierShift(Base, TimestampMixin):
     __tablename__ = "cashier_shifts"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        primary_key=True,
+        autoincrement=True,
+    )
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     operator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     opening_float: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
