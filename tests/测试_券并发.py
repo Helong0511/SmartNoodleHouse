@@ -68,9 +68,9 @@ async def test_issue_quota_insufficient():
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
     db.get = AsyncMock(return_value=_mock_customer())
-    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=2, total_quota=10)), upd_result])
     upd_result = MagicMock()
     upd_result.rowcount = 0  # 库存不足
+    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=2, total_quota=10)), upd_result])
     db.flush = AsyncMock()
     db.rollback = AsyncMock()
 
@@ -93,12 +93,12 @@ async def test_issue_stale_loaded_remaining_does_not_oversell():
     # 加载到内存的 remaining=10（旧快照），本次请求 qty=3
     db.get = AsyncMock(return_value=_mock_customer())
 
-    # 第 1 次 execute：client_request_id 幂等回查 → 空
+    # 第 1 次 execute：模板行锁；第 2 次 execute：client_request_id 幂等回查 → 空
     scalars_empty = MagicMock()
     scalars_empty.all = MagicMock(return_value=[])
     sel_result = MagicMock()
     sel_result.scalars = MagicMock(return_value=scalars_empty)
-    # 第 2 次 execute：原子扣减 UPDATE，DB 当前 remaining 已不足 → 0 行
+    # 第 3 次 execute：原子扣减 UPDATE，DB 当前 remaining 已不足 → 0 行
     upd_result = MagicMock()
     upd_result.rowcount = 0
     db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=10, total_quota=10)), sel_result, upd_result])
@@ -110,7 +110,7 @@ async def test_issue_stale_loaded_remaining_does_not_oversell():
         )
     assert ei.value.code == 40070
     # 扣减必须是带守卫的批量 UPDATE（WHERE remaining >= qty 由 DB 判定），而非按内存值 ORM flush
-    stmt = db.execute.call_args_list[1].args[0]
+    stmt = db.execute.call_args_list[2].args[0]
     assert isinstance(stmt, Update)
     # 拒绝发生在写券之前：不得进入发券 savepoint
     assert db.begin_nested.call_count == 0
@@ -162,8 +162,8 @@ async def test_issue_idempotent_returns_existing():
     )
     assert len(issued) == 1
     assert issued[0].id == 99
-    # 只执行了 1 次 SELECT（幂等回查），不应有 UPDATE 库存
-    assert db.execute.await_count == 1
+    # 模板行锁 + 1 次幂等回查，不应有库存 UPDATE
+    assert db.execute.await_count == 2
 
 
 @pytest.mark.asyncio
