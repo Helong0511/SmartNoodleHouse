@@ -6,6 +6,7 @@ Revises: 0051_pos_refund_fencing
 from __future__ import annotations
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
 from alembic import op
 
 revision = "0052_pos_payment_shift"
@@ -30,7 +31,11 @@ def upgrade() -> None:
         if needs_column or needs_fk:
             with op.batch_alter_table("payments", recreate="always") as batch:
                 if needs_column:
-                    batch.add_column(sa.Column("cashier_shift_id", sa.BigInteger(), nullable=True))
+                    batch.add_column(sa.Column(
+                        "cashier_shift_id",
+                        sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+                        nullable=True,
+                    ))
                 if needs_fk:
                     batch.create_foreign_key(
                         "fk_payments_cashier_shift_id",
@@ -43,7 +48,11 @@ def upgrade() -> None:
         if needs_column:
             op.add_column(
                 "payments",
-                sa.Column("cashier_shift_id", sa.BigInteger(), nullable=True),
+                sa.Column(
+                    "cashier_shift_id",
+                    sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+                    nullable=True,
+                ),
             )
         if needs_fk:
             op.create_foreign_key(
