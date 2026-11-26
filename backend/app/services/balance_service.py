@@ -263,20 +263,27 @@ class BalanceService:
                 raise AppException(40991, "原储值支付流水金额无效，拒绝自动回补")
             # 分笔退款不能逐笔独立四舍五入 gift 占比，否则多笔退款累加可能产生分币漂移。
             # 按“累计已退款金额”计算目标赠送金回补值，本次只补差额；全额退时精确回到原始赠送金。
-            previous_restore = (
+            # The customer row lock serializes refunds, but a plain aggregate
+            # SELECT can still reuse a REPEATABLE READ snapshot created earlier
+            # in this transaction (before waiting for that lock). Read the
+            # committed restore rows with a locking/current read instead.
+            previous_rows = (
                 await db.execute(
-                    select(
-                        func.coalesce(func.sum(BalanceLedger.delta_principal), 0),
-                        func.coalesce(func.sum(BalanceLedger.delta_gift), 0),
-                    ).where(
+                    select(BalanceLedger)
+                    .where(
                         BalanceLedger.entry_type == "REFUND_RESTORE",
                         BalanceLedger.order_id == order_id,
                         BalanceLedger.customer_id == customer_id,
                     )
+                    .with_for_update()
                 )
-            ).one()
-            previous_principal = money(previous_restore[0] or 0)
-            previous_gift = money(previous_restore[1] or 0)
+            ).scalars().all()
+            previous_principal = money(
+                sum((money(row.delta_principal) for row in previous_rows), Decimal("0.00"))
+            )
+            previous_gift = money(
+                sum((money(row.delta_gift) for row in previous_rows), Decimal("0.00"))
+            )
             previous_total = money(previous_principal + previous_gift)
             cumulative_refund = money(previous_total + amt)
             if cumulative_refund > paid_total:
