@@ -572,28 +572,20 @@ async def create_recharge(
     if not channel_type:
         raise AppException(40041, "充值支付渠道类型无效")
 
-    pkg = await db.get(RechargePackage, data.package_id)
-    if not pkg or int(pkg.status) != 1:
-        raise AppException(40490, "充值档位不可用")
     store_id = int(data.store_id) if data.store_id else None
     if not store_id:
         raise AppException(40061, "请选择充值门店")
-    store = await db.get(Store, store_id)
-    if not store or store.status != 1:
-        raise AppException(40061, "门店不存在或已停用")
-    if pkg.store_id and int(pkg.store_id) != store_id:
-        raise AppException(40092, "该档位不适用于当前门店")
 
     def _assert_same_recharge_intent(existed: RechargeOrder) -> None:
-        # 幂等键绑定不可变的顾客/档位/门店/渠道身份；充值金额以已创建订单快照为准，
-        # 档位后续编辑不能改变一次已发起支付的原始金额。
+        # 幂等键绑定不可变的顾客/档位/门店/渠道身份；重试按已创建充值单快照继续，
+        # 不要求档位或门店仍处于可新建状态，也不重新读取已变更的套餐金额。
         if (
             int(existed.customer_id) != int(customer.id)
-            or int(existed.package_id or 0) != int(pkg.id)
+            or int(existed.package_id or 0) != int(data.package_id)
             or int(existed.store_id) != int(store_id)
             or (existed.channel or "").upper() != provider_u
         ):
-            raise AppException(40909, "幂等键冲突：充值档位、门店、金额或支付渠道不一致", status_code=409)
+            raise AppException(40909, "幂等键冲突：充值档位、门店或支付渠道不一致", status_code=409)
 
     async def _paid_replay(existed: RechargeOrder):
         if existed.status != "PAID":
@@ -609,6 +601,9 @@ async def create_recharge(
             request=request,
         )
 
+    # Resolve the idempotency key before validating whether the package/store
+    # can accept a *new* recharge. Existing pending payments must remain
+    # queryable/retryable after an administrator disables the package/store.
     ro = (
         await db.execute(
             select(RechargeOrder)
@@ -622,6 +617,15 @@ async def create_recharge(
         if replay is not None:
             return replay
     else:
+        pkg = await db.get(RechargePackage, data.package_id)
+        if not pkg or int(pkg.status) != 1:
+            raise AppException(40490, "充值档位不可用")
+        store = await db.get(Store, store_id)
+        if not store or store.status != 1:
+            raise AppException(40061, "门店不存在或已停用")
+        if pkg.store_id and int(pkg.store_id) != store_id:
+            raise AppException(40092, "该档位不适用于当前门店")
+
         sno = store.store_no or f"S{store.id}"
         candidate = RechargeOrder(
             recharge_no=generate_no("RC", sno, "00"),
@@ -658,7 +662,6 @@ async def create_recharge(
             replay = await _paid_replay(ro)
             if replay is not None:
                 return replay
-
 
     extra: dict | None = None
     channel_l = channel_type
