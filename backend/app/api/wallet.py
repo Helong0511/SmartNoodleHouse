@@ -22,6 +22,12 @@ from app.services.store_scope import assert_store_access, require_bound_store
 router = APIRouter(prefix="/wallet", tags=["储值"])
 
 
+def _ledger_customer_filter(customer_id: int):
+    """历史账本按当前资产归属或原始账户归属均可检索。"""
+    cid = int(customer_id)
+    return or_(BalanceLedger.customer_id == cid, BalanceLedger.origin_customer_id == cid)
+
+
 class PackageCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     pay_amount: Decimal = Field(..., gt=0)
@@ -346,12 +352,7 @@ async def admin_ledger(
         raise AppException(40301, "账号未绑定门店")
     if customer_id:
         # 合并后 customer_id 表示当前资产归属；origin_customer_id 保留历史账本原账户，两个 ID 都应可检索。
-        filters.append(
-            or_(
-                BalanceLedger.customer_id == int(customer_id),
-                BalanceLedger.origin_customer_id == int(customer_id),
-            )
-        )
+        filters.append(_ledger_customer_filter(customer_id))
     if entry_type and entry_type.strip():
         filters.append(BalanceLedger.entry_type == entry_type.strip().upper())
     kw = (keyword or "").strip()
