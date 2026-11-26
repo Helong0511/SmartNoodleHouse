@@ -5,8 +5,9 @@ Revises: 0053_pos_cash_refund_shift
 """
 from __future__ import annotations
 
+import copy
+
 import sqlalchemy as sa
-from sqlalchemy.dialects import mysql
 from alembic import op
 
 revision = "0054_customer_ledger_origin"
@@ -15,10 +16,12 @@ branch_labels = None
 depends_on = None
 
 
-def _origin_column(table: str) -> sa.Column:
+def _origin_column(table: str, customer_id_type: sa.types.TypeEngine) -> sa.Column:
+    # Match the referenced PK exactly: installations may use signed BIGINT
+    # from ORM metadata or BIGINT UNSIGNED from the canonical SQL schema.
     return sa.Column(
         "origin_customer_id",
-        sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        copy.copy(customer_id_type),
         sa.ForeignKey(
             "customers.id",
             name=f"fk_{table}_origin_customer",
@@ -35,13 +38,19 @@ def _add_origin_column(table: str) -> None:
     if not inspector.has_table(table):
         return
     columns = {item["name"] for item in inspector.get_columns(table)}
+    customer_columns = {
+        item["name"]: item for item in inspector.get_columns("customers")
+    } if inspector.has_table("customers") else {}
+    if "id" not in customer_columns:
+        raise RuntimeError("customers.id is required for ledger origin foreign keys")
+    customer_id_type = customer_columns["id"]["type"]
     if "origin_customer_id" not in columns:
         # SQLite cannot ALTER TABLE ADD COLUMN with a REFERENCES clause when
         # foreign_keys are enabled. Batch mode rebuilds the table and keeps
         # the new FK; MySQL uses the native ALTER path.
         if conn.dialect.name == "sqlite":
             with op.batch_alter_table(table, recreate="always") as batch:
-                batch.add_column(_origin_column(table))
+                batch.add_column(_origin_column(table, customer_id_type))
         else:
             op.add_column(table, _origin_column(table))
 
