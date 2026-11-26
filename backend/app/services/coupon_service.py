@@ -351,6 +351,7 @@ class CouponService:
                     select(func.count(CustomerCoupon.id)).where(
                         CustomerCoupon.template_id == int(tmpl.id),
                         CustomerCoupon.status == "AVAILABLE",
+                        CustomerCoupon.expires_at > now_local(),
                     )
                 )
                 or 0
