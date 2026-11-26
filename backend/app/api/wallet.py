@@ -504,9 +504,12 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
         sid = require_bound_store(user, data.store_id)
         if not sid:
             raise AppException(40301, "账号未绑定门店")
-        from app.api.customers import _assert_customer_in_store
 
-        await _assert_customer_in_store(db, data.customer_id, int(sid), action="调账")
+    # 超管可以指定任意门店，但不能把其他门店顾客的钱包记入当前门店账本。
+    # 顾客门店归属检查必须对所有角色执行，不能只保护普通门店账号。
+    from app.api.customers import _assert_customer_in_store
+
+    await _assert_customer_in_store(db, data.customer_id, int(sid), action="调账")
     row = await BalanceService.adjust(
         db,
         customer_id=data.customer_id,
