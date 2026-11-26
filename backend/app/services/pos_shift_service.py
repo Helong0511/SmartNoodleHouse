@@ -440,8 +440,8 @@ class PosShiftService:
             .join(CashierShift, CashierShift.id == PaymentRefund.cashier_shift_id)
             .where(
                 CashierShift.operator_id == int(operator_id),
-                CashierShift.opened_at >= start,
-                CashierShift.opened_at < end,
+                PaymentRefund.succeeded_at >= start,
+                PaymentRefund.succeeded_at < end,
                 Payment.provider == "CASH",
                 PaymentRefund.status == "SUCCESS",
             )
