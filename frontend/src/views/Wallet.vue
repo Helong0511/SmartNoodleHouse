@@ -52,7 +52,11 @@
                   <div class="cust-sub">
                     <span v-if="row.customer_phone">{{ row.customer_phone }}</span>
                     <span v-else class="muted">无手机号</span>
-                    <span class="muted"> · #{{ row.customer_id }}</span>
+                    <span class="muted"> · 当前归属 #{{ row.customer_id }}</span>
+                  </div>
+                  <div v-if="row.origin_customer_id && row.origin_customer_id !== row.customer_id" class="cust-sub origin-customer">
+                    原账户：{{ row.origin_customer_name || row.origin_customer_no || `#${row.origin_customer_id}` }}
+                    <span class="muted">（#{{ row.origin_customer_id }}）</span>
                   </div>
                 </div>
               </div>
@@ -93,8 +97,12 @@
           </el-table-column>
           <el-table-column prop="delta_principal" label="本金变动" width="110" />
           <el-table-column prop="delta_gift" label="赠送变动" width="110" />
-          <el-table-column prop="principal_after" label="本金余额" width="110" />
-          <el-table-column prop="gift_after" label="赠送余额" width="110" />
+          <el-table-column prop="principal_after" label="本金余额快照" width="125">
+            <template #header><span title="该笔流水发生后的历史余额，不代表合并后的当前余额">本金余额快照 ⓘ</span></template>
+          </el-table-column>
+          <el-table-column prop="gift_after" label="赠送余额快照" width="130">
+            <template #header><span title="该笔流水发生后的历史余额，不代表合并后的当前余额">赠送余额快照 ⓘ</span></template>
+          </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           <el-table-column prop="created_at" label="时间" width="280" />
         </el-table>
