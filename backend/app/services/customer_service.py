@@ -775,13 +775,11 @@ class CustomerService:
             raise AppException(40404, "当前门店不可兑换此优惠券")
         if not CouponService.template_visible_to_store(template, store_id):
             raise AppException(40404, "当前门店不可兑换此优惠券")
-        if int(customer.points or 0) < cost:
-            raise AppException(40010, "积分不足")
-
-        # 幂等键：同月同选项只发一次
+        # 幂等键：同月同选项只发一次。先查已完成的兑换，再校验当前余额；
+        # 否则顾客首次兑换后又消费积分，网络重试会错误返回“积分不足”，
+        # 而不是返回首次成功发放的优惠券。
         month_key = now_local().strftime("%Y%m")
         req_key = f"PTS:{int(customer.id)}:{int(option.id)}:{month_key}"
-        # 先查是否已发过（issue_by_template_id 内部也查，但提前查可避免不必要的扣分）
         existing_coupon = (
             await db.execute(
                 select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
@@ -794,6 +792,9 @@ class CustomerService:
                 "coupon_id": int(existing_coupon.id),
                 "remaining_points": int(customer.points or 0),
             }
+
+        if int(customer.points or 0) < cost:
+            raise AppException(40010, "积分不足")
 
         # 发券（原子扣库存 + PTS 幂等键）；顾客行 FOR UPDATE 保证同客串行，防重扣分
         coupons = await CouponService.issue_by_template_id(
