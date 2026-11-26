@@ -106,3 +106,42 @@ async def test_close_shift_refuses_pending_barcode_payment():
 
     assert exc.value.status_code == 409
     assert "待确认" in str(exc.value)
+
+ 
+@pytest.mark.asyncio
+async def test_shift_totals_use_current_read_and_include_late_callback_payment():
+    from datetime import timezone
+    from types import SimpleNamespace
+
+    from sqlalchemy.dialects import mysql
+
+    from app.services.pos_shift_service import _aggregate_payments
+
+    since = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)
+    closed_at = datetime(2026, 1, 1, 18, 0, tzinfo=timezone.utc)
+    late_payment = SimpleNamespace(
+        provider="WECHAT",
+        amount=Decimal("15.00"),
+        paid_at=datetime(2026, 1, 1, 18, 5, tzinfo=timezone.utc),
+        cashier_shift_id=12,
+    )
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [late_payment]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+
+    stats = await _aggregate_payments(
+        db,
+        operator_id=9,
+        since=since,
+        until=closed_at,
+        store_id=4,
+        cashier_shift_id=12,
+    )
+
+    statement = db.execute.await_args.args[0]
+    compiled = str(statement.compile(dialect=mysql.dialect()))
+    assert "FOR UPDATE" in compiled
+    assert "cashier_shift_id" in compiled
+    assert stats["total_wechat"] == Decimal("15.00")
+    assert stats["total_amount"] == Decimal("15.00")
