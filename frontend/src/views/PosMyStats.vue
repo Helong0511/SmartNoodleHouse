@@ -9,6 +9,7 @@
     <div v-else class="cards">
       <div class="card"><div class="label">备用金</div><div class="val">¥{{ data.opening_float || '0.00' }}</div></div>
       <div class="card"><div class="label">现金收款</div><div class="val cash">¥{{ data.total_cash || '0.00' }}</div></div>
+      <div class="card"><div class="label">现金退款</div><div class="val cash">−¥{{ data.total_cash_refunds || '0.00' }}</div></div>
       <div class="card"><div class="label">微信收款</div><div class="val wx">¥{{ data.total_wechat || '0.00' }}</div></div>
       <div class="card"><div class="label">支付宝收款</div><div class="val ali">¥{{ data.total_alipay || '0.00' }}</div></div>
       <div class="card total"><div class="label">今日合计</div><div class="val">¥{{ data.total_amount || '0.00' }}</div></div>
