@@ -46,8 +46,58 @@ async def _aggregate_payments(
     store_id: int | None = None,
     cashier_shift_id: int | None = None,
 ) -> dict[str, Decimal]:
+    if cashier_shift_id is not None:
+        # 交班必须使用 current read：先前的普通 SELECT 可能已建立 RR 快照，
+        # 普通聚合可能看不到 pending 查询之后刚提交的支付回调。
+        q = select(Payment).where(
+            Payment.status == _PAID,
+            or_(
+                Payment.cashier_shift_id == int(cashier_shift_id),
+                and_(
+                    Payment.cashier_shift_id.is_(None),
+                    Payment.paid_at >= since,
+                    Payment.paid_at < until if until is not None else True,
+                ),
+            ),
+        )
+        if operator_id is not None:
+            q = q.where(Payment.operator_id == int(operator_id))
+        if store_id is not None:
+            q = q.where(
+                or_(
+                    Payment.order_id.in_(
+                        select(Order.id).where(Order.store_id == int(store_id))
+                    ),
+                    Payment.recharge_order_id.in_(
+                        select(RechargeOrder.id).where(RechargeOrder.store_id == int(store_id))
+                    ),
+                )
+            )
+        payments = (await db.execute(q.with_for_update())).scalars().all()
+        totals = {"CASH": Decimal("0"), "WECHAT": Decimal("0"), "ALIPAY": Decimal("0")}
+        other = Decimal("0")
+        for payment in payments:
+            provider = (payment.provider or "").upper()
+            amount = _money(payment.amount)
+            if provider in totals:
+                totals[provider] += amount
+            else:
+                other += amount
+        cash = totals["CASH"]
+        wechat = totals["WECHAT"]
+        alipay = totals["ALIPAY"]
+        total_amount = cash + wechat + alipay + other
+        return {
+            "total_cash": cash,
+            "total_wechat": wechat,
+            "total_alipay": alipay,
+            "total_other": other,
+            "total_amount": total_amount,
+        }
+
     q = select(Payment.provider, func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.status == _PAID,
+        Payment.paid_at >= since,
     )
     if store_id is not None:
         # 订单收款与充值收款都按发生门店归集，避免收银员跨店后把别的门店流水算进本班
@@ -56,24 +106,10 @@ async def _aggregate_payments(
         ).where(
             or_(Order.store_id == int(store_id), RechargeOrder.store_id == int(store_id))
         )
+    if until is not None:
+        q = q.where(Payment.paid_at < until)
     if operator_id is not None:
         q = q.where(Payment.operator_id == int(operator_id))
-    if cashier_shift_id is None:
-        q = q.where(Payment.paid_at >= since)
-        if until is not None:
-            q = q.where(Payment.paid_at < until)
-    else:
-        # 新流水按明确班次归属，允许交班后的迟到回调仍计入原班次；
-        # NULL 仅回退兼容迁移前的历史流水时间窗。
-        legacy_window = [Payment.cashier_shift_id.is_(None), Payment.paid_at >= since]
-        if until is not None:
-            legacy_window.append(Payment.paid_at < until)
-        q = q.where(
-            or_(
-                Payment.cashier_shift_id == int(cashier_shift_id),
-                and_(*legacy_window),
-            )
-        )
     rows = (await db.execute(q.group_by(Payment.provider))).all()
     cash = wechat = alipay = other = Decimal("0")
     for provider, total in rows:
