@@ -1,0 +1,157 @@
+"""Real MySQL REPEATABLE READ regression for cumulative wallet refunds."""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import delete, event, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.models import BalanceLedger, Customer, Order, Store
+from app.services.balance_service import BalanceService
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snapshot(db_session):
+    """A waiting refund must use a current read, not its pre-lock RR snapshot."""
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB REPEATABLE READ")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=True)
+    suffix = uuid.uuid4().hex
+    async with maker() as setup:
+        store = Store(store_no=f"WR-{suffix[:20]}", name="Wallet refund race")
+        setup.add(store)
+        await setup.flush()
+        customer = Customer(
+            customer_no=f"WC-{suffix[:30]}",
+            display_name="Wallet refund race",
+            balance_principal=Decimal("0.00"),
+            balance_gift=Decimal("0.00"),
+        )
+        setup.add(customer)
+        await setup.flush()
+        order = Order(
+            order_no=f"WO-{suffix[:30]}",
+            store_id=store.id,
+            status="PAID",
+            payment_status="PAID",
+            subtotal="10.00",
+            total_amount="10.00",
+            discount_amount="0.00",
+            coupon_discount="0.00",
+            voucher_discount="0.00",
+            packing_fee="0.00",
+            dining_type="TAKEOUT",
+        )
+        setup.add(order)
+        await setup.flush()
+        store_id, customer_id, order_id = store.id, customer.id, order.id
+        setup.add(
+            BalanceLedger(
+                customer_id=customer_id,
+                store_id=store_id,
+                order_id=order_id,
+                entry_type="PAY",
+                delta_principal=Decimal("-7.00"),
+                delta_gift=Decimal("-3.00"),
+                principal_after=Decimal("0.00"),
+                gift_after=Decimal("0.00"),
+                biz_no=f"WP-{suffix[:30]}",
+            )
+        )
+        await setup.commit()
+
+    competing_customer_lock = asyncio.Event()
+
+    def observe_waiting_customer_lock(_conn, _cursor, statement, _params, _ctx, _many):
+        normalized = statement.upper()
+        if "FOR UPDATE" in normalized and "FROM CUSTOMERS" in normalized:
+            competing_customer_lock.set()
+
+    async with maker() as first, maker() as second:
+        # Session A owns the serialization row before session B establishes its
+        # REPEATABLE READ snapshot and starts waiting for the same customer.
+        await first.execute(
+            select(Customer).where(Customer.id == customer_id).with_for_update()
+        )
+        # This ordinary consistent read establishes B's old snapshot while A
+        # still holds the customer lock. There are not yet any restore rows.
+        stale_rows = (
+            await second.execute(
+                select(BalanceLedger).where(
+                    BalanceLedger.entry_type == "REFUND_RESTORE",
+                    BalanceLedger.order_id == order_id,
+                    BalanceLedger.customer_id == customer_id,
+                )
+            )
+        ).scalars().all()
+        assert stale_rows == []
+
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_waiting_customer_lock)
+        try:
+            second_refund = asyncio.create_task(
+                BalanceService.restore_for_refund(
+                    second,
+                    customer_id=customer_id,
+                    order_id=order_id,
+                    refund_id=900002,
+                    amount=Decimal("3.33"),
+                    store_id=store_id,
+                )
+            )
+            # Do not use sleeps: prove B reached its customer FOR UPDATE while
+            # A still owns that row lock.
+            await asyncio.wait_for(competing_customer_lock.wait(), timeout=10)
+            first_refund = await BalanceService.restore_for_refund(
+                first,
+                customer_id=customer_id,
+                order_id=order_id,
+                refund_id=900001,
+                amount=Decimal("3.33"),
+                store_id=store_id,
+            )
+            assert first_refund.delta_gift == Decimal("1.00")
+            assert first_refund.delta_principal == Decimal("2.33")
+            await first.commit()
+
+            second_row = await asyncio.wait_for(second_refund, timeout=15)
+            assert second_row.delta_gift == Decimal("1.00")
+            assert second_row.delta_principal == Decimal("2.33")
+            await second.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_waiting_customer_lock)
+            if first.in_transaction():
+                await first.rollback()
+            if second.in_transaction():
+                await second.rollback()
+
+    async with maker() as verify:
+        customer = await verify.get(Customer, customer_id)
+        restores = (
+            await verify.execute(
+                select(BalanceLedger).where(
+                    BalanceLedger.entry_type == "REFUND_RESTORE",
+                    BalanceLedger.order_id == order_id,
+                    BalanceLedger.customer_id == customer_id,
+                ).order_by(BalanceLedger.refund_id)
+            )
+        ).scalars().all()
+        assert len(restores) == 2
+        assert sum((row.delta_principal for row in restores), Decimal("0.00")) == Decimal("4.66")
+        assert sum((row.delta_gift for row in restores), Decimal("0.00")) == Decimal("2.00")
+        assert customer.balance_principal == Decimal("4.66")
+        assert customer.balance_gift == Decimal("2.00")
+        assert customer.balance_principal + customer.balance_gift == Decimal("6.66")
+
+        await verify.execute(
+            delete(BalanceLedger).where(BalanceLedger.customer_id == customer_id)
+        )
+        await verify.execute(delete(Order).where(Order.id == order_id))
+        await verify.execute(delete(Customer).where(Customer.id == customer_id))
+        await verify.execute(delete(Store).where(Store.id == store_id))
+        await verify.commit()
