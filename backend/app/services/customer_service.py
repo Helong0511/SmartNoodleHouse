@@ -764,14 +764,7 @@ class CustomerService:
         template = await db.get(CouponTemplate, int(option.template_id))
         if not template or int(template.status) != 1:
             raise AppException(40404, "兑换优惠券模板不存在或已停用")
-        if template.store_id is not None and (
-            store_id is None or int(template.store_id) != store_id
-        ):
-            raise AppException(40404, "兑换优惠券模板不属于当前门店")
-        whitelist = getattr(template, "store_whitelist", None)
-        if whitelist is not None and (
-            store_id is None or store_id not in {int(value) for value in whitelist}
-        ):
+        if not CouponService.template_visible_to_store(template, store_id):
             raise AppException(40404, "当前门店不可兑换此优惠券")
         if int(customer.points or 0) < cost:
             raise AppException(40010, "积分不足")
