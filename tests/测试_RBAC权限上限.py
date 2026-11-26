@@ -53,3 +53,21 @@ async def test_super_admin_can_assign_any_role_without_permission_lookup():
     await _assert_can_assign_role(db, actor, target_role)
 
     db.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_system_manage_cannot_be_granted_by_temporary_delegation(monkeypatch):
+    from app.api import deps
+
+    checker = deps.require_permission("system:manage").dependency
+    monkeypatch.setattr(
+        deps,
+        "get_user_permissions",
+        AsyncMock(return_value={"system:manage"}),
+    )
+    actor = SimpleNamespace(id=7, role_id=3, role=SimpleNamespace(code="STORE_ADMIN"))
+
+    with pytest.raises(AppException) as exc:
+        await checker(actor, MagicMock())
+
+    assert exc.value.code == 40300
