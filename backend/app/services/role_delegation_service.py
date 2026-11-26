@@ -81,6 +81,7 @@ class RoleDelegationService:
                 .where(User.id.in_(sorted({int(grantor_user_id), int(delegatee_user_id)})))
                 .order_by(User.id.asc())
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalars().all()
         users = {int(item.id): item for item in locked_users}
@@ -111,6 +112,7 @@ class RoleDelegationService:
                         select(Permission.code)
                         .join(RolePermission, RolePermission.permission_id == Permission.id)
                         .where(RolePermission.role_id == int(grantor.role_id))
+                        .with_for_update()
                     )
                 ).scalars().all()
             )
