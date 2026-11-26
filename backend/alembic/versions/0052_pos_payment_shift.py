@@ -79,20 +79,22 @@ def downgrade() -> None:
     if not inspector.has_table("payments"):
         return
 
-    index_names = {item["name"] for item in inspector.get_indexes("payments")}
-    if "ix_payments_cashier_shift_status" in index_names:
-        op.drop_index("ix_payments_cashier_shift_status", table_name="payments")
-
+    # MySQL may use the composite index to satisfy the FK's leading-column
+    # requirement. Drop the FK first, then the index, then the column.
     fk_names = {item.get("name") for item in inspector.get_foreign_keys("payments")}
-    columns = {item["name"] for item in inspector.get_columns("payments")}
     has_fk = "fk_payments_cashier_shift_id" in fk_names
+    columns = {item["name"] for item in inspector.get_columns("payments")}
     has_column = "cashier_shift_id" in columns
 
     if conn.dialect.name == "sqlite":
-        if has_fk or has_column:
+        index_names = {item["name"] for item in inspector.get_indexes("payments")}
+        has_index = "ix_payments_cashier_shift_status" in index_names
+        if has_fk or has_column or has_index:
             with op.batch_alter_table("payments", recreate="always") as batch:
                 if has_fk:
                     batch.drop_constraint("fk_payments_cashier_shift_id", type_="foreignkey")
+                if has_index:
+                    batch.drop_index("ix_payments_cashier_shift_status")
                 if has_column:
                     batch.drop_column("cashier_shift_id")
     else:
@@ -100,29 +102,8 @@ def downgrade() -> None:
             op.drop_constraint(
                 "fk_payments_cashier_shift_id", "payments", type_="foreignkey"
             )
+        index_names = {item["name"] for item in sa.inspect(conn).get_indexes("payments")}
+        if "ix_payments_cashier_shift_status" in index_names:
+            op.drop_index("ix_payments_cashier_shift_status", table_name="payments")
         if has_column:
             op.drop_column("payments", "cashier_shift_id")
-
-
-def downgrade() -> None:
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
-    if not inspector.has_table("payments"):
-        return
-
-    index_names = {item["name"] for item in inspector.get_indexes("payments")}
-    if "ix_payments_cashier_shift_status" in index_names:
-        op.drop_index("ix_payments_cashier_shift_status", table_name="payments")
-
-    fk_names = {
-        item.get("name")
-        for item in inspector.get_foreign_keys("payments")
-    }
-    if "fk_payments_cashier_shift_id" in fk_names:
-        op.drop_constraint(
-            "fk_payments_cashier_shift_id", "payments", type_="foreignkey"
-        )
-
-    columns = {item["name"] for item in inspector.get_columns("payments")}
-    if "cashier_shift_id" in columns:
-        op.drop_column("payments", "cashier_shift_id")
