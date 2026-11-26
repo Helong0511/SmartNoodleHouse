@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from unittest.mock import AsyncMock
 from datetime import timedelta
 from decimal import Decimal
 
@@ -21,6 +22,7 @@ from app.models import (
     Store,
     User,
 )
+from app.services.payment_service import PaymentService
 from app.services.pos_shift_service import PosShiftService
 
 
@@ -297,3 +299,66 @@ async def test_cash_refund_and_shift_close_serialize_on_shift_row(db_session):
                     await close_session.rollback()
         finally:
             await _cleanup(maker, ids, payment_ids, refund_ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_payment_service_binds_cash_refund_to_executing_shift_without_early_commit(
+    db_session, monkeypatch
+):
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+    maker = async_sessionmaker(db_session.bind, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    ids = await _make_shift_graph(maker, suffix)
+    payment_ids: list[int] = []
+    refund_ids: list[int] = []
+    try:
+        async with maker() as db:
+            payment = Payment(
+                payment_no=f"CRSVC-{suffix[:24]}",
+                order_id=ids["order_id"],
+                operator_id=ids["user_id"],
+                cashier_shift_id=ids["shift_id"],
+                provider="CASH",
+                channel="POS",
+                amount="20.00",
+                status="PAID",
+                paid_at=now_local(),
+            )
+            db.add(payment)
+            await db.flush()
+            payment_ids.append(payment.id)
+
+            async def fake_finalize(session, refund_row, new_status, **kwargs):
+                refund_row.status = new_status
+                refund_row.succeeded_at = now_local()
+                return refund_row
+
+            monkeypatch.setattr(
+                PaymentService, "_finalize_refund", AsyncMock(side_effect=fake_finalize)
+            )
+            monkeypatch.setattr(
+                "app.services.payment_service._order_table_parts",
+                AsyncMock(return_value=(None, None)),
+            )
+            monkeypatch.setattr(
+                "app.services.payment_service._order_store_no",
+                AsyncMock(return_value="TEST"),
+            )
+            refund = await PaymentService.refund(
+                db,
+                payment,
+                Decimal("5.00"),
+                "POS cash refund shift attribution",
+                operator_id=ids["user_id"],
+                idempotency_key=f"cash-refund-{suffix[:24]}",
+            )
+            refund_ids.append(refund.id)
+            assert refund.status == "SUCCESS"
+            assert refund.cashier_shift_id == ids["shift_id"]
+            # The CASH path must not commit before the caller commits the refund/audit unit.
+            assert db.in_transaction()
+            await db.commit()
+    finally:
+        await _cleanup(maker, ids, payment_ids, refund_ids)
