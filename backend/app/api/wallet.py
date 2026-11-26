@@ -588,7 +588,7 @@ async def create_recharge(
         # 幂等键绑定完整充值意图，不能用同一 key 静默复用另一档位/门店/金额。
         if (
             int(existed.customer_id) != int(customer.id)
-            or int(existed.package_id) != int(pkg.id)
+            or int(existed.package_id or 0) != int(pkg.id)
             or int(existed.store_id) != int(store_id)
             or money(existed.pay_amount) != money(pkg.pay_amount)
             or money(existed.credit_principal) != money(pkg.pay_amount)
@@ -661,9 +661,6 @@ async def create_recharge(
             if replay is not None:
                 return replay
 
-    provider_u = provider_u
-    if provider_u not in ("WECHAT", "ALIPAY"):
-        raise AppException(40041, "充值仅支持微信或支付宝")
 
     extra: dict | None = None
     channel_l = channel_type
@@ -684,7 +681,7 @@ async def create_recharge(
         db,
         recharge=ro,
         provider=provider_u,
-        channel_type=data.channel_type,
+        channel_type=channel_type,
         customer_id=customer.id,
         extra=extra,
     )
