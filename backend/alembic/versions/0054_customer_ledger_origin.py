@@ -15,6 +15,20 @@ branch_labels = None
 depends_on = None
 
 
+def _origin_column(table: str) -> sa.Column:
+    return sa.Column(
+        "origin_customer_id",
+        sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        sa.ForeignKey(
+            "customers.id",
+            name=f"fk_{table}_origin_customer",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        comment="Original customer account that generated the ledger snapshot",
+    )
+
+
 def _add_origin_column(table: str) -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
@@ -22,20 +36,15 @@ def _add_origin_column(table: str) -> None:
         return
     columns = {item["name"] for item in inspector.get_columns(table)}
     if "origin_customer_id" not in columns:
-        op.add_column(
-            table,
-            sa.Column(
-                "origin_customer_id",
-                sa.BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
-                sa.ForeignKey(
-                    "customers.id",
-                    name=f"fk_{table}_origin_customer",
-                    ondelete="SET NULL",
-                ),
-                nullable=True,
-                comment="Original customer account that generated the ledger snapshot",
-            ),
-        )
+        # SQLite cannot ALTER TABLE ADD COLUMN with a REFERENCES clause when
+        # foreign_keys are enabled. Batch mode rebuilds the table and keeps
+        # the new FK; MySQL uses the native ALTER path.
+        if conn.dialect.name == "sqlite":
+            with op.batch_alter_table(table, recreate="always") as batch:
+                batch.add_column(_origin_column(table))
+        else:
+            op.add_column(table, _origin_column(table))
+
     indexes = {item["name"] for item in sa.inspect(conn).get_indexes(table)}
     index_name = f"ix_{table}_origin_customer_id"
     if index_name not in indexes:
@@ -62,23 +71,27 @@ def downgrade() -> None:
         columns = {item["name"] for item in inspector.get_columns(table)}
         index_name = f"ix_{table}_origin_customer_id"
         indexes = {item["name"] for item in inspector.get_indexes(table)}
-        fk_name = f"fk_{table}_origin_customer"
-        foreign_keys = {item.get("name") for item in inspector.get_foreign_keys(table)}
-        # MySQL may use the FK-supporting index to enforce the reference. Drop
-        # the FK before the explicit index and column. SQLite needs batch mode
-        # to rebuild the table while dropping a foreign key.
+        # Do not rely solely on a generated constraint name: MySQL may report
+        # a dialect-normalized name. Identify the FK by its local column.
+        origin_fks = [
+            fk for fk in inspector.get_foreign_keys(table)
+            if "origin_customer_id" in (fk.get("constrained_columns") or [])
+        ]
         if conn.dialect.name == "sqlite":
-            if fk_name in foreign_keys or index_name in indexes or "origin_customer_id" in columns:
+            if origin_fks or index_name in indexes or "origin_customer_id" in columns:
                 with op.batch_alter_table(table, recreate="always") as batch:
-                    if fk_name in foreign_keys:
-                        batch.drop_constraint(fk_name, type_="foreignkey")
+                    for fk in origin_fks:
+                        if fk.get("name"):
+                            batch.drop_constraint(fk["name"], type_="foreignkey")
                     if index_name in indexes:
                         batch.drop_index(index_name)
                     if "origin_customer_id" in columns:
                         batch.drop_column("origin_customer_id")
         else:
-            if fk_name in foreign_keys:
-                op.drop_constraint(fk_name, table, type_="foreignkey")
+            # InnoDB requires the FK to be removed before its supporting index.
+            for fk in origin_fks:
+                if fk.get("name"):
+                    op.drop_constraint(fk["name"], table, type_="foreignkey")
             if index_name in indexes:
                 op.drop_index(index_name, table_name=table)
             if "origin_customer_id" in columns:
