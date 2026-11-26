@@ -677,59 +677,62 @@ class CustomerService:
 
         # Refunds may precede delayed EARN creation. Do not reserve refund_id
         # until the EARN ledger exists; award_points_for_paid_order will retry.
-        earned = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
+        # Use current/locking reads for every cumulative ledger input. A plain
+        # aggregate can reuse a REPEATABLE READ snapshot established before the
+        # customer-row lock wait, and therefore miss another refund worker's commit.
+        earned_rows = (
+            await db.execute(
+                select(PointLedger)
+                .where(
                     PointLedger.order_id == order.id,
                     PointLedger.entry_type == "EARN",
                 )
+                .with_for_update()
             )
-            or 0
-        )
+        ).scalars().all()
+        earned = sum(int(row.delta or 0) for row in earned_rows)
         if earned <= 0:
             return 0
 
         from app.models import PaymentRefund
 
-        refunded_total = money(
-            await db.scalar(
-                select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+        successful_refunds = (
+            await db.execute(
+                select(PaymentRefund)
+                .where(
                     PaymentRefund.order_id == int(order.id),
                     PaymentRefund.status == "SUCCESS",
                 )
+                .with_for_update()
             )
-            or 0
+        ).scalars().all()
+        refunded_total = money(
+            sum((money(row.amount) for row in successful_refunds), Decimal("0.00"))
         )
         # Defensive support for callers that invoke this method before the
         # current refund row becomes visible as SUCCESS in this transaction.
-        current_is_success = False
-        if refund_id is not None:
-            current_is_success = bool(
-                await db.scalar(
-                    select(PaymentRefund.id).where(
-                        PaymentRefund.id == int(refund_id),
-                        PaymentRefund.order_id == int(order.id),
-                        PaymentRefund.status == "SUCCESS",
-                    ).limit(1)
-                )
-            )
+        current_is_success = bool(
+            refund_id is not None
+            and any(int(row.id) == int(refund_id) for row in successful_refunds)
+        )
         if refund_id is None or not current_is_success:
             refunded_total += max(Decimal("0"), money(refund_amount or 0))
 
         target_total = CustomerService.points_for_cumulative_refunds(
             earned, refunded_total, order.total_amount
         )
-        already_deducted = max(
-            0,
-            -int(
-                await db.scalar(
-                    select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
-                        PointLedger.order_id == order.id,
-                        PointLedger.entry_type == "REFUND_DEDUCT",
-                    )
+        deducted_rows = (
+            await db.execute(
+                select(PointLedger)
+                .where(
+                    PointLedger.order_id == order.id,
+                    PointLedger.entry_type == "REFUND_DEDUCT",
                 )
-                or 0
-            ),
+                .with_for_update()
+            )
+        ).scalars().all()
+        already_deducted = max(
+            0, -sum(int(row.delta or 0) for row in deducted_rows)
         )
         # Assign the incremental clawback to whichever refund is processed now.
         # The cumulative target is monotonic, so callback order cannot over-deduct.
