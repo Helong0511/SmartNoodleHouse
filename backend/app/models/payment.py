@@ -31,6 +31,7 @@ class Payment(Base, TimestampMixin):
         Index("ix_payments_operator_paid_at", "operator_id", "paid_at"),
         Index("ix_payments_paid_at_status", "paid_at", "status"),
         Index("ix_payments_order_id_status", "order_id", "status"),
+        Index("ix_payments_cashier_shift_status", "cashier_shift_id", "status"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     payment_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)
@@ -40,6 +41,9 @@ class Payment(Base, TimestampMixin):
     )
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
     operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    cashier_shift_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("cashier_shifts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     provider: Mapped[str] = mapped_column(String(20))
     channel: Mapped[str] = mapped_column(String(30))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
