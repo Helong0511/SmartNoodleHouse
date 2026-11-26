@@ -10,9 +10,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.core.response import ensure_local_aware, now_local, serialize_dt
-from app.models import CashierShift, DiningTable, Order, Payment, RechargeOrder, User
+from app.models import CashierShift, DiningTable, Order, Payment, PaymentRefund, RechargeOrder, User
 
 _PAID = "PAID"
+
+
+async def _aggregate_cash_refunds(
+    db: AsyncSession, *, cashier_shift_id: int, lock: bool = False
+) -> Decimal:
+    query = (
+        select(PaymentRefund)
+        .join(Payment, Payment.id == PaymentRefund.payment_id)
+        .where(
+            PaymentRefund.cashier_shift_id == int(cashier_shift_id),
+            Payment.provider == "CASH",
+            PaymentRefund.status == "SUCCESS",
+        )
+    )
+    if lock:
+        query = query.with_for_update()
+    rows = (await db.execute(query)).scalars().all()
+    return _money(sum((money(row.amount) for row in rows), Decimal("0.00")))
 
 
 def _money(v: Decimal | None) -> Decimal:
@@ -230,6 +248,9 @@ class PosShiftService:
             store_id=int(shift.store_id),
             cashier_shift_id=int(shift.id),
         )
+        stats["total_cash_refunds"] = await _aggregate_cash_refunds(
+            db, cashier_shift_id=int(shift.id), lock=True
+        )
         shift.total_cash = stats["total_cash"]
         shift.total_wechat = stats["total_wechat"]
         shift.total_alipay = stats["total_alipay"]
@@ -255,6 +276,22 @@ class PosShiftService:
             raise AppException(40414, "班次不存在")
         if locked.status != "OPEN":
             raise AppException(40014, "班次已交班")
+        # 未完成现金退款与交班互斥；查询使用锁定读，避免 RR 快照漏掉已提交记录。
+        pending_cash_refunds = (
+            await db.execute(
+                select(PaymentRefund.id)
+                .join(Payment, Payment.id == PaymentRefund.payment_id)
+                .where(
+                    PaymentRefund.cashier_shift_id == int(locked.id),
+                    Payment.provider == "CASH",
+                    PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        if pending_cash_refunds:
+            raise AppException(40910, "仍有现金退款待确认，请完成处理后再交班", status_code=409)
+
         # 兼容迁移前尚未绑定班次的待支付单，避免升级窗口内迟到回调漏账。
         pending = (
             await db.execute(
@@ -287,7 +324,11 @@ class PosShiftService:
         locked.closed_by = closed_by
         if closing_cash is not None:
             locked.closing_cash = _money(closing_cash)
-            expected_cash = _money(locked.opening_float) + stats["total_cash"]
+            expected_cash = (
+                _money(locked.opening_float)
+                + stats["total_cash"]
+                - stats["total_cash_refunds"]
+            )
             locked.cash_difference = _money(closing_cash) - expected_cash
         await db.flush()
         return locked
@@ -299,10 +340,15 @@ class PosShiftService:
         else:
             stats = {
                 "total_cash": _money(shift.total_cash),
+                "total_cash_refunds": Decimal("0.00"),
                 "total_wechat": _money(shift.total_wechat),
                 "total_alipay": _money(shift.total_alipay),
                 "total_amount": _money(shift.total_amount),
             }
+        if "total_cash_refunds" not in stats:
+            stats["total_cash_refunds"] = await _aggregate_cash_refunds(
+                db, cashier_shift_id=int(shift.id), lock=False
+            )
         op = await db.get(User, shift.operator_id)
         return {
             "id": shift.id,
@@ -314,6 +360,10 @@ class PosShiftService:
             "opened_at": serialize_dt(shift.opened_at) if shift.opened_at else None,
             "closed_at": serialize_dt(shift.closed_at) if shift.closed_at else None,
             "total_cash": str(stats["total_cash"]),
+            "total_cash_refunds": str(stats["total_cash_refunds"]),
+            "expected_cash": str(
+                _money(shift.opening_float) + stats["total_cash"] - stats["total_cash_refunds"]
+            ),
             "total_wechat": str(stats["total_wechat"]),
             "total_alipay": str(stats["total_alipay"]),
             "total_amount": str(stats["total_amount"]),
