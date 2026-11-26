@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import BalanceLedger, Customer, Order, Store
+from app.models import BalanceLedger, Customer, Order, Payment, PaymentRefund, Store
 from app.services.balance_service import BalanceService
 
 
@@ -50,6 +50,32 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
         )
         setup.add(order)
         await setup.flush()
+        payment = Payment(
+            payment_no=f"WPAY-{suffix[:30]}",
+            order_id=order.id,
+            customer_id=customer.id,
+            provider="MOCK",
+            channel="MOCK",
+            amount=Decimal("10.00"),
+            currency="CNY",
+            status="PAID",
+        )
+        setup.add(payment)
+        await setup.flush()
+        refund_rows = [
+            PaymentRefund(
+                refund_no=f"WREF-{suffix[:25]}-{index}",
+                payment_id=payment.id,
+                order_id=order.id,
+                amount=Decimal("3.33"),
+                status="SUCCESS",
+            )
+            for index in (1, 2)
+        ]
+        setup.add_all(refund_rows)
+        await setup.flush()
+        refund_ids = [row.id for row in refund_rows]
+        payment_id = payment.id
         store_id, customer_id, order_id = store.id, customer.id, order.id
         setup.add(
             BalanceLedger(
@@ -99,7 +125,7 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
                     second,
                     customer_id=customer_id,
                     order_id=order_id,
-                    refund_id=900002,
+                    refund_id=refund_ids[1],
                     amount=Decimal("3.33"),
                     store_id=store_id,
                 )
@@ -111,7 +137,7 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
                 first,
                 customer_id=customer_id,
                 order_id=order_id,
-                refund_id=900001,
+                refund_id=refund_ids[0],
                 amount=Decimal("3.33"),
                 store_id=store_id,
             )
@@ -151,6 +177,8 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
         await verify.execute(
             delete(BalanceLedger).where(BalanceLedger.customer_id == customer_id)
         )
+        await verify.execute(delete(PaymentRefund).where(PaymentRefund.id.in_(refund_ids)))
+        await verify.execute(delete(Payment).where(Payment.id == payment_id))
         await verify.execute(delete(Order).where(Order.id == order_id))
         await verify.execute(delete(Customer).where(Customer.id == customer_id))
         await verify.execute(delete(Store).where(Store.id == store_id))
