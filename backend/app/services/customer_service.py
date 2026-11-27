@@ -517,10 +517,7 @@ class CustomerService:
             return 0
         # 与顾客合并统一锁序：先无锁读取归属，再锁 Customer，最后锁 Order。
         order_id = int(order.id)
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == order_id)
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        owner_id = getattr(order, "customer_id", None)
         if owner_id is None:
             return 0
         customer = (
@@ -653,10 +650,7 @@ class CustomerService:
             return 0
         # Outbox 可能携带旧 ORM 快照；必须按当前订单归属先锁顾客，再锁订单。
         order_id = int(order.id)
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == order_id)
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        owner_id = getattr(order, "customer_id", None)
         if owner_id is None:
             return 0
         customer = (
