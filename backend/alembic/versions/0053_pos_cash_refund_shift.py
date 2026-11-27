@@ -18,6 +18,33 @@ depends_on = None
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
+
+    # RECONCILIATION_REQUIRED is longer than the historical VARCHAR(20).
+    # Widen the request status before the service starts persisting that state.
+    if inspector.has_table("pos_refund_requests"):
+        request_columns = {
+            item["name"]: item for item in inspector.get_columns("pos_refund_requests")
+        }
+        status_column = request_columns.get("status")
+        status_length = getattr(status_column.get("type"), "length", None) if status_column else None
+        if status_column is not None and status_length is not None and status_length < 32:
+            if conn.dialect.name == "sqlite":
+                with op.batch_alter_table("pos_refund_requests") as batch:
+                    batch.alter_column(
+                        "status",
+                        existing_type=sa.String(length=status_length),
+                        type_=sa.String(length=32),
+                        existing_nullable=status_column.get("nullable", False),
+                    )
+            else:
+                op.alter_column(
+                    "pos_refund_requests",
+                    "status",
+                    existing_type=sa.String(length=status_length),
+                    type_=sa.String(length=32),
+                    existing_nullable=status_column.get("nullable", False),
+                )
+
     if not inspector.has_table("payment_refunds"):
         return
 
