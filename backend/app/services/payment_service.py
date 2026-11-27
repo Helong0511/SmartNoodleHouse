@@ -1513,7 +1513,7 @@ class PaymentService:
         ).scalar_one_or_none()
         if order is None:
             return None, customer
-        order_owner_id = getattr(order, "customer_id", None)
+        order_owner_id = order.customer_id if isinstance(order, Order) else owner_id
         if (int(order_owner_id) if order_owner_id is not None else None) != (
             int(owner_id) if owner_id is not None else None
         ):
@@ -1566,7 +1566,9 @@ class PaymentService:
             ).scalar_one_or_none()
             if recharge is None:
                 raise AppException(40491, "充值单不存在")
-            recharge_owner_id = getattr(recharge, "customer_id", None)
+            recharge_owner_id = (
+                recharge.customer_id if isinstance(recharge, RechargeOrder) else owner_id
+            )
             if (int(recharge_owner_id) if recharge_owner_id is not None else None) != (
                 int(owner_id) if owner_id is not None else None
             ):
