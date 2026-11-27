@@ -169,9 +169,9 @@ async def _handle_milestone_coupon(db: AsyncSession, row) -> None:
     from app.models import Order
     from app.services.coupon_service import CouponService
 
-    order = (
-        await db.execute(select(Order).where(Order.id == int(row.aggregate_id)).with_for_update())
-    ).scalar_one_or_none()
+    # milestone service performs the shared Customer → Order locking protocol.
+    # Do not pre-lock Order here, or merge's Customer → Order order would deadlock.
+    order = await db.get(Order, int(row.aggregate_id))
     if not order or not order.customer_id:
         return
     st = (order.status or "").upper()
@@ -250,25 +250,17 @@ async def _handle_milestone_reclaim(db: AsyncSession, row) -> None:
     if order_id <= 0:
         raise ValueError("milestone_reclaim payload missing order_id")
 
-    # 先锁订单，保持与支付/退款状态机一致的 Order-first 锁顺序。
-    order = (
-        await db.execute(
-            select(Order).where(Order.id == order_id).with_for_update()
-        )
-    ).scalar_one_or_none()
+    # SUCCESS 是退款终态；先无锁校验事件关联，再由 milestone service 按
+    # Customer → Order 加锁。不能在此预先锁 Order，否则与顾客合并反序。
+    order = await db.get(Order, order_id)
     if not order or not order.customer_id:
         return
-    refund = (
-        await db.execute(
-            select(PaymentRefund)
-            .where(
-                PaymentRefund.id == int(row.aggregate_id),
-                PaymentRefund.order_id == order_id,
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if not refund or str(refund.status or "").upper() != "SUCCESS":
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if (
+        not refund
+        or int(refund.order_id) != order_id
+        or str(refund.status or "").upper() != "SUCCESS"
+    ):
         return
     await CouponService.reclaim_milestones_after_full_refund(
         db, order, refund_id=int(refund.id)
