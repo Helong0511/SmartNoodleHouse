@@ -1523,6 +1523,61 @@ class PaymentService:
         return order, customer
 
     @classmethod
+    async def _lock_customer_then_recharge_order(
+        cls,
+        db: AsyncSession,
+        recharge_id: int,
+        *,
+        owner_customer_id_hint: int | None = None,
+        owner_hint_supplied: bool = False,
+    ) -> tuple[RechargeOrder | None, Customer | None]:
+        """充值单资产写入统一按 Customer → RechargeOrder 加锁。"""
+        recharge_id = int(recharge_id)
+        if owner_hint_supplied:
+            owner_id = owner_customer_id_hint
+        else:
+            owner_result = await db.execute(
+                select(RechargeOrder.customer_id).where(RechargeOrder.id == recharge_id)
+            )
+            owner_id = owner_result.scalar_one_or_none()
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
+
+        customer = None
+        if owner_id is not None:
+            customer = (
+                await db.execute(
+                    select(Customer)
+                    .where(Customer.id == int(owner_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if customer is None:
+                raise AppException(40962, "充值顾客不存在，已暂停创建支付，请重新核对")
+            if getattr(customer, "status", None) in (0, 1) and customer.status != 1:
+                raise AppException(40962, "充值顾客正在合并或已停用，请重新读取后重试")
+
+        recharge = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == recharge_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if recharge is None:
+            return None, customer
+        current_owner_id = (
+            recharge.customer_id if isinstance(recharge, RechargeOrder) else owner_id
+        )
+        if (int(current_owner_id) if current_owner_id is not None else None) != (
+            int(owner_id) if owner_id is not None else None
+        ):
+            raise AppException(40963, "充值顾客归属已变化，请回滚并重试充值支付")
+        return recharge, customer
+
+    @classmethod
     async def _lock_order_then_payment(
         cls, db: AsyncSession, payment_id: int
     ) -> Payment | None:
