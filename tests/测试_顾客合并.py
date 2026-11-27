@@ -12,7 +12,9 @@ from app.models import (
     CouponTemplate,
     Customer,
     CustomerAlipayAccount,
+    CustomerBehaviorEvent,
     CustomerCoupon,
+    CustomerTasteProfile,
     CustomerWechatAccount,
     MemberLevel,
     PointLedger,
@@ -102,7 +104,39 @@ async def test_merge_moves_accounts_and_points(db_session):
         biz_no="MG-ORIGIN-WALLET-1",
         remark="源账户历史充值",
     )
-    db_session.add_all([original_points, original_wallet])
+    profile_at = datetime(2026, 11, 27, 10, 0, tzinfo=_TZ)
+    target_taste = CustomerTasteProfile(
+        customer_id=target.id,
+        dim_type="PRODUCT",
+        target_key="101",
+        target_name="牛肉面",
+        score=Decimal("0.6000"),
+        raw_weight=Decimal("3.0000"),
+        event_count=3,
+        last_event_at=profile_at,
+        last_computed_at=profile_at,
+    )
+    source_taste = CustomerTasteProfile(
+        customer_id=source.id,
+        dim_type="PRODUCT",
+        target_key="101",
+        target_name="牛肉面",
+        score=Decimal("0.5500"),
+        raw_weight=Decimal("2.0000"),
+        event_count=2,
+        last_event_at=profile_at,
+        last_computed_at=profile_at,
+    )
+    source_event = CustomerBehaviorEvent(
+        event_id="merge-source-event-1",
+        customer_id=source.id,
+        event_type="CLICK",
+        product_id=101,
+        payload={"scene": "menu"},
+    )
+    db_session.add_all([
+        original_points, original_wallet, target_taste, source_taste, source_event
+    ])
     await db_session.flush()
 
     with patch(
@@ -157,6 +191,28 @@ async def test_merge_moves_accounts_and_points(db_session):
     assert Decimal(str(target.balance_principal)) == Decimal("10.00")
     assert Decimal(str(target.balance_gift)) == Decimal("5.00")
     assert source.phone is None
+
+    merged_taste = (
+        await db_session.execute(
+            select(CustomerTasteProfile).where(
+                CustomerTasteProfile.customer_id == target.id,
+                CustomerTasteProfile.dim_type == "PRODUCT",
+                CustomerTasteProfile.target_key == "101",
+            )
+        )
+    ).scalar_one()
+    assert merged_taste.event_count == 5
+    assert merged_taste.raw_weight == Decimal("5.0000")
+    assert merged_taste.last_event_at == profile_at
+    assert (
+        await db_session.execute(
+            select(CustomerTasteProfile.id).where(
+                CustomerTasteProfile.customer_id == source.id
+            )
+        )
+    ).scalar_one_or_none() is None
+    await db_session.refresh(source_event)
+    assert source_event.customer_id == target.id
 
     wx = (
         await db_session.execute(
