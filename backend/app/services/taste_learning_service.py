@@ -190,11 +190,55 @@ class TasteLearningService:
     # ---------- 主入口 ----------
 
     @staticmethod
-    async def learn_from_events(db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT) -> int:
-        """仅对明确同意个性化推荐的顾客增量 fold 行为事件。"""
+    async def _lock_customer_for_order(db, order_id: int):
+        """行为画像订单写入按 Customer → Order 加锁，与顾客合并保持同序。"""
+        from app.core.exceptions import AppException
         from app.models import Customer
-        customer = await db.get(Customer, customer_id)
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+
+        owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == int(order_id))
+        )
+        if owner_id is None:
+            return None, None
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(owner_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if customer is None or int(customer.status or 0) != 1:
+            raise AppException(40962, "订单顾客正在合并或已停用，行为画像更新将重试")
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None or int(order.customer_id or 0) != int(owner_id):
+            raise AppException(40963, "订单顾客归属已变化，行为画像事务必须回滚重试")
+        return order, customer
+
+    @staticmethod
+    async def learn_from_events(db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT) -> int:
+        """仅对明确同意个性化推荐的顾客增量 fold 行为事件；先锁顾客防止合并竞态。"""
+        from app.models import Customer
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            not customer
+            or int(customer.status or 0) != 1
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return 0
         rows = await TasteLearningService._load_rows(db, customer_id)
         watermark = max((r.last_event_at for r in rows.values() if r.last_event_at), default=None)
@@ -236,8 +280,19 @@ class TasteLearningService:
         from datetime import timezone
 
         from app.models import Customer
-        customer = await db.get(Customer, int(feedback.customer_id))
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(feedback.customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            not customer
+            or int(customer.status or 0) != 1
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return
         sentiment = (feedback.sentiment or "NEUTRAL").upper()
         w = FEEDBACK_WEIGHTS.get(sentiment, 0.0)
@@ -274,12 +329,15 @@ class TasteLearningService:
         以事件表 event_id 幂等 + 水位增量 fold，outbox 重试安全；部分退款不在此处理
         （既有 PreferenceService.PARTIAL_REFUND_WEIGHT 已覆盖规格偏好降权）。
         """
-        order = await db.get(Order, order_id)
-        if not order or not order.customer_id or (order.payment_status or "") != "REFUNDED":
-            return 0
-        from app.models import Customer
-        customer = await db.get(Customer, int(order.customer_id))
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        order, customer = await TasteLearningService._lock_customer_for_order(
+            db, int(order_id)
+        )
+        if (
+            not order
+            or not customer
+            or (order.payment_status or "") != "REFUNDED"
+            or not int(getattr(customer, "recommend_opt_in", 0) or 0)
+        ):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
@@ -327,13 +385,12 @@ class TasteLearningService:
         由 paid_side_effects 的 taste_learning handler 调用；outbox 重试安全：
         重复事件被唯一约束去重，学习以水位增量 fold。
         """
-        from app.models import Customer
-
-        order = await db.get(Order, order_id)
-        if not order or not order.customer_id:
+        order, customer = await TasteLearningService._lock_customer_for_order(
+            db, int(order_id)
+        )
+        if not order or not customer:
             return 0
-        customer = await db.get(Customer, int(order.customer_id))
-        if customer and not int(getattr(customer, "recommend_opt_in", 1) or 0):
+        if not int(getattr(customer, "recommend_opt_in", 1) or 0):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
