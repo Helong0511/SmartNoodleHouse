@@ -195,10 +195,8 @@ class TasteLearningService:
         from app.core.exceptions import AppException
         from app.models import Customer
 
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == int(order_id))
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        order_hint = await db.get(Order, int(order_id))
+        owner_id = getattr(order_hint, "customer_id", None) if order_hint else None
         if owner_id is None:
             return None, None
         customer = (
