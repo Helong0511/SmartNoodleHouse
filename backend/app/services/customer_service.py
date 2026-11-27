@@ -530,7 +530,7 @@ class CustomerService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if customer is None or (isinstance(customer, Customer) and int(customer.status or 0) != 1):
+        if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
             raise AppException(40962, "订单顾客正在合并或已停用，积分发放将由任务重试")
         locked_order = (
             await db.execute(
@@ -665,7 +665,7 @@ class CustomerService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if customer is None or (isinstance(customer, Customer) and int(customer.status or 0) != 1):
+        if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
             raise AppException(40962, "退款订单顾客正在合并或已停用，积分补扣将由任务重试")
         locked_order = (
             await db.execute(
