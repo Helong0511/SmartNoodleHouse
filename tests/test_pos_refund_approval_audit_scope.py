@@ -62,7 +62,7 @@ async def test_refund_requester_cannot_approve_own_request(monkeypatch):
         status="PENDING",
         refund_id=None,
     )
-    monkeypatch.setattr(PosRefundService, "_can_approve", AsyncMock(return_value=True))
+    monkeypatch.setattr(pos_refund_service, "_can_approve", AsyncMock(return_value=True))
     monkeypatch.setattr(PosRefundService, "_lock_request", AsyncMock(return_value=row))
     monkeypatch.setattr(pos_refund_service, "assert_store_access", lambda *_args: None)
 
