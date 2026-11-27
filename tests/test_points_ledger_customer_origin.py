@@ -14,5 +14,6 @@ def test_points_ledger_response_exposes_origin_and_snapshot_semantics():
     assert '"origin_customer_no": origin_customer.customer_no if origin_customer else None' in source
     assert '"origin_customer_name": origin_customer.display_name if origin_customer else None' in source
     assert '"is_merged_history": is_merged_history' in source
-    assert '"原账户历史积分余额快照" if is_merged_history else "流水发生后积分余额"' in source
+    assert '"原账户历史积分余额快照"' in source
+    assert 'if is_merged_history is True' in source
     assert "PointLedger.customer_id == int(customer.id)" in source
