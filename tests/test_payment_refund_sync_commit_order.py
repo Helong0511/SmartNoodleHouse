@@ -71,3 +71,24 @@ async def test_sync_refund_websocket_failure_does_not_fail_committed_sync(monkey
     response = await payment_api.sync_refund("RF-8", request=MagicMock(), db=db, user=SimpleNamespace(id=1))
     assert response["status"] == "SUCCESS"
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_refund_rejects_missing_order_before_provider_query(monkeypatch):
+    row = SimpleNamespace(id=9, refund_no="RF-9", order_id=99, payment_id=13, amount="8.00", status="UNKNOWN")
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = row
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.get = AsyncMock(return_value=None)
+    sync = AsyncMock()
+    audit = AsyncMock()
+    monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", sync)
+    monkeypatch.setattr(payment_api.AuditService, "log_staff", audit)
+
+    with pytest.raises(payment_api.AppException) as exc:
+        await payment_api.sync_refund("RF-9", request=MagicMock(), db=db, user=SimpleNamespace(id=1))
+    assert exc.value.status_code == 404
+    sync.assert_not_awaited()
+    audit.assert_not_awaited()
+    db.commit.assert_not_awaited()
