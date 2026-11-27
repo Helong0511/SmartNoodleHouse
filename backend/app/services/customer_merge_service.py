@@ -495,11 +495,10 @@ class CustomerMergeService:
         # 推荐隐私同意不随账号合并自动继承：仅双方均明确 opt-in 时合并事件/画像。
         # 先在顾客协调锁内 fold 两侧待处理事件，避免源事件早于目标画像水位而被漏学。
         profile_customer_ids = (
-            [int(source_id), int(target_id)]
-            if source_opt_in and target_opt_in
-            else ([int(target_id)] if target_opt_in else [])
+            ([int(source_id)] if source_opt_in else [])
+            + ([int(target_id)] if target_opt_in else [])
         )
-        if source_opt_in and target_opt_in:
+        if profile_customer_ids:
             from app.services.taste_learning_service import TasteLearningService
 
             for customer_id in profile_customer_ids:
@@ -513,27 +512,27 @@ class CustomerMergeService:
                         "顾客推荐行为事件积压过多，请稍后重试合并，避免丢失推荐画像",
                     )
 
+        if source_opt_in and target_opt_in:
             await cls._reassign_simple(
                 db, CustomerBehaviorEvent, source_id, target_id, "taste_events_moved", stats
             )
         else:
-            # 源账户未同意时，不把其行为导入目标；目标也未同意时双方画像/事件均不保留。
+            # 源账户未同意时，不把其行为导入目标；目标未同意时双方画像/事件均清除。
             delete_customer_ids = (
                 [int(source_id), int(target_id)] if not target_opt_in else [int(source_id)]
             )
-            if delete_customer_ids:
-                event_result = await db.execute(
-                    delete(CustomerBehaviorEvent).where(
-                        CustomerBehaviorEvent.customer_id.in_(delete_customer_ids)
-                    )
+            event_result = await db.execute(
+                delete(CustomerBehaviorEvent).where(
+                    CustomerBehaviorEvent.customer_id.in_(delete_customer_ids)
                 )
-                profile_result = await db.execute(
-                    delete(CustomerTasteProfile).where(
-                        CustomerTasteProfile.customer_id.in_(delete_customer_ids)
-                    )
+            )
+            profile_result = await db.execute(
+                delete(CustomerTasteProfile).where(
+                    CustomerTasteProfile.customer_id.in_(delete_customer_ids)
                 )
-                stats["taste_events_deleted"] += int(event_result.rowcount or 0)
-                stats["taste_profiles_deleted"] += int(profile_result.rowcount or 0)
+            )
+            stats["taste_events_deleted"] += int(event_result.rowcount or 0)
+            stats["taste_profiles_deleted"] += int(profile_result.rowcount or 0)
 
         # CustomerTasteProfile 是增量画像，不能只改 customer_id 后覆盖目标。
         # 两侧 raw_weight 按时间衰减到较新的事件时间，再合并事件数与分数。
