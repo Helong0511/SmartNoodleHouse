@@ -34,23 +34,22 @@ def _schema(conn) -> None:
     conn.exec_driver_sql("CREATE TABLE balance_ledger (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), delta_principal NUMERIC NOT NULL)")
 
 
-def test_upgrade_backfills_original_customer_and_is_idempotent():
+def test_upgrade_leaves_legacy_origin_unknown_and_is_idempotent():
     engine = sa.create_engine("sqlite:///:memory:")
     try:
         with engine.begin() as conn:
             _schema(conn)
             conn.exec_driver_sql("INSERT INTO customers(id) VALUES (1), (2)")
-            conn.exec_driver_sql("INSERT INTO point_ledger(id, customer_id, delta) VALUES (11, 1, 80)")
+            # Simulate an old merge: source account 1's ledger was reassigned
+            # to target account 2 before origin_customer_id existed.
+            conn.exec_driver_sql("INSERT INTO point_ledger(id, customer_id, delta) VALUES (11, 2, 80)")
             conn.exec_driver_sql("INSERT INTO balance_ledger(id, customer_id, delta_principal) VALUES (21, 2, 10)")
             _run(conn, "upgrade")
             _run(conn, "upgrade")
-            assert conn.exec_driver_sql(
-                "SELECT origin_customer_id FROM point_ledger WHERE id=11"
-            ).scalar_one() == 1
-            assert conn.exec_driver_sql(
-                "SELECT origin_customer_id FROM balance_ledger WHERE id=21"
-            ).scalar_one() == 2
-            for table in ("point_ledger", "balance_ledger"):
+            for table, row_id in (("point_ledger", 11), ("balance_ledger", 21)):
+                assert conn.exec_driver_sql(
+                    f"SELECT origin_customer_id FROM {table} WHERE id={row_id}"
+                ).scalar_one() is None
                 assert "origin_customer_id" in {
                     col["name"] for col in sa.inspect(conn).get_columns(table)
                 }
