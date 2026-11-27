@@ -105,3 +105,26 @@ def test_upgrade_is_safe_when_refund_table_is_absent():
             assert not sa.inspect(conn).has_table("payment_refunds")
     finally:
         engine.dispose()
+
+
+def test_upgrade_widens_pos_refund_request_status_for_reconciliation():
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            _create_schema(conn)
+            conn.exec_driver_sql(
+                "CREATE TABLE pos_refund_requests (id INTEGER PRIMARY KEY, status VARCHAR(20) NOT NULL DEFAULT 'PENDING')"
+            )
+            _run(conn, "upgrade")
+            status = {
+                item["name"]: item for item in sa.inspect(conn).get_columns("pos_refund_requests")
+            }["status"]
+            assert status["type"].length == 32
+            # A second upgrade must remain idempotent.
+            _run(conn, "upgrade")
+            status = {
+                item["name"]: item for item in sa.inspect(conn).get_columns("pos_refund_requests")
+            }["status"]
+            assert status["type"].length == 32
+    finally:
+        engine.dispose()
