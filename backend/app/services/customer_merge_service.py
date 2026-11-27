@@ -511,6 +511,7 @@ class CustomerMergeService:
                 if value is not None
             ]
             latest_at = max(timestamps) if timestamps else None
+            previous_target_event_at = target_row.last_event_at
             source_weight = float(source_row.raw_weight or 0)
             target_weight = float(target_row.raw_weight or 0)
             source_weight *= TasteLearningService._decay_factor(
@@ -538,7 +539,8 @@ class CustomerMergeService:
             target_row.last_computed_at = max(computed_at) if computed_at else latest_at
             if source_row.last_event_at and (
                 target_row.target_name is None
-                or source_row.last_event_at >= (target_profiles[0].last_event_at if target_profiles else source_row.last_event_at)
+                or previous_target_event_at is None
+                or source_row.last_event_at >= previous_target_event_at
             ):
                 target_row.target_name = source_row.target_name or target_row.target_name
             await db.delete(source_row)
@@ -556,7 +558,7 @@ class CustomerMergeService:
                 )
             ).scalars().all()
         )
-        favorite_keys = {(int(row.product_id), int(row.store_id)) for row in target_favorites}
+        favorite_keys = {int(row.product_id) for row in target_favorites}
         source_favorites = list(
             (
                 await db.execute(
@@ -568,7 +570,7 @@ class CustomerMergeService:
             ).scalars().all()
         )
         for row in source_favorites:
-            key = (int(row.product_id), int(row.store_id))
+            key = int(row.product_id)
             if key in favorite_keys:
                 await db.delete(row)
                 stats["favorites_deduplicated"] += 1
