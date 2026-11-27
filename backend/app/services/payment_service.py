@@ -1556,7 +1556,7 @@ class PaymentService:
                         .execution_options(populate_existing=True)
                     )
                 ).scalar_one_or_none()
-                if customer is None or int(customer.status or 0) != 1:
+                if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
                     raise AppException(40962, "充值顾客正在合并或已停用，请重新查单重试")
             recharge = (
                 await db.execute(
