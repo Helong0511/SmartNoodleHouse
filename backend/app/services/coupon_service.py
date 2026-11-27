@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.orm_safe import orm_attr_loaded
 from app.core.response import ensure_local_aware, money, now_local, naive_local_now, serialize_dt
-from app.models import CouponTemplate, CustomerCoupon, Order
+from app.models import CouponTemplate, Customer, CustomerCoupon, Order
 from app.services.customer_service import CustomerService
 
 logger = logging.getLogger(__name__)
