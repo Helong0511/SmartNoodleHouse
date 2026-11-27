@@ -97,6 +97,7 @@ class PreferenceService:
             from app.core.exceptions import AppException
 
             raise AppException(40963, "订单顾客归属已变化，画像更新事务必须回滚重试")
+        order = order if hasattr(order, "customer_id") else order_hint
         return order, customer
 
     @staticmethod
