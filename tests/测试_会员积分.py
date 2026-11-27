@@ -172,7 +172,7 @@ async def test_refund_with_zero_available_points_still_persists_idempotency_mark
     existing_marker.scalar_one_or_none.return_value = 777
 
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[customer_lock, no_marker])
+    db.execute = AsyncMock(side_effect=[customer_lock, MagicMock(), no_marker])
     db.scalar = AsyncMock(side_effect=[100, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
