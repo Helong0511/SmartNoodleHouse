@@ -204,6 +204,11 @@ async def test_concurrent_first_reconcile_batch_avoids_innodb_gap_lock_deadlock(
                 )
             )
             await asyncio.wait_for(insert_seen.wait(), timeout=10)
+            # The listener runs immediately before cursor execution. Give the
+            # driver time to reach InnoDB and assert the competing INSERT is
+            # still blocked while the winning transaction remains uncommitted.
+            await asyncio.sleep(0.2)
+            assert not task.done(), "competing INSERT completed before the unique-key winner committed"
             await winner.commit()
             second = await asyncio.wait_for(task, timeout=15)
             assert second.id == first.id
