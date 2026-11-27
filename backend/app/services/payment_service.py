@@ -1587,10 +1587,11 @@ class PaymentService:
     async def _lock_order_then_payment_for_refund(
         cls, db: AsyncSession, refund: PaymentRefund
     ) -> tuple[Payment, Order]:
-        """退款成功入账统一按 Order → Payment 加锁，与支付回调/订单状态机保持同序。
+        """在外层已持有 Customer 协调锁的前提下，按 Order → Payment 加锁。
 
-        退款行可能已由回调/补偿任务先锁定；但不得先锁 Payment 再锁 Order，
-        否则会与 _lock_order_then_payment() 形成 Order↔Payment 死锁环。
+        所有调用方必须先经 _lock_order_then_payment() 取得 Customer 锁；
+        此处只负责父订单与支付行顺序，不能独立作为顾客资产写入入口。
+        退款行可能已由回调/补偿任务先锁定，但不得先锁 Payment 再锁 Order。
         """
         order_id = int(refund.order_id) if refund.order_id is not None else 0
         if order_id <= 0:
@@ -2886,7 +2887,7 @@ class PaymentService:
                     # 全额退：始终交由提交后的 Outbox worker 回收里程碑券。
                     # 不能在当前退款事务内同步计算：order_net_collected 已可能建立
                     # REPEATABLE READ 快照；另一个订单的支付/退款副作用也可能并发。
-                    # Outbox handler 会按 Order -> Customer 锁序串行发券/回收，并在锁后计数。
+                    # Outbox handler 先锁 Customer，再锁 Order/权益行，并在锁后计数。
                     if order.customer_id:
                         from app.services.outbox_worker import enqueue_outbox
 
