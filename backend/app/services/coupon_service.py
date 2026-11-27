@@ -1393,7 +1393,7 @@ class CouponService:
         # 顾客合并、支付发券、退款回收统一 Customer → Order 锁序。
         # 锁顾客后再当前读订单，确保归属没有在预读后发生变化。
         customer = await CouponService._lock_customer_for_milestone(db, int(owner_id))
-        if not customer or int(getattr(customer, "status", 1) or 0) != 1:
+        if customer is None or (isinstance(customer, Customer) and int(customer.status or 0) != 1):
             raise AppException(40962, "订单顾客正在合并或已停用，里程碑发券将重试")
         locked_order = (
             await db.execute(
