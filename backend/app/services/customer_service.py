@@ -540,7 +540,7 @@ class CustomerService:
         ).scalar_one_or_none()
         if not locked_order or int(getattr(locked_order, "customer_id", owner_id) or 0) != int(owner_id):
             raise AppException(40963, "订单顾客归属已变化，积分发放事务必须回滚重试")
-        order = locked_order if hasattr(locked_order, "customer_id") else order
+        order = locked_order if isinstance(locked_order, Order) else order
         st = (order.status or "").upper()
         pay = (order.payment_status or "").upper()
         if st in ("CANCELLED", "REFUNDED") or pay in ("REFUNDED", "CANCELLED", "UNPAID"):
@@ -673,7 +673,7 @@ class CustomerService:
         ).scalar_one_or_none()
         if not locked_order or int(getattr(locked_order, "customer_id", owner_id) or 0) != int(owner_id):
             raise AppException(40963, "退款订单顾客归属已变化，积分补扣事务必须回滚重试")
-        order = locked_order if hasattr(locked_order, "customer_id") else order
+        order = locked_order if isinstance(locked_order, Order) else order
         if refund_id is not None:
             existed = (
                 await db.execute(
