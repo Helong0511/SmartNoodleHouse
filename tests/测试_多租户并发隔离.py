@@ -168,3 +168,113 @@ async def test_store_staff_merge_blocks_unknown_store_scope_history(blocked_tabl
     assert ei.value.code == 40301
     guarded = next(sql for sql in statements if f"from {blocked_table}" in sql)
     assert "is null" in guarded
+
+
+@pytest.mark.asyncio
+async def test_payment_parent_lock_acquires_customer_before_order_and_payment():
+    """支付结算必须先锁顾客协调行，避免与 Customer→Order 合并反序。"""
+    from app.services.payment_service import PaymentService
+
+    customer = SimpleNamespace(id=42, status=1)
+    order = SimpleNamespace(id=12, customer_id=42)
+    payment = SimpleNamespace(id=99, order_id=12, recharge_order_id=None)
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from payments" in sql:
+            result.first.return_value = (12, None)
+            result.scalar_one_or_none.return_value = payment
+        elif "from customers" in sql:
+            result.scalar_one_or_none.return_value = customer
+        elif "from orders" in sql:
+            result.scalar_one_or_none.return_value = order
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+    db.scalar = AsyncMock(return_value=42)
+
+    locked = await PaymentService._lock_order_then_payment(db, 99)
+
+    assert locked is payment
+    assert len(statements) == 4
+    assert "from payments" in statements[0]  # relation preflight, no row lock
+    assert "from customers" in statements[1] and "for update" in statements[1]
+    assert "from orders" in statements[2] and "for update" in statements[2]
+    assert "from payments" in statements[3] and "for update" in statements[3]
+
+
+@pytest.mark.asyncio
+async def test_payment_parent_lock_rejects_merged_customer_before_order_lock():
+    """若预读后顾客已合并，必须回滚重试，不能继续锁旧订单结算。"""
+    from app.services.payment_service import PaymentService
+
+    inactive_customer = SimpleNamespace(id=42, status=0)
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from payments" in sql:
+            result.first.return_value = (12, None)
+        elif "from customers" in sql:
+            result.scalar_one_or_none.return_value = inactive_customer
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+    db.scalar = AsyncMock(return_value=42)
+
+    with pytest.raises(AppException) as ei:
+        await PaymentService._lock_order_then_payment(db, 99)
+
+    assert ei.value.code == 40962
+    assert len(statements) == 2
+    assert "from orders" not in " ".join(statements)
+
+
+@pytest.mark.asyncio
+async def test_recharge_payment_parent_lock_acquires_customer_before_recharge_and_payment():
+    """充值结算的资产锁序必须是 Customer→RechargeOrder→Payment。"""
+    from app.services.payment_service import PaymentService
+
+    customer = SimpleNamespace(id=52, status=1)
+    recharge = SimpleNamespace(id=22, customer_id=52)
+    payment = SimpleNamespace(id=199, order_id=None, recharge_order_id=22)
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from payments" in sql:
+            result.first.return_value = (None, 22)
+            result.scalar_one_or_none.return_value = payment
+        elif "from customers" in sql:
+            result.scalar_one_or_none.return_value = customer
+        elif "from recharge_orders" in sql:
+            result.scalar_one_or_none.return_value = recharge
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+    db.scalar = AsyncMock(return_value=52)
+
+    locked = await PaymentService._lock_order_then_payment(db, 199)
+
+    assert locked is payment
+    assert len(statements) == 4
+    assert "from payments" in statements[0]
+    assert "from customers" in statements[1] and "for update" in statements[1]
+    assert "from recharge_orders" in statements[2] and "for update" in statements[2]
+    assert "from payments" in statements[3] and "for update" in statements[3]
