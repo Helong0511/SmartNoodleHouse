@@ -110,3 +110,44 @@ async def test_missing_linked_refund_requires_reconciliation(monkeypatch):
     assert "关联退款单不存在" in result.fail_reason
     db.flush.assert_awaited_once()
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recovery_missing_linked_refund_requires_reconciliation(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.pos_refund_service import PosRefundService
+
+    row = SimpleNamespace(
+        id=34,
+        status="PROCESSING",
+        refund_id=10001,
+        execution_token="claim-token",
+        execution_epoch=3,
+        execution_lease_until=None,
+        executed_amount="0.00",
+        fail_reason=None,
+    )
+    db = MagicMock()
+    db.rollback = AsyncMock()
+    db.get = AsyncMock(return_value=None)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    monkeypatch.setattr(
+        PosRefundService, "_lock_request", AsyncMock(return_value=row)
+    )
+
+    result = await PosRefundService._recover_execution_error(
+        db,
+        request_id=row.id,
+        claim_token="claim-token",
+        claim_epoch=3,
+        amount_total=Decimal("18.00"),
+        error=RuntimeError("channel response lost"),
+    )
+
+    assert result.status == "RECONCILIATION_REQUIRED"
+    assert "禁止重试" in result.fail_reason
+    db.rollback.assert_awaited_once()
+    db.flush.assert_awaited_once()
+    db.commit.assert_awaited_once()
