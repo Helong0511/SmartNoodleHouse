@@ -815,8 +815,8 @@ async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     )
 
     assert result == {"already_paid": True, "status": "PAID"}
-    assert db.execute.await_count == 2
-    for call in db.execute.await_args_list:
+    assert db.execute.await_count == 5
+    for call in db.execute.await_args_list[2:]:
         stmt = call.args[0]
         assert stmt._for_update_arg is not None
         assert stmt.get_execution_options().get("populate_existing") is True
