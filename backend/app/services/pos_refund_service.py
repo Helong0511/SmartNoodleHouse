@@ -452,7 +452,15 @@ class PosRefundService:
                     .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
-            if linked_refund and linked_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
+            if linked_refund is None:
+                # A persisted link with no corresponding refund row is an integrity
+                # anomaly. Never treat it as permission to issue another channel refund.
+                row.status = "RECONCILIATION_REQUIRED"
+                row.fail_reason = "关联退款单不存在，禁止重复发起退款，需核对支付渠道及账务记录"
+                await db.flush()
+                await db.commit()
+                return row
+            if linked_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
                 await db.refresh(row)
                 return row
         # PROCESSING：仅在上一笔已明确结束后，才允许继续处理剩余金额。
