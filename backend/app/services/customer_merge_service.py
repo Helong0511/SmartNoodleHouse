@@ -225,6 +225,7 @@ class CustomerMergeService:
             "stats": stats,
             "target": after["target"],
             "source_store_ids": source_store_ids,
+            "unknown_store_scope": unknown_store_scope,
             "cross_store": len(source_store_ids) > 1,
         }
 
