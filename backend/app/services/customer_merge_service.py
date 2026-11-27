@@ -120,8 +120,19 @@ class CustomerMergeService:
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if foreign_order or foreign_recharge:
-                raise AppException(40301, "源顾客在其他门店有订单或充值，请由总部账号合并")
+            foreign_wallet_ledger = (
+                await db.execute(
+                    select(BalanceLedger.id)
+                    .where(
+                        BalanceLedger.customer_id == source.id,
+                        BalanceLedger.store_id.is_not(None),
+                        BalanceLedger.store_id != sid,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if foreign_order or foreign_recharge or foreign_wallet_ledger:
+                raise AppException(40301, "源顾客在其他门店有订单或充值/储值流水，请由总部账号合并")
 
         before = {
             "target": _customer_snapshot(target),
@@ -129,13 +140,8 @@ class CustomerMergeService:
             "reason": (reason or "").strip() or None,
         }
 
-        # P1-3 收集源顾客涉及的门店列表，写入审计日志，便于追溯跨门店数据合并
-        source_store_ids = (
-            await db.execute(
-                select(Order.store_id).where(Order.customer_id == source.id).distinct()
-            )
-        ).scalars().all()
-        source_store_ids = sorted({int(s) for s in source_store_ids if s is not None})
+        # P1-3 汇总订单、充值、储值流水及顾客档案中的门店归属，避免审计漏报跨店数据。
+        source_store_ids = await cls._collect_source_store_ids(db, source)
 
         stats: dict[str, Any] = {
             "wechat_moved": 0,
@@ -213,6 +219,28 @@ class CustomerMergeService:
             "source_store_ids": source_store_ids,
             "cross_store": len(source_store_ids) > 1,
         }
+
+
+    @classmethod
+    async def _collect_source_store_ids(cls, db: AsyncSession, source: Customer) -> list[int]:
+        store_ids = {
+            int(value)
+            for value in (
+                getattr(source, "registered_store_id", None),
+                getattr(source, "first_seen_store_id", None),
+            )
+            if value is not None
+        }
+        for model in (Order, RechargeOrder, BalanceLedger):
+            values = (
+                await db.execute(
+                    select(model.store_id)
+                    .where(model.customer_id == int(source.id), model.store_id.is_not(None))
+                    .distinct()
+                )
+            ).scalars().all()
+            store_ids.update(int(value) for value in values if value is not None)
+        return sorted(store_ids)
 
     @classmethod
     async def _merge_platform_accounts(
