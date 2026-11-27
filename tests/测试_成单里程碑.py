@@ -227,7 +227,7 @@ async def test_reclaim_milestones_revokes_available_above_count():
 
 
 @pytest.mark.asyncio
-async def test_reclaim_milestones_noop_when_not_refunded():
+async def test_reclaim_milestones_noop_when_not_refunded(monkeypatch):
     order = SimpleNamespace(
         id=100,
         customer_id=9,
@@ -235,7 +235,15 @@ async def test_reclaim_milestones_noop_when_not_refunded():
         payment_status="PAID",
         status="PAID",
     )
+    monkeypatch.setattr(
+        CouponService,
+        "_lock_customer_for_milestone",
+        AsyncMock(return_value=SimpleNamespace(id=9, status=1)),
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = order
     db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
     out = await CouponService.reclaim_milestones_after_full_refund(db, order, refund_id=1)
     assert out == []
 
