@@ -134,7 +134,7 @@ async def test_zero_point_refund_marker_depends_on_original_order_earn(
     no_marker = MagicMock()
     no_marker.scalar_one_or_none.return_value = None
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[customer_lock, no_marker])
+    db.execute = AsyncMock(side_effect=[customer_lock, MagicMock(), no_marker])
     db.scalar = AsyncMock(return_value=earned_points)
     db.add = MagicMock()
     db.flush = AsyncMock()
@@ -193,7 +193,7 @@ async def test_refund_with_zero_available_points_still_persists_idempotency_mark
 
     # 模拟后续已获得新积分；重复处理同一 refund_id 必须直接命中标记并 no-op。
     customer.points = 250
-    db.execute = AsyncMock(side_effect=[customer_lock, existing_marker])
+    db.execute = AsyncMock(side_effect=[customer_lock, MagicMock(), existing_marker])
     db.scalar.reset_mock()
     db.add.reset_mock()
     retried = await CustomerService.deduct_points_for_refund(
