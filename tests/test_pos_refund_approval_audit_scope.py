@@ -44,3 +44,31 @@ async def test_processing_refund_approval_audit_keeps_request_store_scope(monkey
     assert kwargs["store_id"] == 7
     assert kwargs["detail"]["store_id"] == 7
     assert kwargs["target_id"] == 31
+
+
+@pytest.mark.asyncio
+async def test_refund_requester_cannot_approve_own_request(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.core.exceptions import AppException
+    from app.services import pos_refund_service
+    from app.services.pos_refund_service import PosRefundService
+
+    user = SimpleNamespace(id=5)
+    row = SimpleNamespace(
+        id=32,
+        store_id=7,
+        requested_by=5,
+        status="PENDING",
+        refund_id=None,
+    )
+    monkeypatch.setattr(PosRefundService, "_can_approve", AsyncMock(return_value=True))
+    monkeypatch.setattr(PosRefundService, "_lock_request", AsyncMock(return_value=row))
+    monkeypatch.setattr(pos_refund_service, "assert_store_access", lambda *_args: None)
+
+    with pytest.raises(AppException) as exc:
+        await PosRefundService.approve_and_execute(
+            MagicMock(), user=user, request_id=row.id, remark="self approval attempt"
+        )
+    assert exc.value.code == 40301
+    assert "不能审批自己的" in exc.value.message
