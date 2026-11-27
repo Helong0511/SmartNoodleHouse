@@ -71,6 +71,8 @@ class PreferenceService:
         if order_hint is None:
             order_hint = await db.get(Order, int(order_id))
         owner_id = getattr(order_hint, "customer_id", None) if order_hint else None
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
         if owner_id is None:
             return None, None
         customer = (
