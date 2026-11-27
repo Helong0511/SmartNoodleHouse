@@ -323,7 +323,7 @@ async def test_milestone_reclaim_locks_customer_before_count(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_milestone_reclaim_handler_locks_order_before_refund(monkeypatch):
+async def test_milestone_reclaim_handler_does_not_prelock_order(monkeypatch):
     from app.services.paid_side_effects import _handle_milestone_reclaim
     from app.models import Order, PaymentRefund
 
