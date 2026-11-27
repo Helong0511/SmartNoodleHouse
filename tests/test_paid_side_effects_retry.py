@@ -87,7 +87,7 @@ async def test_refund_preference_handler_does_not_swallow_recommendation_learnin
 
     with (
         patch(
-            "app.services.paid_side_effects.PreferenceService.recompute_for_order",
+            "app.services.customer_service.PreferenceService.recompute_for_order",
             new_callable=AsyncMock,
         ) as recompute,
         patch(
