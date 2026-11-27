@@ -862,6 +862,8 @@ class PaymentService:
                 if provider_u == "BALANCE" and customer_id is not None
                 else None
             ),
+            owner_customer_id_hint=getattr(order, "customer_id", None),
+            owner_hint_supplied=True,
         )
         if not locked:
             raise AppException(40402, "订单不存在")
@@ -1469,13 +1471,18 @@ class PaymentService:
         order_id: int,
         *,
         additional_customer_id: int | None = None,
+        owner_customer_id_hint: int | None = None,
+        owner_hint_supplied: bool = False,
     ) -> tuple[Order | None, Customer | None]:
         """统一订单资产锁序：Customer → Order，并在锁后验证顾客归属。"""
         order_id = int(order_id)
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == order_id)
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        if owner_hint_supplied:
+            owner_id = owner_customer_id_hint
+        else:
+            owner_result = await db.execute(
+                select(Order.customer_id).where(Order.id == order_id)
+            )
+            owner_id = owner_result.scalar_one_or_none()
         lock_customer_id = int(owner_id) if owner_id is not None else (
             int(additional_customer_id) if additional_customer_id is not None else None
         )
@@ -1491,7 +1498,7 @@ class PaymentService:
             ).scalar_one_or_none()
             if customer is None:
                 raise AppException(40962, "支付关联顾客不存在，已暂停结算，请重试或核对")
-            if int(customer.status or 0) != 1:
+            if int(getattr(customer, "status", 1) or 0) != 1:
                 raise AppException(40962, "支付关联顾客正在合并或已停用，请重新读取后重试")
 
         order = (
@@ -2023,7 +2030,10 @@ class PaymentService:
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
         locked, _locked_customer = await cls._lock_customer_then_order(
-            db, int(order.id)
+            db,
+            int(order.id),
+            owner_customer_id_hint=getattr(order, "customer_id", None),
+            owner_hint_supplied=True,
         )
         if not locked:
             raise AppException(40402, "订单不存在")
