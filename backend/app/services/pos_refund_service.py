@@ -420,6 +420,11 @@ class PosRefundService:
         if not row:
             raise AppException(40404, "退款申请不存在")
         assert_store_access(user, row.store_id)
+        # Segregation of duties: the staff member who requested a POS refund
+        # must not approve/execute that same request, even if they are a manager.
+        # Customer self-service requests have requested_by=None and remain approvable.
+        if row.requested_by is not None and int(row.requested_by) == int(user.id):
+            raise AppException(40301, "退款申请人不能审批自己的退款申请")
         # PROCESSING 但尚未绑定 refund_id，表示首个审批请求已提交认领事务、
         # 正在创建第一笔渠道退款单。另一个审批请求即使在锁等待后读到该状态，
         # 也必须直接返回；不能因 refund_id 暂为空而再次分配并发起退款。
