@@ -188,12 +188,7 @@ async def test_issue_integrity_error_refunds_quota():
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
     db.get = AsyncMock(return_value=_mock_tmml(remaining=5, total_quota=10))
-    # SELECT existing → 空
-    scalars_empty = MagicMock()
-    scalars_empty.all = MagicMock(return_value=[])
-    exec_result = MagicMock()
-    exec_result.scalars = MagicMock(return_value=scalars_empty)
-    # UPDATE 库存成功
+    # 无 client_request_id：直接原子扣减库存
     upd_result = MagicMock()
     upd_result.rowcount = 1
     # rollback 后回补 UPDATE
