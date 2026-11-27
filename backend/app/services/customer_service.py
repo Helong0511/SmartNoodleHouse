@@ -518,6 +518,8 @@ class CustomerService:
         # 与顾客合并统一锁序：先无锁读取归属，再锁 Customer，最后锁 Order。
         order_id = int(order.id)
         owner_id = getattr(order, "customer_id", None)
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
         if owner_id is None:
             return 0
         customer = (
@@ -651,6 +653,8 @@ class CustomerService:
         # Outbox 可能携带旧 ORM 快照；必须按当前订单归属先锁顾客，再锁订单。
         order_id = int(order.id)
         owner_id = getattr(order, "customer_id", None)
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
         if owner_id is None:
             return 0
         customer = (
