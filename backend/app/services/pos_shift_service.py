@@ -289,8 +289,13 @@ class PosShiftService:
                             PaymentRefund.cashier_shift_id.is_(None),
                             Payment.provider == "CASH",
                             Payment.channel == "POS",
-                            Payment.operator_id == int(locked.operator_id),
-                            Payment.created_at >= ensure_local_aware(locked.opened_at),
+                            # Legacy refunds have no shift link. Attribute them to the
+                            # executing cashier (refund.operator_id), while retaining the
+                            # original payment cashier as a conservative fallback.
+                            or_(
+                                PaymentRefund.operator_id == int(locked.operator_id),
+                                Payment.operator_id == int(locked.operator_id),
+                            ),
                             PaymentRefund.created_at >= ensure_local_aware(locked.opened_at),
                             Order.store_id == int(locked.store_id),
                         ),
