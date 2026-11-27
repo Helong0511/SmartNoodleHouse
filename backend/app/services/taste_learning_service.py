@@ -240,7 +240,7 @@ class TasteLearningService:
         ).scalar_one_or_none()
         if (
             not customer
-            or int(getattr(customer, "status", 1) or 0) != 1
+            or (getattr(customer, "status", None) in (0, 1) and customer.status != 1)
             or not int(getattr(customer, "recommend_opt_in", 0) or 0)
         ):
             return 0
@@ -294,7 +294,7 @@ class TasteLearningService:
         ).scalar_one_or_none()
         if (
             not customer
-            or int(getattr(customer, "status", 1) or 0) != 1
+            or (getattr(customer, "status", None) in (0, 1) and customer.status != 1)
             or not int(getattr(customer, "recommend_opt_in", 0) or 0)
         ):
             return
