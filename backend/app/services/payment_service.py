@@ -1299,24 +1299,22 @@ class PaymentService:
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
 
-        # 统一充值单锁序：RechargeOrder → Payment，与 _lock_order_then_payment 一致。
-        # 回调入口可能已持有充值单锁；反向先锁 Payment 会与并发结算形成死锁环。
+        # 统一资产锁序：Customer → RechargeOrder → Payment。
+        # create-recharge 即时结果与异步回调均通过同一入口取得顾客协调锁，
+        # 防止合并先迁移充值单后，旧充值回调仍向源顾客储值。
+        locked_p = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_p is None or int(locked_p.recharge_order_id or 0) != int(recharge.id):
+            raise AppException(40963, "充值支付关联已变化，请回滚并重新查单")
         locked_r = (
             await db.execute(
                 select(RechargeOrder)
-                .where(RechargeOrder.id == recharge.id)
+                .where(RechargeOrder.id == int(recharge.id))
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-        ).scalar_one()
-        locked_p = (
-            await db.execute(
-                select(Payment)
-                .where(Payment.id == payment.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if locked_r is None:
+            raise AppException(40491, "充值单不存在")
         recharge, payment = locked_r, locked_p
         if (
             recharge.status == "PAID"
