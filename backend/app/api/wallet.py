@@ -591,6 +591,18 @@ async def create_recharge(
     """顾客选档充值并拉起微信/支付宝支付。"""
     from app.services.payment_service import PaymentService
 
+    # RechargeOrder 创建与顾客合并共用 Customer → RechargeOrder 锁序。
+    # 不能只依赖 CurrentCustomer 的请求快照，否则合并完成后迟到请求仍可能给源账户建充值单。
+    customer = (
+        await db.execute(
+            select(Customer)
+            .where(Customer.id == int(customer.id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if customer is None or int(customer.status or 0) != 1:
+        raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
     if not CustomerService.is_member(customer):
         raise AppException(40320, "请先开通会员后再充值", status_code=403)
 
