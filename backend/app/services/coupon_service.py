@@ -1388,7 +1388,7 @@ class CouponService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if not locked_order or int(getattr(locked_order, "customer_id", owner_id) or 0) != int(owner_id):
+        if not locked_order or int(locked_order.customer_id if isinstance(locked_order, Order) else owner_id) != int(owner_id):
             raise AppException(40963, "订单顾客归属已变化，里程碑发券事务必须回滚重试")
         order = locked_order if isinstance(locked_order, Order) else order
         cid = int(order.customer_id)
@@ -1492,7 +1492,7 @@ class CouponService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if not locked_order or int(getattr(locked_order, "customer_id", owner_id) or 0) != int(owner_id):
+        if not locked_order or int(locked_order.customer_id if isinstance(locked_order, Order) else owner_id) != int(owner_id):
             raise AppException(40963, "退款订单顾客归属已变化，里程碑回收事务必须回滚重试")
         order = locked_order if isinstance(locked_order, Order) else order
         cid = int(order.customer_id)
