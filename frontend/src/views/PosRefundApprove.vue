@@ -6,6 +6,7 @@
         <el-option label="已退款" value="SUCCESS" />
         <el-option label="已拒绝" value="REJECTED" />
         <el-option label="失败" value="FAILED" />
+        <el-option label="待人工核对" value="RECONCILIATION_REQUIRED" />
         <el-option label="已撤销" value="CANCELLED" />
       </el-select>
       <el-input
@@ -137,6 +138,7 @@ function statusLabel(s: string) {
     SUCCESS: '已退款',
     REJECTED: '已拒绝',
     FAILED: '失败',
+    RECONCILIATION_REQUIRED: '待人工核对',
     CANCELLED: '已撤销',
   }
   return map[s] || s
@@ -145,7 +147,7 @@ function statusLabel(s: string) {
 function tagType(s: string) {
   if (s === 'PENDING') return 'warning'
   if (s === 'SUCCESS') return 'success'
-  if (s === 'FAILED' || s === 'REJECTED') return 'danger'
+  if (s === 'FAILED' || s === 'REJECTED' || s === 'RECONCILIATION_REQUIRED') return 'danger'
   return 'info'
 }
 
@@ -216,8 +218,19 @@ async function approve(row: any) {
   }
   actingId.value = row.id
   try {
-    await api.post(`/pos/refund-requests/${row.id}/approve`)
-    ElMessage.success('已退款')
+    const res = await api.post(`/pos/refund-requests/${row.id}/approve`)
+    const resultStatus = res.data?.status
+    if (resultStatus === 'SUCCESS') {
+      ElMessage.success('退款已确认成功')
+    } else if (resultStatus === 'RECONCILIATION_REQUIRED') {
+      ElMessage.warning('退款结果待人工核对，系统已禁止自动重试')
+    } else if (resultStatus === 'PROCESSING') {
+      ElMessage.info('退款处理中，渠道确认后将自动更新状态')
+    } else if (resultStatus === 'FAILED') {
+      ElMessage.warning('退款未成功；请核实失败原因后再决定是否重试')
+    } else {
+      ElMessage.info('退款申请状态已更新')
+    }
     await load()
   } catch (e: any) {
     ElMessage.error(e.message || '退款失败')
