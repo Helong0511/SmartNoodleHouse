@@ -203,7 +203,8 @@ async def test_merge_moves_accounts_and_points(db_session):
     ).scalar_one()
     assert merged_taste.event_count == 5
     assert merged_taste.raw_weight == Decimal("5.0000")
-    assert merged_taste.last_event_at == profile_at
+    assert merged_taste.last_event_at is not None
+    assert merged_taste.last_event_at.replace(tzinfo=_TZ) == profile_at
     assert (
         await db_session.execute(
             select(CustomerTasteProfile.id).where(
