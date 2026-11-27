@@ -1,5 +1,6 @@
 """POS refund approval audit records retain their store scope while pending."""
 from types import SimpleNamespace
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
