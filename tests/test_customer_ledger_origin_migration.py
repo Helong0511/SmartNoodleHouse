@@ -53,7 +53,15 @@ def test_upgrade_leaves_legacy_origin_unknown_and_is_idempotent():
                 assert "origin_customer_id" in {
                     col["name"] for col in sa.inspect(conn).get_columns(table)
                 }
-                assert sa.inspect(conn).get_foreign_keys(table)
+                foreign_keys = sa.inspect(conn).get_foreign_keys(table)
+                assert any(
+                    fk.get("constrained_columns") == ["origin_customer_id"]
+                    and fk.get("referred_table") == "customers"
+                    for fk in foreign_keys
+                )
+                assert f"ix_{table}_origin_customer_id" in {
+                    index["name"] for index in sa.inspect(conn).get_indexes(table)
+                }
     finally:
         engine.dispose()
 
@@ -69,6 +77,9 @@ def test_downgrade_removes_origin_columns_and_indexes():
             for table in ("point_ledger", "balance_ledger"):
                 assert "origin_customer_id" not in {
                     col["name"] for col in sa.inspect(conn).get_columns(table)
+                }
+                assert f"ix_{table}_origin_customer_id" not in {
+                    index["name"] for index in sa.inspect(conn).get_indexes(table)
                 }
     finally:
         engine.dispose()
