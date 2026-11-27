@@ -217,7 +217,9 @@ class TasteLearningService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if order is None or int(order.customer_id or 0) != int(owner_id):
+        if order is None or (
+            isinstance(order, Order) and int(order.customer_id or 0) != int(owner_id)
+        ):
             raise AppException(40963, "订单顾客归属已变化，行为画像事务必须回滚重试")
         order = order if isinstance(order, Order) else order_hint
         return order, customer
