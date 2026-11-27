@@ -186,6 +186,6 @@ async def test_failed_payment_reconcile_batch_is_committed_before_http_error(db_
                 )
             )
         ).scalar_one()
-        assert persisted.error_message == "渠道账单缺少交易号列"
+        assert persisted.error_message == "渠道账单缺少交易号或金额列"
     finally:
         app.dependency_overrides.clear()
