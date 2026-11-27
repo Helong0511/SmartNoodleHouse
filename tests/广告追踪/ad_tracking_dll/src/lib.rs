@@ -920,7 +920,10 @@ mod tests {
 
     #[test]
     fn strict_schema_rejects_unknown_fields() {
+        let now = now_unix().unwrap();
         let payload = serde_json::json!({
+            "v": 1, "kid": 1, "iat": now, "exp": now + 3600,
+            "click_id": "strict-schema-test-click-id",
             "offer_id": 10001, "campaign_id": 20001, "publisher_id": 30001, "advertiser_id": 40001,
             "unknown_field": "x"
         });
