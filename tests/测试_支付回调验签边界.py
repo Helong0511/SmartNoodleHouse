@@ -761,7 +761,24 @@ class _SyncRefundDB:
         return self.payment
 
     async def execute(self, statement):
+        sql = str(statement).lower()
         result = MagicMock()
+        if "payments.order_id" in sql and "for update" not in sql:
+            result.first.return_value = (
+                self.payment.order_id, getattr(self.payment, "recharge_order_id", None)
+            )
+            return result
+        if "from orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = None
+            return result
+        if "from orders" in sql:
+            result.scalar_one_or_none.return_value = SimpleNamespace(
+                id=self.payment.order_id
+            )
+            return result
+        if "from payments" in sql and "for update" in sql:
+            result.scalar_one_or_none.return_value = self.payment
+            return result
         result.scalar_one_or_none.return_value = self.refund
         return result
 
