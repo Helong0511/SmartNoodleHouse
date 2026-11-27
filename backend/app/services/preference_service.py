@@ -64,12 +64,13 @@ class PreferenceService:
         return weight
 
     @staticmethod
-    async def _lock_customer_for_order(db: AsyncSession, order_id: int):
+    async def _lock_customer_for_order(
+        db: AsyncSession, order_id: int, *, order_hint: Order | None = None
+    ):
         """订单画像写入统一 Customer → Order 锁序，并验证合并期间的归属变化。"""
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == int(order_id))
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        if order_hint is None:
+            order_hint = await db.get(Order, int(order_id))
+        owner_id = getattr(order_hint, "customer_id", None) if order_hint else None
         if owner_id is None:
             return None, None
         customer = (
@@ -119,9 +120,13 @@ class PreferenceService:
             )
 
     @staticmethod
-    async def recompute_for_order(db: AsyncSession, order_id: int) -> None:
+    async def recompute_for_order(
+        db: AsyncSession, order_id: int, *, order_hint: Order | None = None
+    ) -> None:
         """退款补偿按订单当前归属锁顾客后重算，避免使用合并前的 customer_id。"""
-        order, customer = await PreferenceService._lock_customer_for_order(db, int(order_id))
+        order, customer = await PreferenceService._lock_customer_for_order(
+            db, int(order_id), order_hint=order_hint
+        )
         if order and customer:
             await PreferenceService.recompute_for_customer(db, int(customer.id))
 
