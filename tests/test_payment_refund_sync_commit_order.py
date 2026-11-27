@@ -10,7 +10,7 @@ from app.api import payments as payment_api
 @pytest.mark.asyncio
 async def test_sync_refund_commits_before_websocket_notification(monkeypatch):
     events = []
-    row = SimpleNamespace(id=7, refund_no="RF-7", order_id=9, amount="12.00", status="PROCESSING")
+    row = SimpleNamespace(id=7, refund_no="RF-7", order_id=9, payment_id=11, amount="12.00", status="PROCESSING")
     order = SimpleNamespace(id=9, order_no="OD-9", store_id=3)
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
@@ -46,7 +46,7 @@ async def test_sync_refund_commits_before_websocket_notification(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_refund_websocket_failure_does_not_fail_committed_sync(monkeypatch):
-    row = SimpleNamespace(id=8, refund_no="RF-8", order_id=10, amount="5.00", status="PROCESSING")
+    row = SimpleNamespace(id=8, refund_no="RF-8", order_id=10, payment_id=12, amount="5.00", status="PROCESSING")
     order = SimpleNamespace(id=10, order_no="OD-10", store_id=4)
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
