@@ -560,8 +560,28 @@ async def sync_refund(refund_no: str, request: Request, db: DbSession, user: Cur
         assert_order_store_access(user, order)
     before_status = row.status
     row = await PaymentService.sync_refund_status(db, row)
-    # Persist the authoritative refund state before publishing the real-time event.
-    # DbSession commits at dependency teardown, after this endpoint returns.
+    # Manual provider reconciliation changes financial state; persist an attributable
+    # audit record in the same transaction as the authoritative refund result.
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="payment.refund.sync",
+        module="payment",
+        target_type="payment_refund",
+        target_id=int(row.id),
+        detail={
+            "refund_no": row.refund_no,
+            "order_id": int(row.order_id),
+            "payment_id": int(row.payment_id),
+            "amount": str(row.amount),
+            "before_status": before_status,
+            "after_status": row.status,
+        },
+        request=request,
+        store_id=int(order.store_id) if order and order.store_id is not None else None,
+    )
+    # Persist the authoritative refund state and its audit record before publishing
+    # the real-time event.
     await db.commit()
     if before_status != "SUCCESS" and row.status == "SUCCESS" and order:
         try:
