@@ -423,7 +423,8 @@ class PosRefundService:
         # Segregation of duties: the staff member who requested a POS refund
         # must not approve/execute that same request, even if they are a manager.
         # Customer self-service requests have requested_by=None and remain approvable.
-        if row.requested_by is not None and int(row.requested_by) == int(user.id):
+        requested_by = getattr(row, "requested_by", None)
+        if requested_by is not None and int(requested_by) == int(user.id):
             raise AppException(40301, "退款申请人不能审批自己的退款申请")
         # PROCESSING 但尚未绑定 refund_id，表示首个审批请求已提交认领事务、
         # 正在创建第一笔渠道退款单。另一个审批请求即使在锁等待后读到该状态，
