@@ -341,3 +341,88 @@ async def test_source_store_audit_includes_orders_recharges_wallet_and_profile()
 
     assert store_ids == [4, 5, 6, 7, 8]
     assert db.execute.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_merge_does_not_import_recommendation_data_from_opted_out_source(db_session):
+    await _seed_levels(db_session)
+    target = Customer(
+        id=903,
+        customer_no="CU_MG_OPT_T",
+        status=1,
+        recommend_opt_in=1,
+        points=0,
+        member_level_id=1,
+    )
+    source = Customer(
+        id=904,
+        customer_no="CU_MG_OPT_S",
+        status=1,
+        recommend_opt_in=0,
+        points=0,
+        member_level_id=1,
+    )
+    at = datetime(2026, 11, 27, 9, 0, tzinfo=_TZ)
+    target_profile = CustomerTasteProfile(
+        customer_id=target.id,
+        dim_type="PRODUCT",
+        target_key="201",
+        target_name="清汤面",
+        score=Decimal("0.6000"),
+        raw_weight=Decimal("3.0000"),
+        event_count=3,
+        last_event_at=at,
+        last_computed_at=at,
+    )
+    source_profile = CustomerTasteProfile(
+        customer_id=source.id,
+        dim_type="PRODUCT",
+        target_key="202",
+        target_name="麻辣面",
+        score=Decimal("0.7000"),
+        raw_weight=Decimal("4.0000"),
+        event_count=4,
+        last_event_at=at,
+        last_computed_at=at,
+    )
+    source_event = CustomerBehaviorEvent(
+        event_id="merge-optout-event-1",
+        customer_id=source.id,
+        event_type="CLICK",
+        product_id=202,
+        payload={"scene": "menu"},
+    )
+    db_session.add_all([target, source, target_profile, source_profile, source_event])
+    await db_session.flush()
+
+    with patch(
+        "app.services.customer_merge_service.AuditService.log",
+        new_callable=AsyncMock,
+    ):
+        await CustomerMergeService.merge(
+            db_session,
+            target_customer_id=target.id,
+            source_customer_id=source.id,
+            reason="opt-out merge",
+            operator_id=1,
+        )
+        await db_session.flush()
+
+    remaining_profiles = (
+        await db_session.execute(
+            select(CustomerTasteProfile).where(
+                CustomerTasteProfile.customer_id.in_((target.id, source.id))
+            )
+        )
+    ).scalars().all()
+    assert len(remaining_profiles) == 1
+    assert remaining_profiles[0].customer_id == target.id
+    assert remaining_profiles[0].target_key == "201"
+    remaining_events = (
+        await db_session.execute(
+            select(CustomerBehaviorEvent).where(
+                CustomerBehaviorEvent.customer_id == source.id
+            )
+        )
+    ).scalars().all()
+    assert remaining_events == []
