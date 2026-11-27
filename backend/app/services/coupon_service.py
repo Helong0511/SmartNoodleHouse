@@ -1368,14 +1368,33 @@ class CouponService:
         """
         from app.models import OrderMilestoneReward
 
-        cid = getattr(order, "customer_id", None)
-        sid = getattr(order, "store_id", None)
-        if not cid or not sid:
+        order_id = int(getattr(order, "id", 0) or 0)
+        if order_id <= 0:
             return []
-        # 同一顾客的支付发券与退款回收必须串行；两条主路径均先锁订单、再锁顾客。
-        # 该锁必须在累计订单数快照建立前取得，避免 REPEATABLE READ 读取等待前的旧快照。
-        customer = await CouponService._lock_customer_for_milestone(db, int(cid))
-        if not customer:
+        owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == order_id)
+        )
+        if owner_id is None:
+            return []
+        # 顾客合并、支付发券、退款回收统一 Customer → Order 锁序。
+        # 锁顾客后再当前读订单，确保归属没有在预读后发生变化。
+        customer = await CouponService._lock_customer_for_milestone(db, int(owner_id))
+        if not customer or int(customer.status or 0) != 1:
+            raise AppException(40962, "订单顾客正在合并或已停用，里程碑发券将重试")
+        locked_order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not locked_order or int(locked_order.customer_id or 0) != int(owner_id):
+            raise AppException(40963, "订单顾客归属已变化，里程碑发券事务必须回滚重试")
+        order = locked_order
+        cid = int(order.customer_id)
+        sid = getattr(order, "store_id", None)
+        if not sid:
             return []
         count = await CouponService.count_paid_orders_at_store(db, int(cid), int(sid))
         rules = list(
@@ -1456,19 +1475,36 @@ class CouponService:
         - 仅处理 AVAILABLE 券；RESERVED/USED 已占用权益，不作废（记日志）
         - 幂等：已是 EXPIRED + status_reason=milestone_reclaim 则跳过
         """
-        cid = getattr(order, "customer_id", None)
+        order_id = int(getattr(order, "id", 0) or 0)
+        if order_id <= 0:
+            return []
+        owner_id = await db.scalar(
+            select(Order.customer_id).where(Order.id == order_id)
+        )
+        if owner_id is None:
+            return []
+        # 与支付发券相同：先锁顾客，再锁订单，防止与顾客合并形成反向锁环。
+        customer = await CouponService._lock_customer_for_milestone(db, int(owner_id))
+        if not customer or int(customer.status or 0) != 1:
+            raise AppException(40962, "退款订单顾客正在合并或已停用，里程碑回收将重试")
+        locked_order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not locked_order or int(locked_order.customer_id or 0) != int(owner_id):
+            raise AppException(40963, "退款订单顾客归属已变化，里程碑回收事务必须回滚重试")
+        order = locked_order
+        cid = int(order.customer_id)
         sid = getattr(order, "store_id", None)
-        if not cid or not sid:
+        if not sid:
             return []
         ps = (getattr(order, "payment_status", None) or "").strip().upper()
         st = (getattr(order, "status", None) or "").strip().upper()
         if ps != "REFUNDED" and st != "REFUNDED":
-            return []
-
-        # 与支付发券共用顾客行锁。此方法由退款 Outbox 在退款事务提交后调用，
-        # 且 Outbox handler 会先锁订单；因此锁序固定为 Order -> Customer。
-        customer = await CouponService._lock_customer_for_milestone(db, int(cid))
-        if not customer:
             return []
         count = await CouponService.count_paid_orders_at_store(db, int(cid), int(sid))
         prefix = f"MILESTONE:{int(cid)}:{int(sid)}:"
