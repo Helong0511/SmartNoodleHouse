@@ -853,17 +853,26 @@ class PaymentService:
         amount: Decimal | None = None,
         cashier_shift_id: int | None = None,
     ) -> tuple[Payment, dict]:
-        locked = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == order.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
+        provider_u = provider.upper()
+        locked, locked_customer = await cls._lock_customer_then_order(
+            db,
+            int(order.id),
+            additional_customer_id=(
+                int(customer_id)
+                if provider_u == "BALANCE" and customer_id is not None
+                else None
+            ),
+        )
         if not locked:
             raise AppException(40402, "订单不存在")
         order = locked
+        if (
+            provider_u == "BALANCE"
+            and customer_id is not None
+            and order.customer_id is not None
+            and int(customer_id) != int(order.customer_id)
+        ):
+            raise AppException(40301, "余额付款顾客与订单顾客不一致")
 
         if order.payment_status == "PAID":
             raise AppException(40010, "订单已支付")
@@ -893,7 +902,6 @@ class PaymentService:
             money(order.total_amount),
         )
 
-        provider_u = provider.upper()
         if provider_u == "BALANCE":
             channel = "BALANCE"
         else:
@@ -971,7 +979,11 @@ class PaymentService:
             if not cid:
                 raise AppException(40040, "余额支付需绑定顾客")
             # 游客/匿名会话不得使用储值财产能力
-            payer = await db.get(Customer, int(cid))
+            payer = (
+                locked_customer
+                if locked_customer is not None and int(locked_customer.id) == int(cid)
+                else await db.get(Customer, int(cid))
+            )
             if not payer or not CustomerService.is_member(payer):
                 raise AppException(40320, "请先开通会员后再使用余额支付", status_code=403)
             # 储值已含赠送，禁止再叠会员折扣/券/代金券
@@ -2008,14 +2020,9 @@ class PaymentService:
         round_down: bool = False,
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
-        locked = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == order.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
+        locked, _locked_customer = await cls._lock_customer_then_order(
+            db, int(order.id)
+        )
         if not locked:
             raise AppException(40402, "订单不存在")
         order = locked
