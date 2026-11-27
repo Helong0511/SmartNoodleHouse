@@ -329,10 +329,6 @@ async def test_milestone_reclaim_handler_locks_order_before_refund(monkeypatch):
 
     order = SimpleNamespace(id=102, customer_id=17)
     refund = SimpleNamespace(id=9001, order_id=102, status="SUCCESS")
-    order_result = MagicMock()
-    order_result.scalar_one_or_none.return_value = order
-    refund_result = MagicMock()
-    refund_result.scalar_one_or_none.return_value = refund
     db = AsyncMock()
     db.get = AsyncMock(side_effect=[order, refund])
     row = SimpleNamespace(
