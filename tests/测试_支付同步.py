@@ -782,8 +782,8 @@ async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks
     assert returned is payment
     assert payment.status == "UNKNOWN"
     history.assert_awaited_once()
-    assert db.execute.await_count == 5
-    for call in db.execute.await_args_list[2:]:
+    assert db.execute.await_count == 2
+    for call in db.execute.await_args_list:
         stmt = call.args[0]
         assert stmt._for_update_arg is not None
         assert stmt.get_execution_options().get("populate_existing") is True
