@@ -1478,6 +1478,8 @@ class PaymentService:
         order_id = int(order_id)
         if owner_hint_supplied:
             owner_id = owner_customer_id_hint
+            if owner_id is not None and not isinstance(owner_id, int):
+                owner_id = None
         else:
             owner_result = await db.execute(
                 select(Order.customer_id).where(Order.id == order_id)
