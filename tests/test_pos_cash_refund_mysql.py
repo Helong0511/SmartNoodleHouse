@@ -223,6 +223,62 @@ async def test_shift_close_refuses_unresolved_cash_refund(db_session):
 
 @pytest.mark.mysql
 @pytest.mark.asyncio
+async def test_shift_close_blocks_legacy_refund_by_executing_cashier_not_sale_cashier(db_session):
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+    maker = async_sessionmaker(db_session.bind, expire_on_commit=False, autoflush=False)
+    suffix = uuid.uuid4().hex
+    ids = await _make_shift_graph(maker, suffix)
+    payment_ids: list[int] = []
+    refund_ids: list[int] = []
+    try:
+        async with maker() as db:
+            shift = await db.get(CashierShift, ids["shift_id"])
+            payment = Payment(
+                payment_no=f"CRLEG-{suffix[:26]}",
+                order_id=ids["order_id"],
+                operator_id=None,
+                provider="CASH",
+                channel="POS",
+                amount="20.00",
+                status="PAID",
+                created_at=shift.opened_at - timedelta(hours=2),
+                paid_at=shift.opened_at - timedelta(hours=2),
+            )
+            db.add(payment)
+            await db.flush()
+            # Before migration 0053, this refund had no cashier_shift_id.
+            # It was executed by the current cashier against an older sale.
+            refund = PaymentRefund(
+                refund_no=f"CRLEGR-{suffix[:22]}",
+                payment_id=payment.id,
+                order_id=ids["order_id"],
+                amount="5.00",
+                status="UNKNOWN",
+                operator_id=ids["user_id"],
+                cashier_shift_id=None,
+                created_at=now_local(),
+            )
+            db.add(refund)
+            await db.flush()
+            payment_ids = [payment.id]
+            refund_ids = [refund.id]
+            with pytest.raises(AppException) as exc:
+                await PosShiftService.close_shift(
+                    db,
+                    shift,
+                    closing_cash=Decimal("100.00"),
+                    remark="legacy refund executed in current shift",
+                    closed_by=ids["user_id"],
+                )
+            assert exc.value.code == 40910
+            await db.rollback()
+    finally:
+        await _cleanup(maker, ids, payment_ids, refund_ids)
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
 async def test_cash_refund_and_shift_close_serialize_on_shift_row(db_session):
     if db_session.get_bind().dialect.name != "mysql":
         pytest.skip("requires MySQL 8 / InnoDB")
