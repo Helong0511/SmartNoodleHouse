@@ -187,6 +187,8 @@ async def test_payment_parent_lock_acquires_customer_before_order_and_payment():
         if "from payments" in sql:
             result.first.return_value = (12, None)
             result.scalar_one_or_none.return_value = payment
+        elif "from orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = 42
         elif "from customers" in sql:
             result.scalar_one_or_none.return_value = customer
         elif "from orders" in sql:
@@ -202,11 +204,12 @@ async def test_payment_parent_lock_acquires_customer_before_order_and_payment():
     locked = await PaymentService._lock_order_then_payment(db, 99)
 
     assert locked is payment
-    assert len(statements) == 4
+    assert len(statements) == 5
     assert "from payments" in statements[0]  # relation preflight, no row lock
-    assert "from customers" in statements[1] and "for update" in statements[1]
-    assert "from orders" in statements[2] and "for update" in statements[2]
-    assert "from payments" in statements[3] and "for update" in statements[3]
+    assert "from orders" in statements[1] and "for update" not in statements[1]
+    assert "from customers" in statements[2] and "for update" in statements[2]
+    assert "from orders" in statements[3] and "for update" in statements[3]
+    assert "from payments" in statements[4] and "for update" in statements[4]
 
 
 @pytest.mark.asyncio
@@ -223,6 +226,8 @@ async def test_payment_parent_lock_rejects_merged_customer_before_order_lock():
         result = MagicMock()
         if "from payments" in sql:
             result.first.return_value = (12, None)
+        elif "from orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = 42
         elif "from customers" in sql:
             result.scalar_one_or_none.return_value = inactive_customer
         else:
@@ -237,8 +242,9 @@ async def test_payment_parent_lock_rejects_merged_customer_before_order_lock():
         await PaymentService._lock_order_then_payment(db, 99)
 
     assert ei.value.code == 40962
-    assert len(statements) == 2
-    assert "from orders" not in " ".join(statements)
+    assert len(statements) == 3
+    assert "from orders" not in statements[-1]
+    assert "from customers" in statements[-1] and "for update" in statements[-1]
 
 
 @pytest.mark.asyncio
@@ -258,6 +264,8 @@ async def test_recharge_payment_parent_lock_acquires_customer_before_recharge_an
         if "from payments" in sql:
             result.first.return_value = (None, 22)
             result.scalar_one_or_none.return_value = payment
+        elif "from recharge_orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = 52
         elif "from customers" in sql:
             result.scalar_one_or_none.return_value = customer
         elif "from recharge_orders" in sql:
@@ -273,8 +281,9 @@ async def test_recharge_payment_parent_lock_acquires_customer_before_recharge_an
     locked = await PaymentService._lock_order_then_payment(db, 199)
 
     assert locked is payment
-    assert len(statements) == 4
+    assert len(statements) == 5
     assert "from payments" in statements[0]
-    assert "from customers" in statements[1] and "for update" in statements[1]
-    assert "from recharge_orders" in statements[2] and "for update" in statements[2]
-    assert "from payments" in statements[3] and "for update" in statements[3]
+    assert "from recharge_orders" in statements[1] and "for update" not in statements[1]
+    assert "from customers" in statements[2] and "for update" in statements[2]
+    assert "from recharge_orders" in statements[3] and "for update" in statements[3]
+    assert "from payments" in statements[4] and "for update" in statements[4]
