@@ -333,7 +333,7 @@ async def _handle_pref_recompute(db: AsyncSession, row) -> None:
     order = await db.get(Order, refund.order_id)
     if not order or not order.customer_id:
         return
-    await PreferenceService.recompute_for_customer(db, order.customer_id)
+    await PreferenceService.recompute_for_order(db, int(order.id))
     # 推荐负向学习由独立 taste_learning_refund Outbox 事件处理，失败必须重试。
 
 
