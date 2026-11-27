@@ -55,6 +55,7 @@ from app.models import (
     Payment,
     PointLedger,
     RechargeOrder,
+    SharedCartItem,
     SocialBenefitRedemption,
     TableParty,
     TablePartyMember,
@@ -193,6 +194,7 @@ class CustomerMergeService:
             "table_party_hosts_moved": 0,
             "table_party_members_moved": 0,
             "table_party_members_closed": 0,
+            "shared_cart_items_moved": 0,
             "faces_revoked": 0,
             "welcome_logs": 0,
             "point_ledgers": 0,
@@ -673,13 +675,19 @@ class CustomerMergeService:
     async def _merge_table_party_memberships(
         cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
     ) -> None:
-        """将进行中的同桌局控制权/成员关系迁到目标；购物车 added_by 保留原始操作人。"""
+        """将进行中的同桌局控制权、成员关系及共享草稿行归属迁到目标。"""
         host_result = await db.execute(
             update(TableParty)
             .where(TableParty.host_customer_id == int(source_id))
             .values(host_customer_id=int(target_id))
         )
         stats["table_party_hosts_moved"] += int(host_result.rowcount or 0)
+        cart_result = await db.execute(
+            update(SharedCartItem)
+            .where(SharedCartItem.added_by_customer_id == int(source_id))
+            .values(added_by_customer_id=int(target_id))
+        )
+        stats["shared_cart_items_moved"] += int(cart_result.rowcount or 0)
 
         target_members = list(
             (
