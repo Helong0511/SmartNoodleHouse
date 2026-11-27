@@ -17,6 +17,8 @@ Merge policy
 9. 储值：本金/赠送金并入目标，写 MERGE 流水；balance_ledger / recharge_orders 改挂目标；储值流水保留原始账户标识。
 10. 公益身份 CustomerSocialIdentity / 核销台账 social_benefit_redemptions 改挂目标；
     同 identity_code 若目标已有 ACTIVE 则源侧 ACTIVE/PENDING 改为 REVOKED，避免双生效。
+11. 推荐行为事件迁移到目标；CustomerTasteProfile 按最近事件时间衰减后合并 raw_weight/event_count；
+    收藏、生命周期快照、发票申请、客群成员、营销任务/消息历史/活动归因一并迁移并处理唯一键冲突。
 """
 from __future__ import annotations
 
