@@ -81,6 +81,7 @@ async def test_sync_refund_rejects_missing_order_before_provider_query(monkeypat
     db = MagicMock()
     db.execute = AsyncMock(return_value=result)
     db.get = AsyncMock(return_value=None)
+    db.commit = AsyncMock()
     sync = AsyncMock()
     audit = AsyncMock()
     monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", sync)
