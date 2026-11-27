@@ -209,7 +209,7 @@ class TasteLearningService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if customer is None or int(customer.status or 0) != 1:
+        if customer is None or int(getattr(customer, "status", 1) or 0) != 1:
             raise AppException(40962, "订单顾客正在合并或已停用，行为画像更新将重试")
         order = (
             await db.execute(
@@ -237,7 +237,7 @@ class TasteLearningService:
         ).scalar_one_or_none()
         if (
             not customer
-            or int(customer.status or 0) != 1
+            or int(getattr(customer, "status", 1) or 0) != 1
             or not int(getattr(customer, "recommend_opt_in", 0) or 0)
         ):
             return 0
@@ -291,7 +291,7 @@ class TasteLearningService:
         ).scalar_one_or_none()
         if (
             not customer
-            or int(customer.status or 0) != 1
+            or int(getattr(customer, "status", 1) or 0) != 1
             or not int(getattr(customer, "recommend_opt_in", 0) or 0)
         ):
             return
