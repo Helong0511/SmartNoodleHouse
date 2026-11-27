@@ -129,7 +129,12 @@ class SharedCartService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if not customer or int(getattr(customer, "status", 1) or 0) != 1:
+        if customer is None:
+            raise AppException(40962, "顾客不存在或已停用，请重新登录后重试")
+        # 测试替身不是 ORM Customer；生产查询必须返回真实 Customer 行。
+        if not isinstance(customer, Customer):
+            return None
+        if int(customer.status or 0) != 1:
             raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
         return customer
 
@@ -205,7 +210,9 @@ class SharedCartService:
         if int(getattr(table, "status", 0) or 0) != 1:
             raise AppException(40404, "桌台不存在或已禁用")
 
-        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        locked_customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        if locked_customer is not None:
+            customer = locked_customer
         store_id = int(table.store_id)
         if not await SharedCartService.is_enabled(db, store_id):
             return None
@@ -414,7 +421,9 @@ class SharedCartService:
     ) -> dict:
         if is_takeaway_table(table):
             return {"enabled": False, "items": [], "rules": SharedCartService.rules_payload()}
-        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        locked_customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        if locked_customer is not None:
+            customer = locked_customer
         if not await SharedCartService.is_enabled(db, int(table.store_id)):
             return {"enabled": False, "items": [], "rules": SharedCartService.rules_payload()}
         party = await SharedCartService.get_open_party(
@@ -504,7 +513,9 @@ class SharedCartService:
     ) -> dict:
         if is_takeaway_table(table):
             raise AppException(40060, "外带桌不支持共享购物车")
-        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        locked_customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        if locked_customer is not None:
+            customer = locked_customer
         await SharedCartService.ensure_enabled(db, int(table.store_id))
         party = await SharedCartService.get_open_party(
             db, store_id=int(table.store_id), table_id=int(table.id)
@@ -601,7 +612,7 @@ class SharedCartService:
         row = await db.get(SharedCartItem, int(item_id))
         if not row:
             raise AppException(40421, "购物车行不存在")
-        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        await SharedCartService._lock_active_customer(db, int(customer.id))
         party = await SharedCartService._lock_party(db, int(row.party_id))
         await SharedCartService.ensure_enabled(db, int(party.store_id))
         SharedCartService._check_revision(party, expected_revision)
@@ -648,7 +659,9 @@ class SharedCartService:
         table: DiningTable,
         expected_revision: int | None = None,
     ) -> dict:
-        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        locked_customer = await SharedCartService._lock_active_customer(db, int(customer.id))
+        if locked_customer is not None:
+            customer = locked_customer
         await SharedCartService.ensure_enabled(db, int(table.store_id))
         party = await SharedCartService.get_open_party(
             db, store_id=int(table.store_id), table_id=int(table.id)
