@@ -1357,6 +1357,7 @@ class CouponService:
                 select(Customer)
                 .where(Customer.id == int(customer_id))
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
 
