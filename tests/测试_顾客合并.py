@@ -121,6 +121,8 @@ async def test_merge_moves_accounts_and_points(db_session):
         detail = mock_audit.await_args.kwargs.get("detail") or {}
         before_phone = ((detail.get("before") or {}).get("target") or {}).get("phone")
         assert before_phone == "138****9001"
+        after_detail = detail.get("after") or {}
+        assert after_detail.get("unknown_store_scope") == {"balance_ledgers": 1}
 
     assert result["stats"]["wechat_moved"] == 1
     assert result["stats"]["alipay_moved"] == 1
