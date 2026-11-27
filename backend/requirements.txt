@@ -21,7 +21,7 @@ httpx>=0.28.1,<1.0
 python-multipart>=0.0.33,<1.0
 apscheduler>=3.11.3,<4.0
 websockets>=17.4,<18
-opencv-python-headless>=5.0.0.93,<6.0
+opencv-python-headless>=5.1.0.95,<6.0
 # NumPy 2.4.6 是支持 Python 3.11 的最新稳定线；2.5.x 要求 Python 3.12+
 numpy>=2.4.6,<3.0
 # Python 3.13 移除了 stdlib audioop，使用兼容移植版；3.11/3.12 仍使用 stdlib。
