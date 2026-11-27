@@ -66,9 +66,10 @@ class PreferenceService:
     @staticmethod
     async def _lock_customer_for_order(db: AsyncSession, order_id: int):
         """订单画像写入统一 Customer → Order 锁序，并验证合并期间的归属变化。"""
-        owner_id = await db.scalar(
+        owner_result = await db.execute(
             select(Order.customer_id).where(Order.id == int(order_id))
         )
+        owner_id = owner_result.scalar_one_or_none()
         if owner_id is None:
             return None, None
         customer = (
