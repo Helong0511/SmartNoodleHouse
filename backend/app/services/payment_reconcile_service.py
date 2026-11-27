@@ -293,7 +293,6 @@ class PaymentReconcileService:
             batch.local_count = len(local_payments)
             batch.channel_count = len(channel_rows)
             batch.mismatch_count = len(diffs)
-            batch.status = "DONE"
             await db.flush()
             return batch
         except Exception as e:
