@@ -34,6 +34,7 @@
             <el-option label="消费" value="PAY" />
             <el-option label="退款回补" value="REFUND_RESTORE" />
             <el-option label="调账" value="ADJUST" />
+            <el-option label="顾客合并" value="MERGE" />
           </el-select>
           <el-button type="primary" :loading="ledgerLoading" @click="loadLedger(1)">查询</el-button>
           <el-button :loading="ledgerLoading" @click="loadLedger(ledger.page)">刷新</el-button>
@@ -282,6 +283,7 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
   PAY: '消费',
   REFUND_RESTORE: '退款回补',
   ADJUST: '调账',
+  MERGE: '顾客合并',
 }
 
 function entryTypeLabel(t?: string | null) {
@@ -295,6 +297,7 @@ function entryTypeTag(t?: string | null): '' | 'success' | 'warning' | 'info' | 
   if (key === 'PAY') return 'warning'
   if (key === 'REFUND_RESTORE') return 'info'
   if (key === 'ADJUST') return 'danger'
+  if (key === 'MERGE') return 'success'
   return ''
 }
 
