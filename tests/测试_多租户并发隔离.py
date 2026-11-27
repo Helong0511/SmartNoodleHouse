@@ -86,8 +86,12 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
     foreign_order.scalar_one_or_none.return_value = 50
     foreign_recharge = MagicMock()
     foreign_recharge.scalar_one_or_none.return_value = None
+    foreign_wallet_ledger = MagicMock()
+    foreign_wallet_ledger.scalar_one_or_none.return_value = None
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[locked, foreign_order, foreign_recharge])
+    db.execute = AsyncMock(
+        side_effect=[locked, foreign_order, foreign_recharge, foreign_wallet_ledger]
+    )
 
     with pytest.raises(AppException) as ei:
         await CustomerMergeService.merge(
