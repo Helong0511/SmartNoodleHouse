@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from itertools import count
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -254,3 +254,29 @@ async def test_merge_moves_all_coupons_including_same_template(db_session):
         ).scalar_one()
         assert row.customer_id == target.id
         assert row.status == "AVAILABLE"
+
+
+
+@pytest.mark.asyncio
+async def test_source_store_audit_includes_orders_recharges_wallet_and_profile():
+    source = Customer(
+        id=990,
+        customer_no="CU_MG_AUDIT",
+        status=1,
+        registered_store_id=4,
+        first_seen_store_id=5,
+    )
+    responses = []
+    for values in ([4, 6], [7], [8, None]):
+        scalar_result = MagicMock()
+        scalar_result.all.return_value = values
+        result = MagicMock()
+        result.scalars.return_value = scalar_result
+        responses.append(result)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=responses)
+
+    store_ids = await CustomerMergeService._collect_source_store_ids(db, source)
+
+    assert store_ids == [4, 5, 6, 7, 8]
+    assert db.execute.await_count == 3
