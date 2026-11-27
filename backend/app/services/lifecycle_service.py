@@ -237,6 +237,8 @@ class LifecycleService:
                         .where(Customer.id > last_id, Customer.status == 1)
                         .order_by(Customer.id.asc())
                         .limit(batch_size)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
                     )
                 ).scalars().all()
             )
