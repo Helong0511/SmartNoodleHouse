@@ -119,6 +119,21 @@ async def _validate_product_options(
 
 class SharedCartService:
     @staticmethod
+    async def _lock_active_customer(db: AsyncSession, customer_id: int) -> Customer:
+        """同桌局写入先锁顾客，再锁 TableParty，和顾客合并保持一致顺序。"""
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not customer or int(customer.status or 0) != 1:
+            raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
+        return customer
+
+    @staticmethod
     def rules_payload() -> dict:
         return {
             "settlement_mode": SETTLEMENT_MODE,
@@ -190,6 +205,7 @@ class SharedCartService:
         if int(getattr(table, "status", 0) or 0) != 1:
             raise AppException(40404, "桌台不存在或已禁用")
 
+        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
         store_id = int(table.store_id)
         if not await SharedCartService.is_enabled(db, store_id):
             return None
@@ -398,6 +414,7 @@ class SharedCartService:
     ) -> dict:
         if is_takeaway_table(table):
             return {"enabled": False, "items": [], "rules": SharedCartService.rules_payload()}
+        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
         if not await SharedCartService.is_enabled(db, int(table.store_id)):
             return {"enabled": False, "items": [], "rules": SharedCartService.rules_payload()}
         party = await SharedCartService.get_open_party(
@@ -424,6 +441,7 @@ class SharedCartService:
         """下单前锁定共享车并核对 revision 与完整餐品快照，防止过期/伪造结算。"""
         if not party_id or expected_revision is None:
             raise AppException(40920, "共享购物车版本缺失，请刷新同桌购物车后再结算", status_code=409)
+        await SharedCartService._lock_active_customer(db, int(customer_id))
         party = await SharedCartService.get_open_party(
             db, store_id=int(store_id), table_id=int(table_id)
         )
@@ -486,6 +504,7 @@ class SharedCartService:
     ) -> dict:
         if is_takeaway_table(table):
             raise AppException(40060, "外带桌不支持共享购物车")
+        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
         await SharedCartService.ensure_enabled(db, int(table.store_id))
         party = await SharedCartService.get_open_party(
             db, store_id=int(table.store_id), table_id=int(table.id)
@@ -582,6 +601,7 @@ class SharedCartService:
         row = await db.get(SharedCartItem, int(item_id))
         if not row:
             raise AppException(40421, "购物车行不存在")
+        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
         party = await SharedCartService._lock_party(db, int(row.party_id))
         await SharedCartService.ensure_enabled(db, int(party.store_id))
         SharedCartService._check_revision(party, expected_revision)
@@ -628,6 +648,7 @@ class SharedCartService:
         table: DiningTable,
         expected_revision: int | None = None,
     ) -> dict:
+        customer = await SharedCartService._lock_active_customer(db, int(customer.id))
         await SharedCartService.ensure_enabled(db, int(table.store_id))
         party = await SharedCartService.get_open_party(
             db, store_id=int(table.store_id), table_id=int(table.id)
@@ -663,6 +684,7 @@ class SharedCartService:
         """一人结全桌成功后清空本桌共享草稿。"""
         if not table_id:
             return
+        await SharedCartService._lock_active_customer(db, int(customer_id))
         party = await SharedCartService.get_open_party(
             db, store_id=int(store_id), table_id=int(table_id)
         )
