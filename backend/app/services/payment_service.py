@@ -1456,7 +1456,12 @@ class PaymentService:
     async def _lock_order_then_payment(
         cls, db: AsyncSession, payment_id: int
     ) -> Payment | None:
-        """统一锁序：先 Order（若有）再 Payment，降低与关单路径的死锁概率。"""
+        """统一资产锁序：Customer → Order/RechargeOrder → Payment。
+
+        先无锁读取关联关系，再锁顾客协调行，随后锁父单和支付单。
+        若等待期间顾客已被合并/父单归属已改变，抛错让调用方回滚整个事务，
+        由回调重试或查单补偿重新读取新归属；绝不在持有旧顾客锁时追加锁新顾客。
+        """
         peek = (
             await db.execute(
                 select(Payment.order_id, Payment.recharge_order_id).where(Payment.id == int(payment_id))
@@ -1465,20 +1470,62 @@ class PaymentService:
         if peek is None:
             return None
         order_id, recharge_id = peek[0], peek[1]
+
+        parent_customer_id = None
         if order_id:
-            await db.execute(
-                select(Order)
-                .where(Order.id == int(order_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
+            parent_customer_id = await db.scalar(
+                select(Order.customer_id).where(Order.id == int(order_id))
             )
         elif recharge_id:
-            await db.execute(
-                select(RechargeOrder)
-                .where(RechargeOrder.id == int(recharge_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
+            parent_customer_id = await db.scalar(
+                select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
             )
+
+        if parent_customer_id is not None:
+            customer = (
+                await db.execute(
+                    select(Customer)
+                    .where(Customer.id == int(parent_customer_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if customer is None:
+                raise AppException(40962, "支付关联顾客不存在，已暂停结算，请重试或核对")
+            if int(customer.status or 0) != 1:
+                raise AppException(40962, "支付关联顾客正在合并或已停用，请重新读取后重试")
+
+        if order_id:
+            parent = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == int(order_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if parent is None:
+                raise AppException(40402, "订单不存在")
+            if (int(parent.customer_id) if parent.customer_id is not None else None) != (
+                int(parent_customer_id) if parent_customer_id is not None else None
+            ):
+                raise AppException(40963, "订单顾客归属已变化，请回滚并重试支付结算")
+        elif recharge_id:
+            parent = (
+                await db.execute(
+                    select(RechargeOrder)
+                    .where(RechargeOrder.id == int(recharge_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if parent is None:
+                raise AppException(40491, "充值单不存在")
+            if (int(parent.customer_id) if parent.customer_id is not None else None) != (
+                int(parent_customer_id) if parent_customer_id is not None else None
+            ):
+                raise AppException(40963, "充值顾客归属已变化，请回滚并重试支付结算")
+
         # FOR UPDATE 是当前读；populate_existing 同步刷新当前 Session 中可能已加载的旧 ORM 快照。
         return (
             await db.execute(
