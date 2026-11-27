@@ -129,7 +129,7 @@ class SharedCartService:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if not customer or int(customer.status or 0) != 1:
+        if not customer or int(getattr(customer, "status", 1) or 0) != 1:
             raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
         return customer
 
