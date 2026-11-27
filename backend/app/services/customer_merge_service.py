@@ -30,6 +30,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
+from app.core.response import now_local
 from app.models import (
     BalanceLedger,
     CampaignAttribution,
@@ -55,6 +56,8 @@ from app.models import (
     PointLedger,
     RechargeOrder,
     SocialBenefitRedemption,
+    TableParty,
+    TablePartyMember,
     WelcomeLog,
 )
 from app.core.response import money, serialize_dt
@@ -187,6 +190,9 @@ class CustomerMergeService:
             "marketing_tasks_moved": 0,
             "marketing_logs_moved": 0,
             "campaign_attributions_moved": 0,
+            "table_party_hosts_moved": 0,
+            "table_party_members_moved": 0,
+            "table_party_members_closed": 0,
             "faces_revoked": 0,
             "welcome_logs": 0,
             "point_ledgers": 0,
@@ -207,6 +213,7 @@ class CustomerMergeService:
         await cls._merge_coupons(db, source.id, target.id, stats)
         await cls._merge_preferences(db, source.id, target.id, stats)
         await cls._merge_customer_profiles_and_relations(db, source.id, target.id, stats)
+        await cls._merge_table_party_memberships(db, source.id, target.id, stats)
         await cls._merge_faces(db, source.id, target.id, stats)
         await cls._merge_social_benefits(db, source.id, target.id, stats)
         await cls._reassign_simple(
@@ -660,6 +667,52 @@ class CustomerMergeService:
                 row.customer_id = int(target_id)
                 member_segment_ids.add(int(row.segment_id))
                 stats["segment_members_moved"] += 1
+        await db.flush()
+
+    @classmethod
+    async def _merge_table_party_memberships(
+        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+    ) -> None:
+        """将进行中的同桌局控制权/成员关系迁到目标；购物车 added_by 保留原始操作人。"""
+        host_result = await db.execute(
+            update(TableParty)
+            .where(TableParty.host_customer_id == int(source_id))
+            .values(host_customer_id=int(target_id))
+        )
+        stats["table_party_hosts_moved"] += int(host_result.rowcount or 0)
+
+        target_members = list(
+            (
+                await db.execute(
+                    select(TablePartyMember)
+                    .where(TablePartyMember.customer_id == int(target_id))
+                    .order_by(TablePartyMember.party_id, TablePartyMember.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        target_party_ids = {int(row.party_id) for row in target_members}
+        source_members = list(
+            (
+                await db.execute(
+                    select(TablePartyMember)
+                    .where(TablePartyMember.customer_id == int(source_id))
+                    .order_by(TablePartyMember.party_id, TablePartyMember.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        for row in source_members:
+            if int(row.party_id) in target_party_ids:
+                # 目标已在同一桌局时保留源侧成员历史，但关闭其活动成员关系，
+                # 避免违反 (party_id, customer_id) 唯一约束或双身份重复计数。
+                if row.left_at is None:
+                    row.left_at = now_local()
+                    stats["table_party_members_closed"] += 1
+            else:
+                row.customer_id = int(target_id)
+                target_party_ids.add(int(row.party_id))
+                stats["table_party_members_moved"] += 1
         await db.flush()
 
     @classmethod
