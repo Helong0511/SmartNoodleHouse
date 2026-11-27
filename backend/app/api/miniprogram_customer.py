@@ -292,14 +292,22 @@ async def get_my_points_ledger(
         }
     items = []
     for r in rows:
-        origin_id = int(r.origin_customer_id) if r.origin_customer_id is not None else int(r.customer_id)
-        origin_customer = origin_customers.get(origin_id)
-        is_merged_history = origin_id != int(customer.id)
+        # NULL means the historical source account was not recorded. Never
+        # substitute the current owner: doing so would fabricate provenance.
+        origin_id = int(r.origin_customer_id) if r.origin_customer_id is not None else None
+        origin_customer = origin_customers.get(origin_id) if origin_id is not None else None
+        is_merged_history = (
+            origin_id != int(customer.id) if origin_id is not None else None
+        )
         items.append({
             "id": r.id,
             "delta": r.delta,
             "balance_after": r.balance_after,
-            "balance_after_label": "原账户历史积分余额快照" if is_merged_history else "流水发生后积分余额",
+            "balance_after_label": (
+                "原账户历史积分余额快照"
+                if is_merged_history is True
+                else "流水发生后积分余额"
+            ),
             "origin_customer_id": origin_id,
             "origin_customer_no": origin_customer.customer_no if origin_customer else None,
             "origin_customer_name": origin_customer.display_name if origin_customer else None,
