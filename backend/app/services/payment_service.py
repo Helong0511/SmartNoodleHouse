@@ -951,8 +951,7 @@ class PaymentService:
             reused = True
             if operator_id is not None:
                 payment.operator_id = operator_id
-            if customer_id is not None:
-                payment.customer_id = customer_id
+            payment.customer_id = customer_id
             if cashier_shift_id is not None:
                 payment.cashier_shift_id = int(cashier_shift_id)
         else:
@@ -1155,26 +1154,23 @@ class PaymentService:
         """储值充值：微信/支付宝实付入账后写入本金+赠送金。"""
         from types import SimpleNamespace
 
-        locked = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
-        ).scalar_one_or_none()
-        if not locked:
-            raise AppException(40491, "充值单不存在")
-        recharge = locked
-        if recharge.status == "PAID":
-            raise AppException(40010, "充值单已支付")
-        # 多端/重试可能同时为同一充值单创建支付：先锁充值单并刷新当前状态，
-        # 再锁定读取现有支付单，避免两个请求都看见“无 PENDING”后各建一笔。
-        recharge = (
-            await db.execute(
-                select(RechargeOrder)
-                .where(RechargeOrder.id == int(recharge.id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
+        recharge, _locked_customer = await cls._lock_customer_then_recharge_order(
+            db,
+            int(recharge.id),
+            owner_customer_id_hint=getattr(recharge, "customer_id", None),
+            owner_hint_supplied=True,
+        )
         if recharge is None:
             raise AppException(40491, "充值单不存在")
+        if customer_id is not None and recharge.customer_id is not None and (
+            int(customer_id) != int(recharge.customer_id)
+        ):
+            raise AppException(40301, "充值单顾客归属已变化，拒绝使用旧顾客身份创建支付")
+        # 支付顾客归属始终以锁内刷新后的充值单为准，不能信任请求层旧 customer_id。
+        customer_id = int(recharge.customer_id) if recharge.customer_id is not None else None
+        if recharge.status == "PAID":
+            raise AppException(40010, "充值单已支付")
+        # 顾客锁 + 充值单锁串行化合并与支付单创建；再读取现有支付避免重复创建。
         if recharge.status != "PENDING":
             raise AppException(40012, f"当前充值单状态不可支付: {recharge.status}")
 
@@ -1217,7 +1213,7 @@ class PaymentService:
                 payment_no=generate_no(payment_biz(provider_u), sno, "00"),
                 order_id=None,
                 recharge_order_id=recharge.id,
-                customer_id=customer_id or recharge.customer_id,
+                customer_id=customer_id,
                 provider=provider_u,
                 channel=channel,
                 amount=pay_amount,
