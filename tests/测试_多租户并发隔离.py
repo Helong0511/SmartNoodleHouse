@@ -128,3 +128,43 @@ async def test_shift_totals_filter_by_store():
     sql = captured[0]
     assert "orders" in sql and "recharge_orders" in sql
     assert "store_id" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_table", ["orders", "recharge_orders", "balance_ledger"])
+async def test_store_staff_merge_blocks_unknown_store_scope_history(blocked_table):
+    """NULL 门店归属代表无法证明同店，门店员工不得将其当作本店数据合并。"""
+    from app.services.customer_merge_service import CustomerMergeService
+
+    source = SimpleNamespace(id=2, status=1)
+    target = SimpleNamespace(id=1, status=1)
+    locked = MagicMock()
+    locked.scalars.return_value.all.return_value = [target, source]
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from customers" in sql:
+            result.scalars.return_value.all.return_value = [target, source]
+            return result
+        result.scalar_one_or_none.return_value = (
+            77 if blocked_table in sql else None
+        )
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+
+    with pytest.raises(AppException) as ei:
+        await CustomerMergeService.merge(
+            db,
+            target_customer_id=1,
+            source_customer_id=2,
+            actor_store_id=1,
+        )
+
+    assert ei.value.code == 40301
+    guarded = next(sql for sql in statements if f"from {blocked_table}" in sql)
+    assert "is null" in guarded
