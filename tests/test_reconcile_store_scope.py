@@ -163,34 +163,11 @@ async def test_failed_payment_reconcile_batch_is_committed_before_http_error(db_
     async def override_user():
         return user
 
-    async def fail_after_recording_batch(
-        db, *, channel, bill_date, bill_csv, created_by=None,
-        source_filename=None, scope_store_id=0,
-    ):
-        batch = PaymentReconcileBatch(
-            channel=channel.upper(),
-            bill_date=bill_date,
-            scope_store_id=scope_store_id,
-            status="FAILED",
-            created_by=created_by,
-            source_filename=source_filename,
-            error_message="渠道账单缺少交易号列",
-        )
-        db.add(batch)
-        await db.flush()
-        raise ValueError(batch.error_message)
-
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_current_user] = override_user
     try:
         permissions = {"reconcile:manage"}
-        with (
-            patch("app.api.deps.get_user_permissions", AsyncMock(return_value=permissions)),
-            patch(
-                "app.api.reconcile.PaymentReconcileService.run_batch",
-                side_effect=fail_after_recording_batch,
-            ),
-        ):
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=permissions)):
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
