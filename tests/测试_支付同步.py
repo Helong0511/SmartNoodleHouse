@@ -793,9 +793,9 @@ async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks
 @pytest.mark.asyncio
 async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     stale_recharge = SimpleNamespace(id=121, status="PENDING")
-    stale_payment = SimpleNamespace(id=122, status="PENDING")
+    stale_payment = SimpleNamespace(id=122, status="PENDING", recharge_order_id=121)
     current_recharge = SimpleNamespace(id=121, status="PAID")
-    current_payment = SimpleNamespace(id=122, status="PAID")
+    current_payment = SimpleNamespace(id=122, status="PAID", recharge_order_id=121)
     peek_result = MagicMock()
     peek_result.first.return_value = (None, 121)
     owner_result = MagicMock()
@@ -826,9 +826,9 @@ async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
 @pytest.mark.asyncio
 async def test_recharge_settlement_never_downgrades_refunded_payment():
     stale_recharge = SimpleNamespace(id=123, status="PENDING")
-    stale_payment = SimpleNamespace(id=124, status="PENDING")
+    stale_payment = SimpleNamespace(id=124, status="PENDING", recharge_order_id=123)
     current_recharge = SimpleNamespace(id=123, status="PENDING")
-    current_payment = SimpleNamespace(id=124, status="REFUNDED")
+    current_payment = SimpleNamespace(id=124, status="REFUNDED", recharge_order_id=123)
     peek_result = MagicMock()
     peek_result.first.return_value = (None, 123)
     owner_result = MagicMock()
