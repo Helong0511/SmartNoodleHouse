@@ -1472,9 +1472,10 @@ class PaymentService:
     ) -> tuple[Order | None, Customer | None]:
         """统一订单资产锁序：Customer → Order，并在锁后验证顾客归属。"""
         order_id = int(order_id)
-        owner_id = await db.scalar(
+        owner_result = await db.execute(
             select(Order.customer_id).where(Order.id == order_id)
         )
+        owner_id = owner_result.scalar_one_or_none()
         lock_customer_id = int(owner_id) if owner_id is not None else (
             int(additional_customer_id) if additional_customer_id is not None else None
         )
@@ -1528,9 +1529,10 @@ class PaymentService:
             if order is None:
                 raise AppException(40402, "订单不存在")
         elif recharge_id:
-            owner_id = await db.scalar(
+            owner_result = await db.execute(
                 select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
             )
+            owner_id = owner_result.scalar_one_or_none()
             if owner_id is not None:
                 customer = (
                     await db.execute(
