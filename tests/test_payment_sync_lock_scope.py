@@ -34,7 +34,7 @@ def test_recharge_settlement_uses_customer_recharge_payment_lock_order():
     helper_source = inspect.getsource(PaymentService._lock_order_then_payment)
     assert "await cls._lock_order_then_payment(db, int(payment.id))" in settle_source
     customer_lock = helper_source.index("select(Customer)")
-    recharge_lock = helper_source.index("select(RechargeOrder)")
+    recharge_lock = helper_source.rindex("select(RechargeOrder)")
     payment_lock = helper_source.rindex("select(Payment)")
     assert customer_lock < recharge_lock < payment_lock, (
         "recharge settlement must use Customer→RechargeOrder→Payment lock order "
