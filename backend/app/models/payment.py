@@ -126,7 +126,7 @@ class PosRefundRequest(Base, TimestampMixin):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     executed_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     reason: Mapped[str] = mapped_column(String(255))
-    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
     # 顾客自助申请时为 NULL（小程序未开始制作订单的全额退款申请）
     requested_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
     reviewed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
