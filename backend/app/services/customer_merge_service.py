@@ -27,7 +27,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -180,8 +180,10 @@ class CustomerMergeService:
             "preferences_moved": 0,
             "preferences_merged": 0,
             "taste_events_moved": 0,
+            "taste_events_deleted": 0,
             "taste_profiles_moved": 0,
             "taste_profiles_merged": 0,
+            "taste_profiles_deleted": 0,
             "favorites_moved": 0,
             "favorites_deduplicated": 0,
             "lifecycle_rows_moved": 0,
@@ -215,7 +217,14 @@ class CustomerMergeService:
         await cls._reassign_orders_payments(db, source.id, target.id, stats)
         await cls._merge_coupons(db, source.id, target.id, stats)
         await cls._merge_preferences(db, source.id, target.id, stats)
-        await cls._merge_customer_profiles_and_relations(db, source.id, target.id, stats)
+        await cls._merge_customer_profiles_and_relations(
+            db,
+            source.id,
+            target.id,
+            stats,
+            source_opt_in=bool(getattr(source, "recommend_opt_in", 0)),
+            target_opt_in=bool(getattr(target, "recommend_opt_in", 0)),
+        )
         await cls._merge_table_party_memberships(db, source.id, target.id, stats)
         await cls._merge_faces(db, source.id, target.id, stats)
         await cls._merge_social_benefits(db, source.id, target.id, stats)
@@ -473,27 +482,76 @@ class CustomerMergeService:
 
     @classmethod
     async def _merge_customer_profiles_and_relations(
-        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+        cls,
+        db: AsyncSession,
+        source_id: int,
+        target_id: int,
+        stats: dict,
+        *,
+        source_opt_in: bool,
+        target_opt_in: bool,
     ) -> None:
-        """迁移合并后仍归属源账户的推荐画像、收藏、生命周期及营销关联。"""
-        # 行为事件是推荐画像的可追溯输入；在 Customer 行锁保护下整体迁移。
-        await cls._reassign_simple(
-            db, CustomerBehaviorEvent, source_id, target_id, "taste_events_moved", stats
+        """按双方推荐同意状态迁移画像，再合并收藏、生命周期及营销关联。"""
+        # 推荐隐私同意不随账号合并自动继承：仅双方均明确 opt-in 时合并事件/画像。
+        # 先在顾客协调锁内 fold 两侧待处理事件，避免源事件早于目标画像水位而被漏学。
+        profile_customer_ids = (
+            [int(source_id), int(target_id)]
+            if source_opt_in and target_opt_in
+            else ([int(target_id)] if target_opt_in else [])
         )
+        if source_opt_in and target_opt_in:
+            from app.services.taste_learning_service import TasteLearningService
+
+            for customer_id in profile_customer_ids:
+                for _ in range(20):
+                    learned = await TasteLearningService.learn_from_events(db, customer_id)
+                    if learned <= 0:
+                        break
+                else:
+                    raise AppException(
+                        40964,
+                        "顾客推荐行为事件积压过多，请稍后重试合并，避免丢失推荐画像",
+                    )
+
+            await cls._reassign_simple(
+                db, CustomerBehaviorEvent, source_id, target_id, "taste_events_moved", stats
+            )
+        else:
+            # 源账户未同意时，不把其行为导入目标；目标也未同意时双方画像/事件均不保留。
+            delete_customer_ids = (
+                [int(source_id), int(target_id)] if not target_opt_in else [int(source_id)]
+            )
+            if delete_customer_ids:
+                event_result = await db.execute(
+                    delete(CustomerBehaviorEvent).where(
+                        CustomerBehaviorEvent.customer_id.in_(delete_customer_ids)
+                    )
+                )
+                profile_result = await db.execute(
+                    delete(CustomerTasteProfile).where(
+                        CustomerTasteProfile.customer_id.in_(delete_customer_ids)
+                    )
+                )
+                stats["taste_events_deleted"] += int(event_result.rowcount or 0)
+                stats["taste_profiles_deleted"] += int(profile_result.rowcount or 0)
 
         # CustomerTasteProfile 是增量画像，不能只改 customer_id 后覆盖目标。
         # 两侧 raw_weight 按时间衰减到较新的事件时间，再合并事件数与分数。
         from app.services.taste_learning_service import _decay_factor, _logistic, _quantize
 
-        source_profiles = list(
-            (
-                await db.execute(
-                    select(CustomerTasteProfile)
-                    .where(CustomerTasteProfile.customer_id == int(source_id))
-                    .order_by(CustomerTasteProfile.id)
-                    .with_for_update()
-                )
-            ).scalars().all()
+        source_profiles = (
+            list(
+                (
+                    await db.execute(
+                        select(CustomerTasteProfile)
+                        .where(CustomerTasteProfile.customer_id == int(source_id))
+                        .order_by(CustomerTasteProfile.id)
+                        .with_for_update()
+                    )
+                ).scalars().all()
+            )
+            if source_opt_in and target_opt_in
+            else []
         )
         target_profiles = list(
             (
