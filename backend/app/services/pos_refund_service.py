@@ -378,7 +378,13 @@ class PosRefundService:
             if getattr(row, "refund_id", None)
             else None
         )
-        if linked_refund and linked_refund.status in (
+        if getattr(row, "refund_id", None) and linked_refund is None:
+            # A durable refund_id whose row disappeared is not equivalent to a
+            # pre-channel failure. The provider may already have accepted the refund.
+            # Keep the request blocked for reconciliation; never make it retryable.
+            row.status = "RECONCILIATION_REQUIRED"
+            row.fail_reason = "关联退款单不存在，无法确认渠道是否受理，禁止重试并需人工核对"[:255]
+        elif linked_refund and linked_refund.status in (
             "PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"
         ):
             # 退款单已提交：外部渠道可能已受理，必须保持处理中并交给查单/回调。
@@ -389,8 +395,8 @@ class PosRefundService:
             if row.status != "SUCCESS":
                 row.fail_reason = f"部分退款成功 ¥{money(row.executed_amount or 0)}，剩余请重试"[:255]
         else:
-            # 没有已绑定退款单，或渠道明确终态失败；PaymentService 的安全边界保证
-            # 外部请求前先提交退款单及关联，因此此时可标记失败并由新审批重新执行。
+            # No refund row was ever linked, or the linked channel result is a
+            # definitive failure; only these cases may be retried safely.
             row.status = "FAILED"
             row.fail_reason = (
                 f"退款执行失败（已退 ¥{money(row.executed_amount or 0)}）: {error}"
