@@ -503,15 +503,16 @@ class CustomerMergeService:
         if profile_customer_ids:
             from app.services.taste_learning_service import TasteLearningService
 
+            # 合并时用单次大批次 fold，避免在无有效信号的事件上因 watermark 不前进而循环。
+            # 超过上限时 fail closed，待推荐后台先消化积压后再合并。
             for customer_id in profile_customer_ids:
-                for _ in range(20):
-                    learned = await TasteLearningService.learn_from_events(db, customer_id)
-                    if learned <= 0:
-                        break
-                else:
+                learned = await TasteLearningService.learn_from_events(
+                    db, customer_id, limit=10000
+                )
+                if learned >= 10000:
                     raise AppException(
                         40964,
-                        "顾客推荐行为事件积压过多，请稍后重试合并，避免丢失推荐画像",
+                        "顾客推荐行为事件超过合并处理上限，请先消化推荐任务积压后再合并",
                     )
 
         if source_opt_in and target_opt_in:
