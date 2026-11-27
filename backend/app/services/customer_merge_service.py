@@ -95,7 +95,7 @@ class CustomerMergeService:
         # 按 id 升序加锁，避免死锁
         ids = sorted([int(target_customer_id), int(source_customer_id)])
         locked = (
-            await db.execute(select(Customer).where(Customer.id.in_(ids)).with_for_update())
+            await db.execute(select(Customer).where(Customer.id.in_(ids)).order_by(Customer.id).with_for_update())
         ).scalars().all()
         by_id = {int(c.id): c for c in locked}
         target = by_id.get(int(target_customer_id))
