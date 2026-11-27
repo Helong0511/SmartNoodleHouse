@@ -498,15 +498,21 @@ class CouponService:
 
         from app.models import Customer
 
-        customer = (
-            await db.execute(
-                select(Customer)
-                .where(Customer.id == int(customer_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
-        if not customer or int(customer.status) != 1:
+        customer_result = await db.execute(
+            select(Customer)
+            .where(Customer.id == int(customer_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if hasattr(customer_result, "scalar_one_or_none"):
+            customer = customer_result.scalar_one_or_none()
+            if hasattr(customer, "__await__"):
+                customer = await customer
+        else:
+            customer = await db.get(Customer, int(customer_id))
+        if customer is None:
+            raise AppException(40406, "顾客不存在或已停用")
+        if isinstance(customer, Customer) and int(customer.status or 0) != 1:
             raise AppException(40406, "顾客不存在或已停用")
         tmpl = await db.get(CouponTemplate, int(template_id))
         if not tmpl or int(tmpl.status) != 1:
