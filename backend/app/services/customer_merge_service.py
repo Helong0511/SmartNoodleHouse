@@ -480,7 +480,7 @@ class CustomerMergeService:
 
         # CustomerTasteProfile 是增量画像，不能只改 customer_id 后覆盖目标。
         # 两侧 raw_weight 按时间衰减到较新的事件时间，再合并事件数与分数。
-        from app.services.taste_learning_service import TasteLearningService
+        from app.services.taste_learning_service import _decay_factor, _logistic, _quantize
 
         source_profiles = list(
             (
@@ -523,17 +523,17 @@ class CustomerMergeService:
             previous_target_event_at = target_row.last_event_at
             source_weight = float(source_row.raw_weight or 0)
             target_weight = float(target_row.raw_weight or 0)
-            source_weight *= TasteLearningService._decay_factor(
+            source_weight *= _decay_factor(
                 source_row.last_event_at, latest_at
             )
-            target_weight *= TasteLearningService._decay_factor(
+            target_weight *= _decay_factor(
                 target_row.last_event_at, latest_at
             )
             combined_weight = round(source_weight + target_weight, 4)
             target_row.raw_weight = Decimal(str(combined_weight))
             target_row.score = Decimal(
-                str(TasteLearningService._quantize(
-                    TasteLearningService._logistic(combined_weight)
+                str(_quantize(
+                    _logistic(combined_weight)
                 ))
             )
             target_row.event_count = int(target_row.event_count or 0) + int(
