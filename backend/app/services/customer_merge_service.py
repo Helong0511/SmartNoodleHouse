@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -109,14 +109,20 @@ class CustomerMergeService:
             foreign_order = (
                 await db.execute(
                     select(Order.id)
-                    .where(Order.customer_id == source.id, Order.store_id != sid)
+                    .where(
+                        Order.customer_id == source.id,
+                        or_(Order.store_id.is_(None), Order.store_id != sid),
+                    )
                     .limit(1)
                 )
             ).scalar_one_or_none()
             foreign_recharge = (
                 await db.execute(
                     select(RechargeOrder.id)
-                    .where(RechargeOrder.customer_id == source.id, RechargeOrder.store_id != sid)
+                    .where(
+                        RechargeOrder.customer_id == source.id,
+                        or_(RechargeOrder.store_id.is_(None), RechargeOrder.store_id != sid),
+                    )
                     .limit(1)
                 )
             ).scalar_one_or_none()
@@ -125,14 +131,13 @@ class CustomerMergeService:
                     select(BalanceLedger.id)
                     .where(
                         BalanceLedger.customer_id == source.id,
-                        BalanceLedger.store_id.is_not(None),
-                        BalanceLedger.store_id != sid,
+                        or_(BalanceLedger.store_id.is_(None), BalanceLedger.store_id != sid),
                     )
                     .limit(1)
                 )
             ).scalar_one_or_none()
             if foreign_order or foreign_recharge or foreign_wallet_ledger:
-                raise AppException(40301, "源顾客在其他门店有订单或充值/储值流水，请由总部账号合并")
+                raise AppException(40301, "源顾客存在其他门店或门店归属未知的订单/充值/储值流水，请由总部账号核实后合并")
 
         before = {
             "target": _customer_snapshot(target),
