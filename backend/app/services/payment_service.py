@@ -2859,7 +2859,7 @@ class PaymentService:
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status
             row.fail_reason = row.fail_reason or fail_reason or (
-                "微信退款异常：需要在微信商户平台处理异常退款后再查询确认" if new_status == "ABNORMAL" else new_status
+                "退款渠道返回异常，需在对应支付平台核实后重新查询" if new_status == "ABNORMAL" else new_status
             )
         elif new_status == "UNKNOWN":
             # 保留 UNKNOWN，不得升格为 SUCCESS；由 query / 定时补偿恢复
