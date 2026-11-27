@@ -30,15 +30,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppException
 from app.models import (
     BalanceLedger,
+    CampaignAttribution,
     Customer,
     CustomerAlipayAccount,
+    CustomerBehaviorEvent,
     CustomerCoupon,
+    CustomerFavoriteProduct,
     CustomerIdentity,
+    CustomerLifecycle,
     CustomerPreference,
+    CustomerSegmentMember,
     CustomerSocialIdentity,
+    CustomerTasteProfile,
     CustomerWechatAccount,
     DiningSession,
     FaceProfile,
+    InvoiceRequest,
+    MarketingMessageLog,
+    MarketingTask,
     Order,
     Payment,
     PointLedger,
@@ -163,6 +172,19 @@ class CustomerMergeService:
             "coupons_expired_dup": 0,
             "preferences_moved": 0,
             "preferences_merged": 0,
+            "taste_events_moved": 0,
+            "taste_profiles_moved": 0,
+            "taste_profiles_merged": 0,
+            "favorites_moved": 0,
+            "favorites_deduplicated": 0,
+            "lifecycle_rows_moved": 0,
+            "lifecycle_rows_merged": 0,
+            "invoice_requests_moved": 0,
+            "segment_members_moved": 0,
+            "segment_members_deduplicated": 0,
+            "marketing_tasks_moved": 0,
+            "marketing_logs_moved": 0,
+            "campaign_attributions_moved": 0,
             "faces_revoked": 0,
             "welcome_logs": 0,
             "point_ledgers": 0,
@@ -182,6 +204,7 @@ class CustomerMergeService:
         await cls._reassign_orders_payments(db, source.id, target.id, stats)
         await cls._merge_coupons(db, source.id, target.id, stats)
         await cls._merge_preferences(db, source.id, target.id, stats)
+        await cls._merge_customer_profiles_and_relations(db, source.id, target.id, stats)
         await cls._merge_faces(db, source.id, target.id, stats)
         await cls._merge_social_benefits(db, source.id, target.id, stats)
         await cls._reassign_simple(
@@ -434,6 +457,205 @@ class CustomerMergeService:
                 tp.last_used_at = sp.last_used_at
             await db.delete(sp)
             stats["preferences_merged"] += 1
+        await db.flush()
+
+    @classmethod
+    async def _merge_customer_profiles_and_relations(
+        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+    ) -> None:
+        """迁移合并后仍归属源账户的推荐画像、收藏、生命周期及营销关联。"""
+        # 行为事件是推荐画像的可追溯输入；在 Customer 行锁保护下整体迁移。
+        await cls._reassign_simple(
+            db, CustomerBehaviorEvent, source_id, target_id, "taste_events_moved", stats
+        )
+
+        # CustomerTasteProfile 是增量画像，不能只改 customer_id 后覆盖目标。
+        # 两侧 raw_weight 按时间衰减到较新的事件时间，再合并事件数与分数。
+        from app.services.taste_learning_service import TasteLearningService
+
+        source_profiles = list(
+            (
+                await db.execute(
+                    select(CustomerTasteProfile)
+                    .where(CustomerTasteProfile.customer_id == int(source_id))
+                    .order_by(CustomerTasteProfile.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        target_profiles = list(
+            (
+                await db.execute(
+                    select(CustomerTasteProfile)
+                    .where(CustomerTasteProfile.customer_id == int(target_id))
+                    .order_by(CustomerTasteProfile.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        target_by_key = {
+            (row.dim_type, row.target_key): row for row in target_profiles
+        }
+        for source_row in source_profiles:
+            key = (source_row.dim_type, source_row.target_key)
+            target_row = target_by_key.get(key)
+            if target_row is None:
+                source_row.customer_id = int(target_id)
+                target_by_key[key] = source_row
+                stats["taste_profiles_moved"] += 1
+                continue
+
+            timestamps = [
+                value
+                for value in (source_row.last_event_at, target_row.last_event_at)
+                if value is not None
+            ]
+            latest_at = max(timestamps) if timestamps else None
+            source_weight = float(source_row.raw_weight or 0)
+            target_weight = float(target_row.raw_weight or 0)
+            source_weight *= TasteLearningService._decay_factor(
+                source_row.last_event_at, latest_at
+            )
+            target_weight *= TasteLearningService._decay_factor(
+                target_row.last_event_at, latest_at
+            )
+            combined_weight = round(source_weight + target_weight, 4)
+            target_row.raw_weight = Decimal(str(combined_weight))
+            target_row.score = Decimal(
+                str(TasteLearningService._quantize(
+                    TasteLearningService._logistic(combined_weight)
+                ))
+            )
+            target_row.event_count = int(target_row.event_count or 0) + int(
+                source_row.event_count or 0
+            )
+            target_row.last_event_at = latest_at
+            computed_at = [
+                value
+                for value in (source_row.last_computed_at, target_row.last_computed_at)
+                if value is not None
+            ]
+            target_row.last_computed_at = max(computed_at) if computed_at else latest_at
+            if source_row.last_event_at and (
+                target_row.target_name is None
+                or source_row.last_event_at >= (target_profiles[0].last_event_at if target_profiles else source_row.last_event_at)
+            ):
+                target_row.target_name = source_row.target_name or target_row.target_name
+            await db.delete(source_row)
+            stats["taste_profiles_merged"] += 1
+        await db.flush()
+
+        # 收藏有 (customer, product) 唯一约束：目标已有同菜品时去重，否则迁移。
+        target_favorites = list(
+            (
+                await db.execute(
+                    select(CustomerFavoriteProduct)
+                    .where(CustomerFavoriteProduct.customer_id == int(target_id))
+                    .order_by(CustomerFavoriteProduct.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        favorite_keys = {(int(row.product_id), int(row.store_id)) for row in target_favorites}
+        source_favorites = list(
+            (
+                await db.execute(
+                    select(CustomerFavoriteProduct)
+                    .where(CustomerFavoriteProduct.customer_id == int(source_id))
+                    .order_by(CustomerFavoriteProduct.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        for row in source_favorites:
+            key = (int(row.product_id), int(row.store_id))
+            if key in favorite_keys:
+                await db.delete(row)
+                stats["favorites_deduplicated"] += 1
+            else:
+                row.customer_id = int(target_id)
+                favorite_keys.add(key)
+                stats["favorites_moved"] += 1
+        await db.flush()
+
+        # 生命周期是每顾客一条的夜批快照；保留计算时间较新的整份快照。
+        lifecycle_rows = list(
+            (
+                await db.execute(
+                    select(CustomerLifecycle)
+                    .where(CustomerLifecycle.customer_id.in_((int(source_id), int(target_id))))
+                    .order_by(CustomerLifecycle.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        source_lifecycle = next(
+            (row for row in lifecycle_rows if int(row.customer_id) == int(source_id)), None
+        )
+        target_lifecycle = next(
+            (row for row in lifecycle_rows if int(row.customer_id) == int(target_id)), None
+        )
+        if source_lifecycle is not None and target_lifecycle is None:
+            source_lifecycle.customer_id = int(target_id)
+            stats["lifecycle_rows_moved"] = 1
+        elif source_lifecycle is not None and target_lifecycle is not None:
+            if source_lifecycle.computed_at and (
+                not target_lifecycle.computed_at
+                or source_lifecycle.computed_at > target_lifecycle.computed_at
+            ):
+                for field in (
+                    "lifecycle_code", "rfm_segment", "r_score", "f_score", "m_score",
+                    "silence_days", "order_count_90d", "pay_amount_90d", "computed_at",
+                ):
+                    setattr(target_lifecycle, field, getattr(source_lifecycle, field))
+            await db.delete(source_lifecycle)
+            stats["lifecycle_rows_merged"] = 1
+        await db.flush()
+
+        # 订单发票申请和营销历史/待执行任务继续跟随合并后的当前顾客。
+        await cls._reassign_simple(
+            db, InvoiceRequest, source_id, target_id, "invoice_requests_moved", stats
+        )
+        await cls._reassign_simple(
+            db, MarketingTask, source_id, target_id, "marketing_tasks_moved", stats
+        )
+        await cls._reassign_simple(
+            db, MarketingMessageLog, source_id, target_id, "marketing_logs_moved", stats
+        )
+        await cls._reassign_simple(
+            db, CampaignAttribution, source_id, target_id, "campaign_attributions_moved", stats
+        )
+
+        # 客群成员有 (segment, customer) 唯一约束；目标已在同一客群时去重。
+        target_members = list(
+            (
+                await db.execute(
+                    select(CustomerSegmentMember)
+                    .where(CustomerSegmentMember.customer_id == int(target_id))
+                    .order_by(CustomerSegmentMember.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        member_segment_ids = {int(row.segment_id) for row in target_members}
+        source_members = list(
+            (
+                await db.execute(
+                    select(CustomerSegmentMember)
+                    .where(CustomerSegmentMember.customer_id == int(source_id))
+                    .order_by(CustomerSegmentMember.id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        for row in source_members:
+            if int(row.segment_id) in member_segment_ids:
+                await db.delete(row)
+                stats["segment_members_deduplicated"] += 1
+            else:
+                row.customer_id = int(target_id)
+                member_segment_ids.add(int(row.segment_id))
+                stats["segment_members_moved"] += 1
         await db.flush()
 
     @classmethod
