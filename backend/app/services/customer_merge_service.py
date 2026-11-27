@@ -118,8 +118,10 @@ class CustomerMergeService:
         source = by_id.get(int(source_customer_id))
         if not target or not source:
             raise AppException(40461, "顾客不存在", status_code=404)
-        if int(source.status or 0) == 0:
+        if int(source.status or 0) != 1:
             raise AppException(40062, "源顾客已禁用/已合并")
+        if int(target.status or 0) != 1:
+            raise AppException(40063, "目标顾客已禁用，不能作为合并目标")
         if actor_store_id is not None:
             sid = int(actor_store_id)
             foreign_order = (
