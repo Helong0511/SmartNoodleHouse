@@ -1372,10 +1372,7 @@ class CouponService:
         order_id = int(getattr(order, "id", 0) or 0)
         if order_id <= 0:
             return []
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == order_id)
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        owner_id = getattr(order, "customer_id", None)
         if owner_id is None:
             return []
         # 顾客合并、支付发券、退款回收统一 Customer → Order 锁序。
@@ -1480,10 +1477,7 @@ class CouponService:
         order_id = int(getattr(order, "id", 0) or 0)
         if order_id <= 0:
             return []
-        owner_result = await db.execute(
-            select(Order.customer_id).where(Order.id == order_id)
-        )
-        owner_id = owner_result.scalar_one_or_none()
+        owner_id = getattr(order, "customer_id", None)
         if owner_id is None:
             return []
         # 与支付发券相同：先锁顾客，再锁订单，防止与顾客合并形成反向锁环。
