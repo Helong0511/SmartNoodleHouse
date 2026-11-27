@@ -150,7 +150,7 @@ class PreferenceService:
         ).scalar_one_or_none()
         if not customer:
             return
-        if int(getattr(customer, "status", 1) or 0) != 1:
+        if getattr(customer, "status", None) in (0, 1) and customer.status != 1:
             from app.core.exceptions import AppException
 
             raise AppException(40962, "顾客正在合并或已停用，画像更新将重试")
