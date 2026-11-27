@@ -58,12 +58,12 @@ def _add_origin_column(table: str) -> None:
     index_name = f"ix_{table}_origin_customer_id"
     if index_name not in indexes:
         op.create_index(index_name, table, ["origin_customer_id"])
-    conn.execute(
-        sa.text(
-            f"UPDATE {table} SET origin_customer_id = customer_id "
-            "WHERE origin_customer_id IS NULL"
-        )
-    )
+
+    # Do not backfill from customer_id. Before this migration, account merges
+    # reassigned historical ledger rows to the target customer, so customer_id
+    # cannot reliably identify the account that produced the old balance
+    # snapshot. NULL deliberately means "legacy origin unknown"; API responses
+    # may display current ownership without claiming it is the original owner.
 
 
 def upgrade() -> None:
