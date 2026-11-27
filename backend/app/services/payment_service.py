@@ -1483,6 +1483,8 @@ class PaymentService:
                 select(Order.customer_id).where(Order.id == order_id)
             )
             owner_id = owner_result.scalar_one_or_none()
+            if owner_id is not None and not isinstance(owner_id, int):
+                owner_id = None
         lock_customer_id = int(owner_id) if owner_id is not None else (
             int(additional_customer_id) if additional_customer_id is not None else None
         )
@@ -1511,7 +1513,8 @@ class PaymentService:
         ).scalar_one_or_none()
         if order is None:
             return None, customer
-        if (int(order.customer_id) if order.customer_id is not None else None) != (
+        order_owner_id = getattr(order, "customer_id", None)
+        if (int(order_owner_id) if order_owner_id is not None else None) != (
             int(owner_id) if owner_id is not None else None
         ):
             raise AppException(40963, "订单顾客归属已变化，请回滚并重试支付结算")
@@ -1540,6 +1543,8 @@ class PaymentService:
                 select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
             )
             owner_id = owner_result.scalar_one_or_none()
+            if owner_id is not None and not isinstance(owner_id, int):
+                owner_id = None
             if owner_id is not None:
                 customer = (
                     await db.execute(
@@ -1561,7 +1566,8 @@ class PaymentService:
             ).scalar_one_or_none()
             if recharge is None:
                 raise AppException(40491, "充值单不存在")
-            if (int(recharge.customer_id) if recharge.customer_id is not None else None) != (
+            recharge_owner_id = getattr(recharge, "customer_id", None)
+            if (int(recharge_owner_id) if recharge_owner_id is not None else None) != (
                 int(owner_id) if owner_id is not None else None
             ):
                 raise AppException(40963, "充值顾客归属已变化，请回滚并重试支付结算")
