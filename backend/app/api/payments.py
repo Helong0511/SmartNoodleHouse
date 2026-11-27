@@ -556,8 +556,11 @@ async def sync_refund(refund_no: str, request: Request, db: DbSession, user: Cur
     if not row:
         raise AppException(40492, "退款单不存在", status_code=404)
     order = await db.get(Order, row.order_id)
-    if order:
-        assert_order_store_access(user, order)
+    # A refund is order-scoped financial state. Fail closed if its required order
+    # association is missing; otherwise the store authorization check is skipped.
+    if not order:
+        raise AppException(40404, "退款关联订单不存在", status_code=404)
+    assert_order_store_access(user, order)
     before_status = row.status
     row = await PaymentService.sync_refund_status(db, row)
     # Manual provider reconciliation changes financial state; persist an attributable
