@@ -72,3 +72,41 @@ async def test_refund_requester_cannot_approve_own_request(monkeypatch):
         )
     assert exc.value.code == 40301
     assert "不能审批自己的" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_missing_linked_refund_requires_reconciliation(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import pos_refund_service
+    from app.services.pos_refund_service import PosRefundService
+
+    user = SimpleNamespace(id=9)
+    row = SimpleNamespace(
+        id=33,
+        store_id=7,
+        order_id=41,
+        amount="18.00",
+        status="PROCESSING",
+        requested_by=None,
+        refund_id=9999,
+        execution_epoch=1,
+        execution_lease_until=None,
+        fail_reason=None,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    monkeypatch.setattr(pos_refund_service, "_can_approve", AsyncMock(return_value=True))
+    monkeypatch.setattr(PosRefundService, "_lock_request", AsyncMock(return_value=row))
+    monkeypatch.setattr(pos_refund_service, "assert_store_access", lambda *_args: None)
+
+    result = await PosRefundService.approve_and_execute(
+        db, user=user, request_id=row.id, remark="核对异常关联"
+    )
+
+    assert result.status == "RECONCILIATION_REQUIRED"
+    assert "关联退款单不存在" in result.fail_reason
+    db.flush.assert_awaited_once()
+    db.commit.assert_awaited_once()
