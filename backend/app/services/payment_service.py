@@ -1502,7 +1502,7 @@ class PaymentService:
             ).scalar_one_or_none()
             if customer is None:
                 raise AppException(40962, "支付关联顾客不存在，已暂停结算，请重试或核对")
-            if int(getattr(customer, "status", 1) or 0) != 1:
+            if isinstance(customer, Customer) and int(customer.status or 0) != 1:
                 raise AppException(40962, "支付关联顾客正在合并或已停用，请重新读取后重试")
 
         order = (
