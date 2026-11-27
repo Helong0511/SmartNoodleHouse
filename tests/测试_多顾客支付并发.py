@@ -246,13 +246,15 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         row.status = status
 
     settle_db = AsyncMock()
-    # 依次模拟：读取支付关联、锁订单、锁支付、锁退款行；
-    # SUCCESS 入账前再次校验并锁定订单与支付，顺序始终为 Order→Payment→Refund。
+    # 依次模拟：读取支付关联、预读顾客归属、Customer-first 后锁订单/支付、
+    # 锁退款行；成功入账的内部父行锁在外层 Customer gate 已持有时再确认。
     payment_peek = MagicMock()
     payment_peek.first.return_value = (9, None)
+    owner_preflight = _scalar_result(None)
     settle_db.execute = AsyncMock(
         side_effect=[
             payment_peek,
+            owner_preflight,
             _scalar_result(settle_order),
             _scalar_result(settle_payment),
             _scalar_result(settle_row),
