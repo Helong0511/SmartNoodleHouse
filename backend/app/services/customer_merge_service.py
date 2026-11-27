@@ -676,6 +676,17 @@ class CustomerMergeService:
         cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
     ) -> None:
         """将进行中的同桌局控制权、成员关系及共享草稿行归属迁到目标。"""
+        host_party_ids = [
+            int(row[0])
+            for row in (
+                await db.execute(
+                    select(TableParty.id)
+                    .where(TableParty.host_customer_id == int(source_id))
+                    .order_by(TableParty.id)
+                    .with_for_update()
+                )
+            ).all()
+        ]
         host_result = await db.execute(
             update(TableParty)
             .where(TableParty.host_customer_id == int(source_id))
@@ -699,7 +710,23 @@ class CustomerMergeService:
                 )
             ).scalars().all()
         )
-        target_party_ids = {int(row.party_id) for row in target_members}
+        target_by_party = {int(row.party_id): row for row in target_members}
+        target_party_ids = set(target_by_party)
+        for party_id in host_party_ids:
+            target_member = target_by_party.get(party_id)
+            if target_member is None:
+                target_member = TablePartyMember(
+                    party_id=party_id,
+                    customer_id=int(target_id),
+                    role="HOST",
+                    joined_at=now_local(),
+                )
+                db.add(target_member)
+                target_by_party[party_id] = target_member
+                target_party_ids.add(party_id)
+            else:
+                target_member.role = "HOST"
+                target_member.left_at = None
         source_members = list(
             (
                 await db.execute(
