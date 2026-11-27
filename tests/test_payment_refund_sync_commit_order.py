@@ -31,12 +31,15 @@ async def test_sync_refund_commits_before_websocket_notification(monkeypatch):
     db.commit = AsyncMock(side_effect=commit)
     db.get = AsyncMock(return_value=order)
     monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", AsyncMock(side_effect=sync_refund_status))
+    async def audit(*_args, **_kwargs):
+        events.append("audit")
+    monkeypatch.setattr(payment_api.AuditService, "log_staff", audit)
     monkeypatch.setattr(payment_api, "assert_order_store_access", lambda *_: None)
     monkeypatch.setattr(payment_api.ws_manager, "notify_order_event", notify)
     monkeypatch.setattr(payment_api, "success", lambda data, request=None: data)
 
     response = await payment_api.sync_refund("RF-7", request=MagicMock(), db=db, user=SimpleNamespace(id=1))
-    assert events == ["sync", "commit", "notify"]
+    assert events == ["sync", "audit", "commit", "notify"]
     assert response["status"] == "SUCCESS"
     db.commit.assert_awaited_once()
 
@@ -60,6 +63,7 @@ async def test_sync_refund_websocket_failure_does_not_fail_committed_sync(monkey
         raise RuntimeError("websocket unavailable")
 
     monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", sync_refund_status)
+    monkeypatch.setattr(payment_api.AuditService, "log_staff", AsyncMock())
     monkeypatch.setattr(payment_api, "assert_order_store_access", lambda *_: None)
     monkeypatch.setattr(payment_api.ws_manager, "notify_order_event", notify)
     monkeypatch.setattr(payment_api, "success", lambda data, request=None: data)
