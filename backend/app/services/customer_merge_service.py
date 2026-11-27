@@ -147,6 +147,8 @@ class CustomerMergeService:
 
         # P1-3 汇总订单、充值、储值流水及顾客档案中的门店归属，避免审计漏报跨店数据。
         source_store_ids = await cls._collect_source_store_ids(db, source)
+        # NULL 门店归属不能伪装成任一门店；总部合并也必须显式记录未知范围。
+        unknown_store_scope = await cls._collect_unknown_source_store_scope(db, source)
 
         stats: dict[str, Any] = {
             "wechat_moved": 0,
@@ -203,6 +205,7 @@ class CustomerMergeService:
             "source": _customer_snapshot(source),
             "stats": stats,
             "source_store_ids": source_store_ids,
+            "unknown_store_scope": unknown_store_scope,
             "cross_store": len(source_store_ids) > 1,
         }
         await AuditService.log(
@@ -225,6 +228,29 @@ class CustomerMergeService:
             "cross_store": len(source_store_ids) > 1,
         }
 
+
+    @classmethod
+    async def _collect_unknown_source_store_scope(
+        cls, db: AsyncSession, source: Customer
+    ) -> dict[str, int]:
+        """统计来源顾客门店归属未知的业务记录，供总部合并审计追溯。"""
+        unknown: dict[str, int] = {}
+        for key, model in (
+            ("orders", Order),
+            ("recharge_orders", RechargeOrder),
+            ("balance_ledgers", BalanceLedger),
+        ):
+            count = (
+                await db.execute(
+                    select(func.count(model.id)).where(
+                        model.customer_id == int(source.id),
+                        model.store_id.is_(None),
+                    )
+                )
+            ).scalar_one()
+            if int(count or 0) > 0:
+                unknown[key] = int(count)
+        return unknown
 
     @classmethod
     async def _collect_source_store_ids(cls, db: AsyncSession, source: Customer) -> list[int]:
