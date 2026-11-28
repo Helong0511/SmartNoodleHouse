@@ -62,6 +62,10 @@ async def import_payment_bill(
         )
         await db.commit()
     except ValueError as e:
+        # run_batch records FAILED + error_message before re-raising validation
+        # errors. Commit that diagnostic batch before translating to HTTP 400;
+        # otherwise request teardown rolls it back and operators lose the audit trail.
+        await db.commit()
         raise AppException(40012, str(e), status_code=400) from e
     return success(
         {

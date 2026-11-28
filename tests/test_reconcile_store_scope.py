@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from httpx import ASGITransport, AsyncClient
 
 from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReconcileDiff
@@ -137,5 +138,127 @@ async def test_unbound_store_admin_cannot_use_reconcile_or_archive_lists(db_sess
                     "/api/reconcile/orders/archived", params={"store_id": 101}
                 )
                 assert archive.status_code == 403, archive.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_failed_payment_reconcile_batch_is_committed_before_http_error(db_session):
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    user = SimpleNamespace(
+        id=99103,
+        role_id=1,
+        role=SimpleNamespace(code="SUPER_ADMIN"),
+        store_id=None,
+        status=1,
+        token_version=0,
+    )
+
+    async def override_db():
+        yield db_session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        permissions = {"reconcile:manage"}
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=permissions)):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/reconcile/payments/import",
+                    data={"channel": "WECHAT", "bill_date": "2026-11-26"},
+                    files={"file": ("invalid.csv", b"not,a,valid,bill", "text/csv")},
+                )
+        assert response.status_code == 400, response.text
+        persisted = (
+            await db_session.execute(
+                select(PaymentReconcileBatch).where(
+                    PaymentReconcileBatch.bill_date == date(2026, 11, 26),
+                    PaymentReconcileBatch.channel == "WECHAT",
+                    PaymentReconcileBatch.status == "FAILED",
+                )
+            )
+        ).scalar_one()
+        assert persisted.error_message == "渠道账单缺少交易号或金额列"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_invalid_reimport_preserves_completed_reconcile_batch_and_diffs(db_session):
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    bill_date = date(2026, 11, 25)
+    user = SimpleNamespace(
+        id=99104,
+        role_id=1,
+        role=SimpleNamespace(code="SUPER_ADMIN"),
+        store_id=None,
+        status=1,
+        token_version=0,
+    )
+    batch = PaymentReconcileBatch(
+        channel="WECHAT",
+        bill_date=bill_date,
+        scope_store_id=0,
+        status="DONE",
+        local_count=8,
+        channel_count=9,
+        mismatch_count=1,
+        source_filename="previous-valid.csv",
+    )
+    db_session.add(batch)
+    await db_session.flush()
+    old_diff = PaymentReconcileDiff(
+        batch_id=batch.id,
+        diff_type="LONG",
+        channel_trade_no="PRESERVE-OLD-DIFF",
+    )
+    db_session.add(old_diff)
+    await db_session.commit()
+    batch_id = batch.id
+
+    async def override_db():
+        yield db_session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        with patch(
+            "app.api.deps.get_user_permissions",
+            AsyncMock(return_value={"reconcile:manage"}),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/reconcile/payments/import",
+                    data={"channel": "WECHAT", "bill_date": bill_date.isoformat()},
+                    files={"file": ("invalid-retry.csv", b"not,a,valid,bill", "text/csv")},
+                )
+        assert response.status_code == 400, response.text
+        await db_session.refresh(batch)
+        assert batch.status == "DONE"
+        assert batch.source_filename == "previous-valid.csv"
+        assert batch.mismatch_count == 1
+        preserved = (
+            await db_session.execute(
+                select(PaymentReconcileDiff).where(
+                    PaymentReconcileDiff.batch_id == batch_id
+                )
+            )
+        ).scalars().all()
+        assert [row.channel_trade_no for row in preserved] == ["PRESERVE-OLD-DIFF"]
     finally:
         app.dependency_overrides.clear()

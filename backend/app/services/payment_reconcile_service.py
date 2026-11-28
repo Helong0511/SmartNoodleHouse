@@ -138,26 +138,10 @@ class PaymentReconcileService:
                 if existing is None:
                     raise
 
-        if existing and existing.status == "DONE":
-            # 重跑：清旧差异
-            old = (
-                await db.execute(
-                    select(PaymentReconcileDiff).where(PaymentReconcileDiff.batch_id == existing.id)
-                )
-            ).scalars().all()
-            for d in old:
-                await db.delete(d)
-            batch = existing
-            batch.status = "PENDING"
-            batch.error_message = None
-        else:
-            batch = existing
-            batch.status = "PENDING"
-            batch.error_message = None
-            if batch.created_by is None and created_by is not None:
-                batch.created_by = created_by
-        batch.source_filename = source_filename
-        await db.flush()
+        batch = existing
+        # 已完成批次的旧结果必须保留到新账单完整校验成功；无效重传不能
+        # 把 DONE 降级为 FAILED，也不能提前删除原差异明细。
+        was_done = batch.status == "DONE"
 
         try:
             channel_rows = parse_channel_bill_csv(ch, bill_csv)
@@ -286,17 +270,38 @@ class PaymentReconcileService:
                         )
                     )
 
+            # 新账单已通过解析、门店归属及本地交易校验，现在才替换旧差异。
+            if was_done:
+                old = (
+                    await db.execute(
+                        select(PaymentReconcileDiff).where(
+                            PaymentReconcileDiff.batch_id == batch.id
+                        )
+                    )
+                ).scalars().all()
+                for old_diff in old:
+                    await db.delete(old_diff)
+
             for d in diffs:
                 db.add(d)
 
+            batch.status = "DONE"
+            batch.error_message = None
+            batch.source_filename = source_filename
+            if batch.created_by is None and created_by is not None:
+                batch.created_by = created_by
             batch.local_count = len(local_payments)
             batch.channel_count = len(channel_rows)
             batch.mismatch_count = len(diffs)
-            batch.status = "DONE"
             await db.flush()
             return batch
         except Exception as e:
-            batch.status = "FAILED"
-            batch.error_message = str(e)[:480]
-            await db.flush()
+            if was_done:
+                # 对已完成批次的无效重传只返回错误；保留 DONE、旧文件元数据和差异。
+                # 只有完整新结果生成后才会进入上面的替换阶段。
+                batch.status = "DONE"
+            else:
+                batch.status = "FAILED"
+                batch.error_message = str(e)[:480]
+                await db.flush()
             raise
