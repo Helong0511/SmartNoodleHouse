@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from httpx import ASGITransport, AsyncClient
 
 from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReconcileDiff
@@ -139,3 +140,218 @@ async def test_unbound_store_admin_cannot_use_reconcile_or_archive_lists(db_sess
                 assert archive.status_code == 403, archive.text
     finally:
         app.dependency_overrides.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_failed_payment_reconcile_batch_is_committed_before_http_error(db_session):
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    user = SimpleNamespace(
+        id=99103,
+        role_id=1,
+        role=SimpleNamespace(code="SUPER_ADMIN"),
+        store_id=None,
+        status=1,
+        token_version=0,
+    )
+
+    async def override_db():
+        yield db_session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        permissions = {"reconcile:manage"}
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=permissions)):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/reconcile/payments/import",
+                    data={"channel": "WECHAT", "bill_date": "2026-11-26"},
+                    files={"file": ("invalid.csv", b"not,a,valid,bill", "text/csv")},
+                )
+        assert response.status_code == 400, response.text
+        persisted = (
+            await db_session.execute(
+                select(PaymentReconcileBatch).where(
+                    PaymentReconcileBatch.bill_date == date(2026, 11, 26),
+                    PaymentReconcileBatch.channel == "WECHAT",
+                    PaymentReconcileBatch.status == "FAILED",
+                )
+            )
+        ).scalar_one()
+        assert persisted.error_message == "渠道账单缺少交易号或金额列"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_invalid_reimport_preserves_completed_reconcile_batch_and_diffs(db_session):
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    bill_date = date(2026, 11, 25)
+    user = SimpleNamespace(
+        id=99104,
+        role_id=1,
+        role=SimpleNamespace(code="SUPER_ADMIN"),
+        store_id=None,
+        status=1,
+        token_version=0,
+    )
+    batch = PaymentReconcileBatch(
+        channel="WECHAT",
+        bill_date=bill_date,
+        scope_store_id=0,
+        status="DONE",
+        local_count=8,
+        channel_count=9,
+        mismatch_count=1,
+        source_filename="previous-valid.csv",
+    )
+    db_session.add(batch)
+    await db_session.flush()
+    old_diff = PaymentReconcileDiff(
+        batch_id=batch.id,
+        diff_type="LONG",
+        channel_trade_no="PRESERVE-OLD-DIFF",
+    )
+    db_session.add(old_diff)
+    await db_session.commit()
+    batch_id = batch.id
+
+    async def override_db():
+        yield db_session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        with patch(
+            "app.api.deps.get_user_permissions",
+            AsyncMock(return_value={"reconcile:manage"}),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/reconcile/payments/import",
+                    data={"channel": "WECHAT", "bill_date": bill_date.isoformat()},
+                    files={"file": ("invalid-retry.csv", b"not,a,valid,bill", "text/csv")},
+                )
+        assert response.status_code == 400, response.text
+        await db_session.refresh(batch)
+        assert batch.status == "DONE"
+        assert batch.source_filename == "previous-valid.csv"
+        assert batch.mismatch_count == 1
+        preserved = (
+            await db_session.execute(
+                select(PaymentReconcileDiff).where(
+                    PaymentReconcileDiff.batch_id == batch_id
+                )
+            )
+        ).scalars().all()
+        assert [row.channel_trade_no for row in preserved] == ["PRESERVE-OLD-DIFF"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_concurrent_first_reconcile_batch_avoids_innodb_gap_lock_deadlock(db_session):
+    """Two RR sessions can safely create the same first batch.
+
+    The second insert waits on the unique key, then reuses the winner's batch
+    through a locking/current read instead of deadlocking on missing-key gap locks.
+    """
+    import asyncio
+    import uuid
+
+    from sqlalchemy import event, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.models import PaymentReconcileBatch
+    from app.services.payment_reconcile_service import PaymentReconcileService
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8 / InnoDB")
+
+    engine = db_session.bind
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    bill_day = date(2026, 11, 26)
+    insert_seen = asyncio.Event()
+
+    def observe_batch_insert(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("INSERT INTO PAYMENT_RECONCILE_BATCHES"):
+            insert_seen.set()
+
+    async with maker() as winner, maker() as loser:
+        key = (
+            PaymentReconcileBatch.channel == "WECHAT",
+            PaymentReconcileBatch.bill_date == bill_day,
+            PaymentReconcileBatch.scope_store_id == 0,
+        )
+        assert await winner.scalar(select(PaymentReconcileBatch.id).where(*key)) is None
+        assert await loser.scalar(select(PaymentReconcileBatch.id).where(*key)) is None
+
+        first = await PaymentReconcileService.run_batch(
+            winner,
+            channel="WECHAT",
+            bill_date=bill_day,
+            bill_csv="trade_no,amount\n",
+            created_by=None,
+            source_filename=f"winner-{suffix[:12]}.csv",
+            scope_store_id=0,
+        )
+        event.listen(engine.sync_engine, "before_cursor_execute", observe_batch_insert)
+        try:
+            task = asyncio.create_task(
+                PaymentReconcileService.run_batch(
+                    loser,
+                    channel="WECHAT",
+                    bill_date=bill_day,
+                    bill_csv="trade_no,amount\n",
+                    created_by=None,
+                    source_filename=f"loser-{suffix[:12]}.csv",
+                    scope_store_id=0,
+                )
+            )
+            await asyncio.wait_for(insert_seen.wait(), timeout=10)
+            # The listener runs immediately before cursor execution. Give the
+            # driver time to reach InnoDB and assert the competing INSERT is
+            # still blocked while the winning transaction remains uncommitted.
+            await asyncio.sleep(0.2)
+            assert not task.done(), "competing INSERT completed before the unique-key winner committed"
+            await winner.commit()
+            second = await asyncio.wait_for(task, timeout=15)
+            assert second.id == first.id
+            assert second.status == "DONE"
+            await loser.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", observe_batch_insert)
+            if winner.in_transaction():
+                await winner.rollback()
+            if loser.in_transaction():
+                await loser.rollback()
+
+    async with maker() as cleanup:
+        await cleanup.execute(
+            PaymentReconcileBatch.__table__.delete().where(
+                PaymentReconcileBatch.channel == "WECHAT",
+                PaymentReconcileBatch.bill_date == bill_day,
+                PaymentReconcileBatch.scope_store_id == 0,
+                PaymentReconcileBatch.source_filename.in_(
+                    [f"winner-{suffix[:12]}.csv", f"loser-{suffix[:12]}.csv"]
+                ),
+            )
+        )
+        await cleanup.commit()
