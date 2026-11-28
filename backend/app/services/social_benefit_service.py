@@ -10,7 +10,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import money, now_local
+from app.core.response import money, naive_local_now, now_local
 from app.models import (
     Customer,
     CustomerSocialIdentity,
@@ -992,6 +992,8 @@ class SocialBenefitService:
             operator_user_id=int(operator_user_id) if operator_user_id else None,
             idempotency_key=key,
             status=SocialBenefitService.REDEEM_PENDING,
+            # Daily limits use the business-local calendar day; avoid DB CURRENT_TIMESTAMP timezone drift.
+            created_at=naive_local_now(),
             meta=meta or {},
         )
         db.add(row)
