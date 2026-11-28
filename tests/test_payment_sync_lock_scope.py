@@ -68,9 +68,9 @@ def test_recharge_query_settlement_does_not_prelock_recharge_before_customer_loc
     recharge_read = source.index("await db.get(RechargeOrder")
     settle = source.index("await cls._settle_recharge_payment")
     assert recharge_read < settle
-    assert ".with_for_update()" not in source, (
-        "query settlement must let _settle_recharge_payment acquire "
-        "Customer→RechargeOrder→Payment locks"
+    assert "select(RechargeOrder)" not in source, (
+        "query settlement must read RechargeOrder without a locking SELECT; "
+        "the ordinary Order FOR UPDATE used for order payments is unrelated"
     )
 
 
@@ -79,7 +79,6 @@ def test_recharge_callback_does_not_prelock_recharge_before_customer_lock():
     recharge_read = source.index("await db.get(RechargeOrder")
     settle = source.index("await cls._settle_recharge_payment")
     assert recharge_read < settle
-    assert ".with_for_update()" not in source, (
-        "callback settlement must let _settle_recharge_payment acquire "
-        "Customer→RechargeOrder→Payment locks"
+    assert "select(RechargeOrder)" not in source, (
+        "callback settlement must read RechargeOrder without a locking SELECT"
     )
