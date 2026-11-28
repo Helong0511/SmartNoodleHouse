@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import generate_no
@@ -312,7 +312,60 @@ class CouponService:
 
     @staticmethod
     async def update_template(db: AsyncSession, tmpl: CouponTemplate, data: dict) -> CouponTemplate:
+        # Lock and refresh the canonical row; issuance takes the same lock.
+        locked_template = (
+            await db.execute(
+                select(CouponTemplate)
+                .where(CouponTemplate.id == int(tmpl.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked_template is None:
+            raise AppException(40407, "优惠券模板不存在或已删除")
+        tmpl = locked_template
         patch = dict(data)
+
+        # Issued, still-usable coupons must retain the benefit and store scope
+        # they were promised. Until snapshots exist, reject edits that would
+        # retroactively change the meaning/eligibility of those coupons.
+        next_store_id = (
+            int(patch["store_id"]) if "store_id" in patch and patch["store_id"] is not None
+            else None if "store_id" in patch else tmpl.store_id
+        )
+        next_whitelist = (
+            CouponService._normalize_whitelist(patch.get("store_whitelist"))
+            if "store_whitelist" in patch and next_store_id is None
+            else None if next_store_id is not None else getattr(tmpl, "store_whitelist", None)
+        )
+        sensitive_changed = (
+            ("coupon_type" in patch and str(patch["coupon_type"]).upper() != str(tmpl.coupon_type).upper())
+            or ("discount_value" in patch and patch["discount_value"] is not None and money(patch["discount_value"]) != money(tmpl.discount_value))
+            or ("min_order_amount" in patch and patch["min_order_amount"] is not None and money(patch["min_order_amount"]) != money(tmpl.min_order_amount))
+            or ("store_id" in patch and next_store_id != tmpl.store_id)
+            or ("store_whitelist" in patch and next_whitelist != getattr(tmpl, "store_whitelist", None))
+        )
+        if sensitive_changed:
+            # Use a locking/current read after the template row lock. Under
+            # MySQL REPEATABLE READ, a plain COUNT may reuse an older snapshot
+            # taken before waiting for the template lock and miss a just-issued
+            # coupon committed by the competing issuer.
+            active_issued = (
+                await db.execute(
+                    select(CustomerCoupon.id)
+                    .where(
+                        CustomerCoupon.template_id == int(tmpl.id),
+                        CustomerCoupon.status.in_(("AVAILABLE", "RESERVED")),
+                        CustomerCoupon.expires_at > now_local(),
+                    )
+                    .with_for_update()
+                )
+            ).scalars().all()
+            if active_issued:
+                raise AppException(
+                    40001,
+                    "该模板仍有未使用或已预占的有效优惠券，不能修改券类型、优惠金额、使用门槛或门店范围；请新建模板",
+                )
         schedule_keys = (
             "schedule_mode",
             "schedule_calendar",
@@ -501,7 +554,16 @@ class CouponService:
         customer = await db.get(Customer, int(customer_id))
         if not customer or int(customer.status) != 1:
             raise AppException(40406, "顾客不存在或已停用")
-        tmpl = await db.get(CouponTemplate, int(template_id))
+        # Serialize issuance with template benefit/scope edits. This lock is
+        # shared with update_template so no coupon can slip in between its
+        # outstanding-coupon check and a benefit mutation.
+        tmpl = (
+            await db.execute(
+                select(CouponTemplate)
+                .where(CouponTemplate.id == int(template_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if not tmpl or int(tmpl.status) != 1:
             raise AppException(40407, "优惠券模板不存在或已停用")
         from app.utils.campaign_schedule import template_in_issue_window
@@ -756,7 +818,6 @@ class CouponService:
                 CustomerCoupon.customer_id == customer_id,
                 CustomerCoupon.status == "AVAILABLE",
                 CustomerCoupon.expires_at > now,
-                CouponTemplate.status == 1,
             )
             .order_by(CustomerCoupon.expires_at.asc())
         )

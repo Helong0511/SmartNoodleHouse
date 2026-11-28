@@ -348,3 +348,36 @@ async def test_milestone_reclaim_handler_locks_order_before_refund(monkeypatch):
     assert order_stmt._for_update_arg is not None
     assert refund_stmt._for_update_arg is not None
     reclaim.assert_awaited_once_with(db, order, refund_id=9001)
+
+
+@pytest.mark.asyncio
+async def test_template_benefit_edit_also_blocks_reserved_coupons():
+    """已预占且仍有效的券仍承诺旧权益，模板不能修改其计价条件。"""
+    tmpl = SimpleNamespace(
+        id=88,
+        coupon_type="FIXED",
+        discount_value=Decimal("5.00"),
+        min_order_amount=Decimal("20.00"),
+        store_id=None,
+        store_whitelist=None,
+        name="测试券",
+        valid_days=30,
+        status=1,
+    )
+    locked = MagicMock()
+    locked.scalar_one_or_none.return_value = tmpl
+    active = MagicMock()
+    active.scalars.return_value.all.return_value = [9001]
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[locked, active])
+
+    with pytest.raises(AppException) as exc:
+        await CouponService.update_template(
+            db, tmpl, {"discount_value": Decimal("8.00")}
+        )
+
+    assert exc.value.code == 40001
+    assert db.execute.await_count == 2
+    active_query = db.execute.await_args_list[1].args[0]
+    compiled = active_query.compile(compile_kwargs={"literal_binds": True})
+    assert "RESERVED" in str(compiled)
