@@ -72,3 +72,110 @@ def test_template_payload_includes_store_scope():
     payload2 = CouponService.template_payload(tmpl)
     assert payload2["store_id"] == 3
     assert payload2["store_scope"] == "STORE"
+
+
+@pytest.mark.asyncio
+async def test_template_benefit_change_blocked_while_available_coupon_exists(db_session):
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+
+    from app.models import CouponTemplate, Customer, CustomerCoupon
+
+    customer = Customer(customer_no="CU_TPL_LOCK", nickname="模板锁测试", points=0)
+    template = CouponTemplate(
+        name="锁定权益测试",
+        coupon_type="FIXED",
+        discount_value=Decimal("5.00"),
+        min_order_amount=Decimal("30.00"),
+        valid_days=30,
+        status=1,
+    )
+    db_session.add_all([customer, template])
+    await db_session.flush()
+    coupon = CustomerCoupon(
+        customer_id=customer.id,
+        template_id=template.id,
+        coupon_no="CP-TEMPLATE-LOCK-0001",
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=20),
+    )
+    db_session.add(coupon)
+    await db_session.flush()
+
+    with pytest.raises(AppException) as exc_info:
+        await CouponService.update_template(
+            db_session, template, {"discount_value": Decimal("9.00")}
+        )
+    assert "不能修改" in exc_info.value.message
+    await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_template_name_change_allowed_while_available_coupon_exists(db_session):
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+
+    from app.models import CouponTemplate, Customer, CustomerCoupon
+
+    customer = Customer(customer_no="CU_TPL_NAME", nickname="模板改名测试", points=0)
+    template = CouponTemplate(
+        name="旧名称",
+        coupon_type="FIXED",
+        discount_value=Decimal("5.00"),
+        min_order_amount=Decimal("30.00"),
+        valid_days=30,
+        status=1,
+    )
+    db_session.add_all([customer, template])
+    await db_session.flush()
+    db_session.add(
+        CustomerCoupon(
+            customer_id=customer.id,
+            template_id=template.id,
+            coupon_no="CP-TEMPLATE-NAME-0001",
+            status="AVAILABLE",
+            expires_at=datetime.now() + timedelta(days=20),
+        )
+    )
+    await db_session.flush()
+
+    updated = await CouponService.update_template(
+        db_session, template, {"name": "新名称"}
+    )
+    assert updated.name == "新名称"
+    await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_disabled_template_does_not_revoke_existing_coupon(db_session):
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+
+    from app.models import CouponTemplate, Customer, CustomerCoupon
+
+    customer = Customer(customer_no="CU_TPL_DISABLED", nickname="模板停用测试", points=0)
+    template = CouponTemplate(
+        name="停用后仍可用",
+        coupon_type="FIXED",
+        discount_value=Decimal("5.00"),
+        min_order_amount=Decimal("30.00"),
+        valid_days=30,
+        status=1,
+    )
+    db_session.add_all([customer, template])
+    await db_session.flush()
+    coupon = CustomerCoupon(
+        customer_id=customer.id,
+        template_id=template.id,
+        coupon_no="CP-TEMPLATE-DISABLED-0001",
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=20),
+    )
+    db_session.add(coupon)
+    await db_session.flush()
+
+    # 停用只阻止继续发券，不应让已经发出的有效券从顾客可用列表消失。
+    await CouponService.update_template(db_session, template, {"status": 0})
+    available = await CouponService.list_available(db_session, customer.id)
+    assert any(item.get("id") == coupon.id for item in available)
+    await db_session.rollback()
