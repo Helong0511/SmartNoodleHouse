@@ -142,6 +142,12 @@ def _invalidate():
     SystemSettingsService.invalidate_cache_local()
 
 
+async def _enable_points_exchange(db):
+    await _mk_setting(db, key="points_exchange_enabled", value="1")
+    await db.commit()
+    _invalidate()
+
+
 # ---------------------------------------------------------------------------
 # 兑换
 # ---------------------------------------------------------------------------
@@ -149,6 +155,7 @@ def _invalidate():
 
 @pytest.mark.asyncio
 async def test_exchange_success_deducts_and_issues(db_session):
+    await _enable_points_exchange(db_session)
     """兑换成功：扣分 + 发券 + 写 EXCHANGE 流水。"""
     await _mk_template(db_session, tid=9001, name="兑换券5")
     await _mk_option(db_session, oid=9101, template_id=9001, points_cost=100)
@@ -186,6 +193,7 @@ async def test_exchange_success_deducts_and_issues(db_session):
 
 @pytest.mark.asyncio
 async def test_exchange_insufficient_points_raises(db_session):
+    await _enable_points_exchange(db_session)
     """积分不足抛 AppException，不扣分不发券。"""
     await _mk_template(db_session, tid=9002, name="兑换券5B")
     await _mk_option(db_session, oid=9102, template_id=9002, points_cost=500)
@@ -205,6 +213,7 @@ async def test_exchange_insufficient_points_raises(db_session):
 
 @pytest.mark.asyncio
 async def test_exchange_idempotent_same_month(db_session):
+    await _enable_points_exchange(db_session)
     """同月同选项重复请求不扣分、不重复发券。"""
     await _mk_template(db_session, tid=9003, name="兑换券5C")
     await _mk_option(db_session, oid=9103, template_id=9003, points_cost=50)
@@ -238,6 +247,7 @@ async def test_exchange_idempotent_same_month(db_session):
 
 @pytest.mark.asyncio
 async def test_exchange_option_disabled_raises(db_session):
+    await _enable_points_exchange(db_session)
     """选项停用不可兑换。"""
     await _mk_template(db_session, tid=9004, name="兑换券5D")
     await _mk_option(db_session, oid=9104, template_id=9004, points_cost=50, status=0)
@@ -252,6 +262,7 @@ async def test_exchange_option_disabled_raises(db_session):
 
 @pytest.mark.asyncio
 async def test_exchange_level_downgrade(db_session):
+    await _enable_points_exchange(db_session)
     """兑换扣分后积分降级。"""
     lv1 = MemberLevel(id=9501, name="普通", min_points=0, discount_rate=Decimal("1.0000"))
     lv2 = MemberLevel(id=9502, name="银卡", min_points=100, discount_rate=Decimal("0.9800"))
@@ -504,3 +515,90 @@ async def test_ledger_pagination_and_labels(db_session):
     }
     assert labels["EXCHANGE"] == "兑换扣减"
     assert labels["EARN"] == "消费获得"
+
+
+@pytest.mark.asyncio
+async def test_exchange_post_rejects_when_feature_is_disabled(db_session):
+    await _mk_template(db_session, tid=9201, name="关闭兑换测试券")
+    await _mk_option(db_session, oid=9201, template_id=9201, points_cost=10)
+    customer = await _mk_customer(db_session, no="CU_EX_DISABLED", points=100)
+    await db_session.commit()
+    _invalidate()
+
+    with pytest.raises(AppException) as exc_info:
+        await CustomerService.exchange_points_for_coupon(db_session, customer.id, 9201)
+    assert "暂未开放" in exc_info.value.message
+    await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_exchange_rejects_option_from_another_store(db_session):
+    from app.models import Store
+
+    await _enable_points_exchange(db_session)
+    store_a = Store(store_no="EX_SCOPE_A", name="兑换门店A")
+    store_b = Store(store_no="EX_SCOPE_B", name="兑换门店B")
+    db_session.add_all([store_a, store_b])
+    await db_session.flush()
+    await _mk_template(db_session, tid=9202, name="总部兑换券")
+    await _mk_option(
+        db_session, oid=9202, template_id=9202, points_cost=10, store_id=store_b.id
+    )
+    customer = await _mk_customer(
+        db_session, no="CU_EX_SCOPE_A", points=100, registered_store_id=store_a.id
+    )
+    await db_session.commit()
+
+    with pytest.raises(AppException) as exc_info:
+        await CustomerService.exchange_points_for_coupon(db_session, customer.id, 9202)
+    assert "不属于当前门店" in exc_info.value.message
+    await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_exchange_rejects_coupon_template_outside_store_whitelist(db_session):
+    from app.models import Store
+
+    await _enable_points_exchange(db_session)
+    store_a = Store(store_no="EX_WHITE_A", name="白名单门店A")
+    store_b = Store(store_no="EX_WHITE_B", name="白名单门店B")
+    db_session.add_all([store_a, store_b])
+    await db_session.flush()
+    template = await _mk_template(db_session, tid=9203, name="白名单兑换券")
+    template.store_whitelist = [int(store_b.id)]
+    await _mk_option(
+        db_session, oid=9203, template_id=9203, points_cost=10, store_id=store_a.id
+    )
+    customer = await _mk_customer(
+        db_session, no="CU_EX_WHITE_A", points=100, registered_store_id=store_a.id
+    )
+    await db_session.commit()
+
+    with pytest.raises(AppException) as exc_info:
+        await CustomerService.exchange_points_for_coupon(db_session, customer.id, 9203)
+    assert "不可兑换" in exc_info.value.message
+    await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_exchange_rejects_restricted_template_without_customer_store(db_session):
+    from app.models import Store
+
+    await _enable_points_exchange(db_session)
+    allowed_store = Store(store_no="EX_WHITE_UNSCOPED", name="白名单限定门店")
+    db_session.add(allowed_store)
+    await db_session.flush()
+    template = await _mk_template(db_session, tid=9204, name="无门店顾客不可兑换")
+    template.store_whitelist = [int(allowed_store.id)]
+    await _mk_option(
+        db_session, oid=9204, template_id=9204, points_cost=10
+    )
+    customer = await _mk_customer(
+        db_session, no="CU_EX_UNSCOPED", points=100, registered_store_id=None
+    )
+    await db_session.commit()
+
+    with pytest.raises(AppException) as exc_info:
+        await CustomerService.exchange_points_for_coupon(db_session, customer.id, 9204)
+    assert "不可兑换" in exc_info.value.message
+    await db_session.rollback()
