@@ -505,8 +505,21 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
         if not sid:
             raise AppException(40301, "账号未绑定门店")
 
+    # 与顾客合并共用 Customer-first 锁序：先锁顾客，再验证门店归属。
+    # 否则“先检查归属、后锁顾客”会允许并发合并在检查后迁移顾客，
+    # 随后仍把调账写入旧顾客/错误门店账本。
+    locked_customer = (
+        await db.execute(
+            select(Customer)
+            .where(Customer.id == int(data.customer_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if not locked_customer or int(locked_customer.status or 0) != 1:
+        raise AppException(40401, "顾客不存在或已停用，不能调账")
+
     # 超管可以指定任意门店，但不能把其他门店顾客的钱包记入当前门店账本。
-    # 顾客门店归属检查必须对所有角色执行，不能只保护普通门店账号。
     from app.api.customers import _assert_customer_in_store
 
     await _assert_customer_in_store(db, data.customer_id, int(sid), action="调账")
