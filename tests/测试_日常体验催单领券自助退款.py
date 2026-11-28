@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.security import create_customer_token
+from app.core.response import now_local
 from app.main import app
 from app.models import (
     CouponTemplate,
@@ -463,7 +464,7 @@ async def test_scheduled_pickup_validation_window():
 
 
 async def test_birthday_double_points(db_session):
-    cust = await _seed_customer(db_session, birthday=datetime.now().date())
+    cust = await _seed_customer(db_session, birthday=now_local().date())
     store = await _seed_store(db_session)
     order = await _seed_order(db_session, store, cust, payment_status="PAID")
     await db_session.commit()

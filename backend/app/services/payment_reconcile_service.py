@@ -97,17 +97,29 @@ class PaymentReconcileService:
             raise ValueError("channel 仅支持 WECHAT/ALIPAY")
 
         # 已存在批次时加行锁，串行化同渠道/日期的重跑；首次并发创建则由唯一键兜底。
-        existing = (
-            await db.execute(
-                select(PaymentReconcileBatch)
-                .where(
-                    PaymentReconcileBatch.channel == ch,
-                    PaymentReconcileBatch.bill_date == bill_date,
-                    PaymentReconcileBatch.scope_store_id == scope_id,
+        batch_key = (
+            PaymentReconcileBatch.channel == ch,
+            PaymentReconcileBatch.bill_date == bill_date,
+            PaymentReconcileBatch.scope_store_id == scope_id,
+        )
+        # Do not FOR UPDATE a missing unique key under InnoDB REPEATABLE READ:
+        # the resulting gap lock lets two first-time imports deadlock while
+        # converting compatible gap locks into insert-intention locks.
+        # An ordinary read followed by SAVEPOINT-protected INSERT lets the
+        # unique constraint arbitrate; the loser then uses a locking/current read.
+        existing_id = await db.scalar(
+            select(PaymentReconcileBatch.id).where(*batch_key).limit(1)
+        )
+        existing = None
+        if existing_id is not None:
+            existing = (
+                await db.execute(
+                    select(PaymentReconcileBatch)
+                    .where(PaymentReconcileBatch.id == existing_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
+            ).scalar_one_or_none()
         if existing is None:
             candidate = PaymentReconcileBatch(
                 channel=ch,
@@ -127,12 +139,9 @@ class PaymentReconcileService:
                 existing = (
                     await db.execute(
                         select(PaymentReconcileBatch)
-                        .where(
-                            PaymentReconcileBatch.channel == ch,
-                            PaymentReconcileBatch.bill_date == bill_date,
-                            PaymentReconcileBatch.scope_store_id == scope_id,
-                        )
+                        .where(*batch_key)
                         .with_for_update()
+                        .execution_options(populate_existing=True)
                     )
                 ).scalar_one_or_none()
                 if existing is None:
