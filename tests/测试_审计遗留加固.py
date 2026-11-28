@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,23 +42,42 @@ def test_parse_channel_bill_csv():
 
 @pytest.mark.asyncio
 async def test_delegation_create_and_active_codes(db_session):
-    from app.models import Role, User
+    from sqlalchemy import select
 
-    role = Role(code="TMP_ROLE_X", name="临时")
-    db_session.add(role)
+    from app.models import Permission, Role, RolePermission, Store, User
+
+    suffix = uuid.uuid4().hex[:12]
+    store = Store(store_no=f"TEST-{suffix}", name="委派测试门店")
+    role = Role(code=f"TMP_ROLE_{suffix}", name="临时")
+    db_session.add_all([store, role])
     await db_session.flush()
+
+    permissions = {}
+    for code in ("order:update", "payment:read"):
+        permission = (
+            await db_session.execute(select(Permission).where(Permission.code == code))
+        ).scalar_one_or_none()
+        if permission is None:
+            permission = Permission(code=code, name=code, module="test")
+            db_session.add(permission)
+            await db_session.flush()
+        permissions[code] = permission
+        db_session.add(RolePermission(role_id=role.id, permission_id=permission.id))
+
     g = User(
-        username="grantor_x",
+        username=f"grantor_{suffix}",
         password_hash="x",
         display_name="G",
         role_id=role.id,
+        store_id=store.id,
         status=1,
     )
     d = User(
-        username="delegatee_x",
+        username=f"delegatee_{suffix}",
         password_hash="x",
         display_name="D",
         role_id=role.id,
+        store_id=store.id,
         status=1,
     )
     db_session.add_all([g, d])
