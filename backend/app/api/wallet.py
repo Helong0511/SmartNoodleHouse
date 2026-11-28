@@ -44,7 +44,14 @@ class RechargeCreate(BaseModel):
     store_id: int | None = None
     provider: str = Field(description="WECHAT or ALIPAY")
     channel_type: str = "miniprogram"
-    idempotency_key: str | None = Field(default=None, min_length=8, max_length=64)
+    idempotency_key: str = Field(min_length=8, max_length=64)
+
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def _normalize_idempotency_key(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class AdjustBody(BaseModel):
