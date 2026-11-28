@@ -123,7 +123,7 @@ async def test_issue_milestones_skips_without_store():
 
 @pytest.mark.asyncio
 async def test_issue_milestones_issues_reached_thresholds():
-    order = SimpleNamespace(customer_id=9, store_id=3)
+    order = SimpleNamespace(id=99, customer_id=9, store_id=3)
     rule20 = SimpleNamespace(threshold_orders=20, template_id=101)
     rule50 = SimpleNamespace(threshold_orders=50, template_id=102)
     exec_result = MagicMock()
@@ -151,7 +151,7 @@ async def test_issue_milestones_issues_reached_thresholds():
 @pytest.mark.asyncio
 async def test_issue_milestones_continues_when_quota_fails():
     """某一档配额不足时跳过该档，继续处理后续档位。"""
-    order = SimpleNamespace(customer_id=9, store_id=3)
+    order = SimpleNamespace(id=98, customer_id=9, store_id=3)
     rule20 = SimpleNamespace(threshold_orders=20, template_id=101)
     rule50 = SimpleNamespace(threshold_orders=50, template_id=102)
     exec_result = MagicMock()
@@ -227,7 +227,7 @@ async def test_reclaim_milestones_revokes_available_above_count():
 
 
 @pytest.mark.asyncio
-async def test_reclaim_milestones_noop_when_not_refunded():
+async def test_reclaim_milestones_noop_when_not_refunded(monkeypatch):
     order = SimpleNamespace(
         id=100,
         customer_id=9,
@@ -235,7 +235,15 @@ async def test_reclaim_milestones_noop_when_not_refunded():
         payment_status="PAID",
         status="PAID",
     )
+    monkeypatch.setattr(
+        CouponService,
+        "_lock_customer_for_milestone",
+        AsyncMock(return_value=SimpleNamespace(id=9, status=1)),
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = order
     db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
     out = await CouponService.reclaim_milestones_after_full_refund(db, order, refund_id=1)
     assert out == []
 

@@ -51,9 +51,46 @@ class AttributionService:
 
     @classmethod
     async def attribute_paid_order(cls, db: AsyncSession, order_id: int) -> CampaignAttribution | None:
-        order = await db.get(Order, int(order_id))
-        if not order or not order.customer_id:
+        # Attribution rows retain customer_id, so this is a customer-scoped write:
+        # use the same Customer → Order lock order as merge and payment side effects.
+        order_id = int(order_id)
+        owner_id = (
+            await db.execute(
+                select(Order.customer_id).where(Order.id == order_id)
+            )
+        ).scalar_one_or_none()
+        if owner_id is None:
             return None
+        from app.models import Customer
+
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(owner_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if customer is None or (
+            getattr(customer, "status", None) in (0, 1) and customer.status != 1
+        ):
+            raise RuntimeError(
+                "订单顾客正在合并或已停用，营销归因将由 Outbox 重试"
+            )
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not order or (
+            int(order.customer_id) if order.customer_id is not None else None
+        ) != int(owner_id):
+            raise RuntimeError(
+                "订单顾客归属已变化，营销归因事务必须回滚重试"
+            )
         if (order.payment_status or "").upper() not in ("PAID", "PARTIAL_REFUND"):
             return None
 

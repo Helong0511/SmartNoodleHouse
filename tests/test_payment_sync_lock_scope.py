@@ -29,13 +29,16 @@ def test_recharge_sync_does_not_lock_recharge_order_before_provider_query():
     )
 
 
-def test_recharge_settlement_locks_recharge_before_payment():
-    source = inspect.getsource(PaymentService._settle_recharge_payment)
-    recharge_lock = source.index("select(RechargeOrder)")
-    payment_lock = source.index("select(Payment)")
-    assert recharge_lock < payment_lock, (
-        "recharge settlement must use RechargeOrder→Payment lock order "
-        "to match the shared callback lock helper and avoid deadlocks"
+def test_recharge_settlement_uses_customer_recharge_payment_lock_order():
+    settle_source = inspect.getsource(PaymentService._settle_recharge_payment)
+    helper_source = inspect.getsource(PaymentService._lock_order_then_payment)
+    assert "await cls._lock_order_then_payment(db, int(payment.id))" in settle_source
+    customer_lock = helper_source.index("select(Customer)")
+    recharge_lock = helper_source.rindex("select(RechargeOrder)")
+    payment_lock = helper_source.rindex("select(Payment)")
+    assert customer_lock < recharge_lock < payment_lock, (
+        "recharge settlement must use Customer→RechargeOrder→Payment lock order "
+        "to serialize with customer merge and prevent wallet misattribution"
     )
 
 

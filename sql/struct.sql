@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS `ab_experiments` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `balance_ledger` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '当前资产归属顾客 → customers.id',
+  `origin_customer_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '产生历史余额快照的原始顾客 → customers.id',
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '发生门店 → stores.id',
   `order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联餐饮订单 → orders.id',
   `recharge_order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联充值单 → recharge_orders.id',
@@ -79,10 +80,12 @@ CREATE TABLE IF NOT EXISTS `balance_ledger` (
   UNIQUE INDEX `uk_bl_refund`(`refund_id` ASC) USING BTREE,
   UNIQUE INDEX `uk_bl_biz_no`(`biz_no` ASC) USING BTREE,
   INDEX `idx_bl_customer_created`(`customer_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `ix_balance_ledger_origin_customer_id`(`origin_customer_id` ASC) USING BTREE,
   INDEX `idx_bl_store_created`(`store_id` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_bl_payment`(`payment_id` ASC) USING BTREE,
   INDEX `idx_bl_operator`(`operator_id` ASC) USING BTREE,
   CONSTRAINT `fk_bl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_bl_origin_customer` FOREIGN KEY (`origin_customer_id`) REFERENCES `customers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_bl_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_bl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_bl_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
@@ -1122,7 +1125,8 @@ CREATE TABLE IF NOT EXISTS `platform_store_bindings` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `point_ledger` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '当前资产归属顾客 → customers.id',
+  `origin_customer_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '产生历史积分快照的原始顾客 → customers.id',
   `order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联订单 → orders.id',
   `refund_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联退款单 → payment_refunds.id',
   `delta` int NOT NULL COMMENT '积分变动（可正可负）',
@@ -1140,8 +1144,10 @@ CREATE TABLE IF NOT EXISTS `point_ledger` (
   UNIQUE INDEX `uk_pl_refund`(`refund_id` ASC) USING BTREE,
   UNIQUE INDEX `uk_pl_earn_order`(`earn_order_id` ASC) USING BTREE,
   INDEX `idx_pl_customer_created`(`customer_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `ix_point_ledger_origin_customer_id`(`origin_customer_id` ASC) USING BTREE,
   INDEX `idx_pl_order`(`order_id` ASC) USING BTREE,
   CONSTRAINT `fk_pl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_pl_origin_customer` FOREIGN KEY (`origin_customer_id`) REFERENCES `customers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_pl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_pl_refund` FOREIGN KEY (`refund_id`) REFERENCES `payment_refunds` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员积分流水' ROW_FORMAT = Dynamic;

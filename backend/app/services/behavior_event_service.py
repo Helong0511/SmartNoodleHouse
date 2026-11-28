@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.core.response import dumps_json
-from app.models import CustomerBehaviorEvent
+from app.models import Customer, CustomerBehaviorEvent
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,25 @@ def normalize_event(raw: Any) -> tuple[CustomerBehaviorEvent | None, str | None]
 async def ingest_events(db, customer, raw_events: list[Any]) -> dict[str, Any]:
     """批量入库。返回 {accepted, duplicate, dropped, reason?}。"""
     total = len(raw_events)
+    # 先锁顾客行再写行为事件，和账号合并共用 Customer-first 锁序；
+    # 请求依赖中的 customer 可能是合并前快照，不能直接拿它作为写入授权。
+    lock_result = await db.execute(
+        select(Customer)
+        .where(Customer.id == int(customer.id))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if hasattr(lock_result, "scalar_one_or_none"):
+        locked_customer = lock_result.scalar_one_or_none()
+        if isinstance(locked_customer, Customer):
+            customer = locked_customer
+            if int(customer.status or 0) != 1:
+                return {
+                    "accepted": 0,
+                    "duplicate": 0,
+                    "dropped": total,
+                    "reason": "customer_inactive",
+                }
     # 隐私：顾客关闭个性化推荐 → 不落任何行为数据
     if not int(getattr(customer, "recommend_opt_in", 1) or 0):
         return {"accepted": 0, "duplicate": 0, "dropped": total, "reason": "opt_out"}

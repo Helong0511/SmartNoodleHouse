@@ -2,16 +2,19 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from itertools import count
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
 
 from app.models import (
+    BalanceLedger,
     CouponTemplate,
     Customer,
     CustomerAlipayAccount,
+    CustomerBehaviorEvent,
     CustomerCoupon,
+    CustomerTasteProfile,
     CustomerWechatAccount,
     MemberLevel,
     PointLedger,
@@ -48,6 +51,7 @@ async def test_merge_moves_accounts_and_points(db_session):
         id=901,
         customer_no="CU_MG_T",
         status=1,
+        recommend_opt_in=1,
         phone="13800009001",
         points=40,
         member_level_id=1,
@@ -56,6 +60,7 @@ async def test_merge_moves_accounts_and_points(db_session):
         id=902,
         customer_no="CU_MG_S",
         status=1,
+        recommend_opt_in=1,
         phone="13800009002",
         points=80,
         member_level_id=1,
@@ -79,6 +84,62 @@ async def test_merge_moves_accounts_and_points(db_session):
     )
     await db_session.flush()
     _sqlite_auto_id(db_session, PointLedger, 7100)
+    _sqlite_auto_id(db_session, BalanceLedger, 7200)
+    source.balance_principal = Decimal("10.00")
+    source.balance_gift = Decimal("5.00")
+    original_points = PointLedger(
+        customer_id=source.id,
+        order_id=None,
+        refund_id=None,
+        delta=80,
+        balance_after=80,
+        entry_type="EARN",
+    )
+    original_wallet = BalanceLedger(
+        customer_id=source.id,
+        store_id=None,
+        entry_type="TOPUP",
+        delta_principal=Decimal("10.00"),
+        delta_gift=Decimal("5.00"),
+        principal_after=Decimal("10.00"),
+        gift_after=Decimal("5.00"),
+        biz_no="MG-ORIGIN-WALLET-1",
+        remark="源账户历史充值",
+    )
+    profile_at = datetime(2026, 11, 27, 10, 0, tzinfo=_TZ)
+    target_taste = CustomerTasteProfile(
+        customer_id=target.id,
+        dim_type="PRODUCT",
+        target_key="101",
+        target_name="牛肉面",
+        score=Decimal("0.6000"),
+        raw_weight=Decimal("3.0000"),
+        event_count=3,
+        last_event_at=profile_at,
+        last_computed_at=profile_at,
+    )
+    source_taste = CustomerTasteProfile(
+        customer_id=source.id,
+        dim_type="PRODUCT",
+        target_key="101",
+        target_name="牛肉面",
+        score=Decimal("0.5500"),
+        raw_weight=Decimal("2.0000"),
+        event_count=2,
+        last_event_at=profile_at,
+        last_computed_at=profile_at,
+    )
+    source_event = CustomerBehaviorEvent(
+        event_id="merge-source-event-1",
+        customer_id=source.id,
+        event_type="CLICK",
+        product_id=101,
+        payload={"scene": "menu"},
+    )
+    db_session.add_all([
+        original_points, original_wallet, target_taste, source_taste, source_event
+    ])
+    await db_session.flush()
 
     with patch(
         "app.services.customer_merge_service.AuditService.log",
@@ -96,6 +157,8 @@ async def test_merge_moves_accounts_and_points(db_session):
         detail = mock_audit.await_args.kwargs.get("detail") or {}
         before_phone = ((detail.get("before") or {}).get("target") or {}).get("phone")
         assert before_phone == "138****9001"
+        after_detail = detail.get("after") or {}
+        assert after_detail.get("unknown_store_scope") == {"balance_ledgers": 1}
 
     assert result["stats"]["wechat_moved"] == 1
     assert result["stats"]["alipay_moved"] == 1
@@ -116,7 +179,43 @@ async def test_merge_moves_accounts_and_points(db_session):
     assert int(target.points) == 120
     assert int(target.member_level_id) == 2
     assert int(source.status) == 0
+    # The original ledger snapshots remain attributed to the source account,
+    # even though current ownership has moved to the surviving target.
+    await db_session.refresh(original_points)
+    await db_session.refresh(original_wallet)
+    assert original_points.customer_id == target.id
+    assert original_points.origin_customer_id == source.id
+    assert original_points.balance_after == 80
+    assert original_wallet.customer_id == target.id
+    assert original_wallet.origin_customer_id == source.id
+    assert original_wallet.principal_after == Decimal("10.00")
+    assert original_wallet.gift_after == Decimal("5.00")
+    assert Decimal(str(target.balance_principal)) == Decimal("10.00")
+    assert Decimal(str(target.balance_gift)) == Decimal("5.00")
     assert source.phone is None
+
+    merged_taste = (
+        await db_session.execute(
+            select(CustomerTasteProfile).where(
+                CustomerTasteProfile.customer_id == target.id,
+                CustomerTasteProfile.dim_type == "PRODUCT",
+                CustomerTasteProfile.target_key == "101",
+            )
+        )
+    ).scalar_one()
+    assert merged_taste.event_count == 5
+    assert merged_taste.raw_weight == Decimal("5.0000")
+    assert merged_taste.last_event_at is not None
+    assert merged_taste.last_event_at.replace(tzinfo=_TZ) == profile_at
+    assert (
+        await db_session.execute(
+            select(CustomerTasteProfile.id).where(
+                CustomerTasteProfile.customer_id == source.id
+            )
+        )
+    ).scalar_one_or_none() is None
+    await db_session.refresh(source_event)
+    assert source_event.customer_id == target.id
 
     wx = (
         await db_session.execute(
@@ -216,3 +315,114 @@ async def test_merge_moves_all_coupons_including_same_template(db_session):
         ).scalar_one()
         assert row.customer_id == target.id
         assert row.status == "AVAILABLE"
+
+
+
+@pytest.mark.asyncio
+async def test_source_store_audit_includes_orders_recharges_wallet_and_profile():
+    source = Customer(
+        id=990,
+        customer_no="CU_MG_AUDIT",
+        status=1,
+        registered_store_id=4,
+        first_seen_store_id=5,
+    )
+    responses = []
+    for values in ([4, 6], [7], [8, None]):
+        scalar_result = MagicMock()
+        scalar_result.all.return_value = values
+        result = MagicMock()
+        result.scalars.return_value = scalar_result
+        responses.append(result)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=responses)
+
+    store_ids = await CustomerMergeService._collect_source_store_ids(db, source)
+
+    assert store_ids == [4, 5, 6, 7, 8]
+    assert db.execute.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_merge_does_not_import_recommendation_data_from_opted_out_source(db_session):
+    await _seed_levels(db_session)
+    target = Customer(
+        id=903,
+        customer_no="CU_MG_OPT_T",
+        status=1,
+        recommend_opt_in=1,
+        points=0,
+        member_level_id=1,
+    )
+    source = Customer(
+        id=904,
+        customer_no="CU_MG_OPT_S",
+        status=1,
+        recommend_opt_in=0,
+        points=0,
+        member_level_id=1,
+    )
+    at = datetime(2026, 11, 27, 9, 0, tzinfo=_TZ)
+    target_profile = CustomerTasteProfile(
+        customer_id=target.id,
+        dim_type="PRODUCT",
+        target_key="201",
+        target_name="清汤面",
+        score=Decimal("0.6000"),
+        raw_weight=Decimal("3.0000"),
+        event_count=3,
+        last_event_at=at,
+        last_computed_at=at,
+    )
+    source_profile = CustomerTasteProfile(
+        customer_id=source.id,
+        dim_type="PRODUCT",
+        target_key="202",
+        target_name="麻辣面",
+        score=Decimal("0.7000"),
+        raw_weight=Decimal("4.0000"),
+        event_count=4,
+        last_event_at=at,
+        last_computed_at=at,
+    )
+    source_event = CustomerBehaviorEvent(
+        event_id="merge-optout-event-1",
+        customer_id=source.id,
+        event_type="CLICK",
+        product_id=202,
+        payload={"scene": "menu"},
+    )
+    db_session.add_all([target, source, target_profile, source_profile, source_event])
+    await db_session.flush()
+
+    with patch(
+        "app.services.customer_merge_service.AuditService.log",
+        new_callable=AsyncMock,
+    ):
+        await CustomerMergeService.merge(
+            db_session,
+            target_customer_id=target.id,
+            source_customer_id=source.id,
+            reason="opt-out merge",
+            operator_id=1,
+        )
+        await db_session.flush()
+
+    remaining_profiles = (
+        await db_session.execute(
+            select(CustomerTasteProfile).where(
+                CustomerTasteProfile.customer_id.in_((target.id, source.id))
+            )
+        )
+    ).scalars().all()
+    assert len(remaining_profiles) == 1
+    assert remaining_profiles[0].customer_id == target.id
+    assert remaining_profiles[0].target_key == "201"
+    remaining_events = (
+        await db_session.execute(
+            select(CustomerBehaviorEvent).where(
+                CustomerBehaviorEvent.customer_id == source.id
+            )
+        )
+    ).scalars().all()
+    assert remaining_events == []

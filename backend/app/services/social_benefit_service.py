@@ -135,9 +135,16 @@ class SocialBenefitService:
         if not await SocialBenefitService.is_enabled(db, store_id=store_id):
             raise AppException(40008, "本店暂未开启社会贡献公益，请联系店员")
         await SocialBenefitService._get_type(db, identity_code)
-        cust = await db.get(Customer, int(customer_id))
-        if not cust or int(cust.status) != 1:
-            raise AppException(40406, "顾客不存在或已停用")
+        cust = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not cust or int(cust.status or 0) != 1:
+            raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
         # 仅「店员主动取消」永久禁申；合并冲突 / 换证作废产生的 REVOKED 不封禁
         revoked_rows = (
             await db.execute(
@@ -218,9 +225,16 @@ class SocialBenefitService:
     ) -> CustomerSocialIdentity:
         """POS 当场核验：可直接 ACTIVE（P0 收银路径）。"""
         await SocialBenefitService._get_type(db, identity_code)
-        cust = await db.get(Customer, int(customer_id))
-        if not cust or int(cust.status) != 1:
-            raise AppException(40406, "顾客不存在或已停用")
+        cust = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not cust or int(cust.status or 0) != 1:
+            raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
         now = now_local()
         if now.tzinfo is not None:
             now = now.replace(tzinfo=None)
@@ -282,9 +296,32 @@ class SocialBenefitService:
         reject_reason: str | None = None,
         store_id: int | None = None,
     ) -> CustomerSocialIdentity:
-        row = await db.get(CustomerSocialIdentity, int(identity_id))
+        row_hint = await db.get(CustomerSocialIdentity, int(identity_id))
+        if not row_hint:
+            raise AppException(40406, "认定记录不存在")
+        owner_id = int(row_hint.customer_id)
+        cust = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == owner_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not cust or int(cust.status or 0) != 1:
+            raise AppException(40962, "顾客正在合并或已停用，请重新读取认定记录")
+        row = (
+            await db.execute(
+                select(CustomerSocialIdentity)
+                .where(CustomerSocialIdentity.id == int(identity_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if not row:
             raise AppException(40406, "认定记录不存在")
+        if int(row.customer_id) != owner_id:
+            raise AppException(40963, "认定记录顾客归属已变化，请重新读取后重试")
         if store_id is not None and row.store_id and int(row.store_id) != int(store_id):
             raise AppException(40301, "无权审核其他门店认定")
         if row.status not in (SocialBenefitService.PENDING, SocialBenefitService.ACTIVE):
@@ -328,9 +365,32 @@ class SocialBenefitService:
         reason: str | None = None,
     ) -> CustomerSocialIdentity:
         """取消公益身份：ACTIVE/PENDING 均→REVOKED（取消后不可再小程序申请）。"""
-        row = await db.get(CustomerSocialIdentity, int(identity_id))
+        row_hint = await db.get(CustomerSocialIdentity, int(identity_id))
+        if not row_hint:
+            raise AppException(40406, "认定记录不存在")
+        owner_id = int(row_hint.customer_id)
+        cust = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == owner_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not cust or int(cust.status or 0) != 1:
+            raise AppException(40962, "顾客正在合并或已停用，请重新读取认定记录")
+        row = (
+            await db.execute(
+                select(CustomerSocialIdentity)
+                .where(CustomerSocialIdentity.id == int(identity_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if not row:
             raise AppException(40406, "认定记录不存在")
+        if int(row.customer_id) != owner_id:
+            raise AppException(40963, "认定记录顾客归属已变化，请重新读取后重试")
         if store_id is not None and row.store_id and int(row.store_id) != int(store_id):
             raise AppException(40301, "无权取消其他门店认定")
         if row.status not in (SocialBenefitService.PENDING, SocialBenefitService.ACTIVE):

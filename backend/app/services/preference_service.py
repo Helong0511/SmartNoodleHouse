@@ -64,34 +64,97 @@ class PreferenceService:
         return weight
 
     @staticmethod
-    async def update_from_order(db: AsyncSession, order_id: int) -> None:
-        order = await db.get(Order, order_id)
-        # 仅在支付成功当下触发（order_lifecycle 在 target=PAID 时调用）
-        if not order or not order.customer_id or order.status != "PAID":
-            return
-        await PreferenceService.recompute_for_customer(db, order.customer_id)
-        customer = await db.get(Customer, order.customer_id)
-        if customer:
-            customer.last_order_at = now_local()
-            # 刚消费过的授权会员优先进人人脸热集，避免被定容踢出后进店认不出
-            try:
-                from app.services.face_service import face_embedding_cache
+    async def _lock_customer_for_order(
+        db: AsyncSession, order_id: int, *, order_hint: Order | None = None
+    ):
+        """订单画像写入统一 Customer → Order 锁序，并验证合并期间的归属变化。"""
+        if order_hint is None:
+            order_hint = await db.get(Order, int(order_id))
+        owner_id = getattr(order_hint, "customer_id", None) if order_hint else None
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
+        if owner_id is None:
+            return None, None
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(owner_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
+            from app.core.exceptions import AppException
 
-                await face_embedding_cache.promote(db, int(order.customer_id))
-            except Exception:
-                logger.debug(
-                    "支付后提升人脸热集失败 customer_id=%s",
-                    order.customer_id,
-                    exc_info=True,
-                )
+            raise AppException(40962, "订单顾客正在合并或已停用，画像更新将重试")
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None or (
+            isinstance(order, Order) and int(order.customer_id or 0) != int(owner_id)
+        ):
+            from app.core.exceptions import AppException
+
+            raise AppException(40963, "订单顾客归属已变化，画像更新事务必须回滚重试")
+        order = order if isinstance(order, Order) else order_hint
+        return order, customer
+
+    @staticmethod
+    async def update_from_order(db: AsyncSession, order_id: int) -> None:
+        order, customer = await PreferenceService._lock_customer_for_order(db, int(order_id))
+        # 仅在支付成功当下触发（order_lifecycle 在 target=PAID 时调用）
+        if not order or not customer or order.status != "PAID":
+            return
+        await PreferenceService.recompute_for_customer(db, int(customer.id))
+        customer.last_order_at = now_local()
+        # 刚消费过的授权会员优先进人人脸热集，避免被定容踢出后进店认不出
+        try:
+            from app.services.face_service import face_embedding_cache
+
+            await face_embedding_cache.promote(db, int(customer.id))
+        except Exception:
+            logger.debug(
+                "支付后提升人脸热集失败 customer_id=%s",
+                customer.id,
+                exc_info=True,
+            )
+
+    @staticmethod
+    async def recompute_for_order(
+        db: AsyncSession, order_id: int, *, order_hint: Order | None = None
+    ) -> None:
+        """退款补偿按订单当前归属锁顾客后重算，避免使用合并前的 customer_id。"""
+        order, customer = await PreferenceService._lock_customer_for_order(
+            db, int(order_id), order_hint=order_hint
+        )
+        if order and customer:
+            await PreferenceService.recompute_for_customer(db, int(customer.id))
 
     @staticmethod
     async def recompute_for_customer(db: AsyncSession, customer_id: int) -> None:
-        """根据顾客近期已付订单重算全部口味偏好（分析 + 修正）。"""
+        """根据顾客近期已付订单重算全部口味偏好（分析 + 修正）；调用方需先持有顾客锁。"""
         if not customer_id:
             return
-        customer = await db.get(Customer, customer_id)
-        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not customer:
+            return
+        if getattr(customer, "status", None) in (0, 1) and customer.status != 1:
+            from app.core.exceptions import AppException
+
+            raise AppException(40962, "顾客正在合并或已停用，画像更新将重试")
+        if not int(getattr(customer, "recommend_opt_in", 0) or 0):
             # 未明确同意：不构建画像，并清除可能残留的规格偏好。
             stale = (await db.execute(select(CustomerPreference).where(CustomerPreference.customer_id == customer_id))).scalars().all()
             for pref in stale:

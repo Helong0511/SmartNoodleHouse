@@ -22,6 +22,12 @@ from app.services.store_scope import assert_store_access, require_bound_store
 router = APIRouter(prefix="/wallet", tags=["储值"])
 
 
+def _ledger_customer_filter(customer_id: int):
+    """历史账本按当前资产归属或原始账户归属均可检索。"""
+    cid = int(customer_id)
+    return or_(BalanceLedger.customer_id == cid, BalanceLedger.origin_customer_id == cid)
+
+
 class PackageCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     pay_amount: Decimal = Field(..., gt=0)
@@ -345,15 +351,20 @@ async def admin_ledger(
     elif user.role.code != "SUPER_ADMIN":
         raise AppException(40301, "账号未绑定门店")
     if customer_id:
-        filters.append(BalanceLedger.customer_id == int(customer_id))
+        # 合并后 customer_id 表示当前资产归属；origin_customer_id 保留历史账本原账户，两个 ID 都应可检索。
+        filters.append(_ledger_customer_filter(customer_id))
     if entry_type and entry_type.strip():
         filters.append(BalanceLedger.entry_type == entry_type.strip().upper())
     kw = (keyword or "").strip()
     if kw:
         cond = CustomerService.keyword_condition(kw)
         if cond is not None:
+            matched_customer_ids = select(Customer.id).where(cond)
             filters.append(
-                BalanceLedger.customer_id.in_(select(Customer.id).where(cond))
+                or_(
+                    BalanceLedger.customer_id.in_(matched_customer_ids),
+                    BalanceLedger.origin_customer_id.in_(matched_customer_ids),
+                )
             )
     count_q = select(func.count()).select_from(BalanceLedger)
     list_q = select(BalanceLedger)
@@ -369,11 +380,13 @@ async def admin_ledger(
         ).scalars()
     )
     cust_ids = list({r.customer_id for r in rows if r.customer_id})
+    origin_cust_ids = list({r.origin_customer_id for r in rows if r.origin_customer_id})
+    lookup_customer_ids = list(set(cust_ids) | set(origin_cust_ids))
     cust_map: dict[int, Customer] = {}
-    if cust_ids:
+    if lookup_customer_ids:
         cust_map = {
             c.id: c
-            for c in (await db.execute(select(Customer).where(Customer.id.in_(cust_ids)))).scalars().all()
+            for c in (await db.execute(select(Customer).where(Customer.id.in_(lookup_customer_ids)))).scalars().all()
         }
     order_ids = list({r.order_id for r in rows if r.order_id})
     order_no_map: dict[int, str] = {}
@@ -399,6 +412,7 @@ async def admin_ledger(
     items = []
     for r in rows:
         cust = cust_map.get(r.customer_id)
+        origin_cust = cust_map.get(r.origin_customer_id) if r.origin_customer_id else None
         order_no = order_no_map.get(int(r.order_id)) if r.order_id else None
         recharge_no = recharge_no_map.get(int(r.recharge_order_id)) if r.recharge_order_id else None
         op_id = getattr(r, "operator_id", None)
@@ -432,6 +446,9 @@ async def admin_ledger(
                 **CustomerService.staff_customer_name_fields(cust),
                 "customer_phone": cust.phone if cust else None,
                 "customer_avatar_url": cust.avatar_url if cust else None,
+                "origin_customer_id": int(r.origin_customer_id) if r.origin_customer_id else None,
+                "origin_customer_no": origin_cust.customer_no if origin_cust else None,
+                "origin_customer_name": CustomerService.public_label(origin_cust),
                 "store_id": r.store_id,
                 "order_id": r.order_id,
                 "order_no": order_no,
@@ -473,12 +490,32 @@ async def search_customers_for_wallet(
     user: CurrentUser,
     keyword: str = Query(..., min_length=1, max_length=100, description="昵称/手机/顾客编号"),
     page_size: int = 20,
+    include_merged: bool = False,
 ):
-    """调账/流水筛选：按门店隔离搜索顾客。超管可搜全库。"""
+    """调账/流水筛选：按门店隔离搜索顾客；流水筛选可额外检索已合并的原账户。"""
     store_id = require_bound_store(user, None)
+    limit = min(max(1, int(page_size)), 50)
     rows, _total = await CustomerService.search_active_customers(
-        db, keyword, page=1, page_size=page_size, store_id=store_id
+        db, keyword, page=1, page_size=limit, store_id=store_id
     )
+    # 已合并源账户会被禁用并清空手机号，默认不出现在调账选择器；
+    # 只有历史流水筛选显式请求时，才按可见门店的 origin_customer_id 找回原账户。
+    if include_merged:
+        cond = CustomerService.keyword_condition(keyword)
+        q = (
+            select(Customer)
+            .join(BalanceLedger, BalanceLedger.origin_customer_id == Customer.id)
+            .where(Customer.status == 0, cond)
+            .distinct()
+            .order_by(Customer.id.desc())
+            .limit(limit)
+        )
+        if store_id is not None:
+            q = q.where(BalanceLedger.store_id == int(store_id))
+        merged_rows = list((await db.execute(q)).scalars().all())
+        seen = {int(c.id) for c in rows}
+        rows.extend(c for c in merged_rows if int(c.id) not in seen)
+        rows = rows[:limit]
     items = [
         {
             "id": c.id,
@@ -554,6 +591,18 @@ async def create_recharge(
     """顾客选档充值并拉起微信/支付宝支付。"""
     from app.services.payment_service import PaymentService
 
+    # RechargeOrder 创建与顾客合并共用 Customer → RechargeOrder 锁序。
+    # 不能只依赖 CurrentCustomer 的请求快照，否则合并完成后迟到请求仍可能给源账户建充值单。
+    customer = (
+        await db.execute(
+            select(Customer)
+            .where(Customer.id == int(customer.id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if customer is None or int(customer.status or 0) != 1:
+        raise AppException(40962, "顾客正在合并或已停用，请重新登录后重试")
     if not CustomerService.is_member(customer):
         raise AppException(40320, "请先开通会员后再充值", status_code=403)
 

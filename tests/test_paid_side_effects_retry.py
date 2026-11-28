@@ -87,7 +87,7 @@ async def test_refund_preference_handler_does_not_swallow_recommendation_learnin
 
     with (
         patch(
-            "app.services.customer_service.PreferenceService.recompute_for_customer",
+            "app.services.customer_service.PreferenceService.recompute_for_order",
             new_callable=AsyncMock,
         ) as recompute,
         patch(
@@ -97,7 +97,7 @@ async def test_refund_preference_handler_does_not_swallow_recommendation_learnin
     ):
         await _handle_pref_recompute(db, row)
 
-    recompute.assert_awaited_once_with(db, order.customer_id)
+    recompute.assert_awaited_once_with(db, order.id, order_hint=order)
     learn.assert_not_awaited()
 
 

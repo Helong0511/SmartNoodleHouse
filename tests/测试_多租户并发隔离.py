@@ -86,8 +86,12 @@ async def test_store_staff_merge_blocked_when_source_has_other_store_orders():
     foreign_order.scalar_one_or_none.return_value = 50
     foreign_recharge = MagicMock()
     foreign_recharge.scalar_one_or_none.return_value = None
+    foreign_wallet_ledger = MagicMock()
+    foreign_wallet_ledger.scalar_one_or_none.return_value = None
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[locked, foreign_order, foreign_recharge])
+    db.execute = AsyncMock(
+        side_effect=[locked, foreign_order, foreign_recharge, foreign_wallet_ledger]
+    )
 
     with pytest.raises(AppException) as ei:
         await CustomerMergeService.merge(
@@ -124,3 +128,228 @@ async def test_shift_totals_filter_by_store():
     sql = captured[0]
     assert "orders" in sql and "recharge_orders" in sql
     assert "store_id" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_table", ["orders", "recharge_orders", "balance_ledger"])
+async def test_store_staff_merge_blocks_unknown_store_scope_history(blocked_table):
+    """NULL 门店归属代表无法证明同店，门店员工不得将其当作本店数据合并。"""
+    from app.services.customer_merge_service import CustomerMergeService
+
+    source = SimpleNamespace(id=2, status=1)
+    target = SimpleNamespace(id=1, status=1)
+    locked = MagicMock()
+    locked.scalars.return_value.all.return_value = [target, source]
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from customers" in sql:
+            result.scalars.return_value.all.return_value = [target, source]
+            return result
+        result.scalar_one_or_none.return_value = (
+            77 if blocked_table in sql else None
+        )
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+
+    with pytest.raises(AppException) as ei:
+        await CustomerMergeService.merge(
+            db,
+            target_customer_id=1,
+            source_customer_id=2,
+            actor_store_id=1,
+        )
+
+    assert ei.value.code == 40301
+    guarded = next(sql for sql in statements if f"from {blocked_table}" in sql)
+    assert "is null" in guarded
+
+
+@pytest.mark.asyncio
+async def test_payment_parent_lock_acquires_customer_before_order_and_payment():
+    """支付结算必须先锁顾客协调行，避免与 Customer→Order 合并反序。"""
+    from app.services.payment_service import PaymentService
+
+    customer = SimpleNamespace(id=42, status=1)
+    order = SimpleNamespace(id=12, customer_id=42)
+    payment = SimpleNamespace(id=99, order_id=12, recharge_order_id=None)
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from payments" in sql:
+            result.first.return_value = (12, None)
+            result.scalar_one_or_none.return_value = payment
+        elif "from orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = 42
+        elif "from customers" in sql:
+            result.scalar_one_or_none.return_value = customer
+        elif "from orders" in sql:
+            result.scalar_one_or_none.return_value = order
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+    db.scalar = AsyncMock(return_value=42)
+
+    locked = await PaymentService._lock_order_then_payment(db, 99)
+
+    assert locked is payment
+    assert len(statements) == 5
+    assert "from payments" in statements[0]  # relation preflight, no row lock
+    assert "from orders" in statements[1] and "for update" not in statements[1]
+    assert "from customers" in statements[2] and "for update" in statements[2]
+    assert "from orders" in statements[3] and "for update" in statements[3]
+    assert "from payments" in statements[4] and "for update" in statements[4]
+
+
+@pytest.mark.asyncio
+async def test_payment_parent_lock_rejects_merged_customer_before_order_lock():
+    """若预读后顾客已合并，必须回滚重试，不能继续锁旧订单结算。"""
+    from app.services.payment_service import PaymentService
+
+    inactive_customer = SimpleNamespace(id=42, status=0)
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from payments" in sql:
+            result.first.return_value = (12, None)
+        elif "from orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = 42
+        elif "from customers" in sql:
+            result.scalar_one_or_none.return_value = inactive_customer
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+    db.scalar = AsyncMock(return_value=42)
+
+    with pytest.raises(AppException) as ei:
+        await PaymentService._lock_order_then_payment(db, 99)
+
+    assert ei.value.code == 40962
+    assert len(statements) == 3
+    assert "from orders" not in statements[-1]
+    assert "from customers" in statements[-1] and "for update" in statements[-1]
+
+
+@pytest.mark.asyncio
+async def test_recharge_payment_parent_lock_acquires_customer_before_recharge_and_payment():
+    """充值结算的资产锁序必须是 Customer→RechargeOrder→Payment。"""
+    from app.services.payment_service import PaymentService
+
+    customer = SimpleNamespace(id=52, status=1)
+    recharge = SimpleNamespace(id=22, customer_id=52)
+    payment = SimpleNamespace(id=199, order_id=None, recharge_order_id=22)
+    statements = []
+
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from payments" in sql:
+            result.first.return_value = (None, 22)
+            result.scalar_one_or_none.return_value = payment
+        elif "from recharge_orders" in sql and "for update" not in sql:
+            result.scalar_one_or_none.return_value = 52
+        elif "from customers" in sql:
+            result.scalar_one_or_none.return_value = customer
+        elif "from recharge_orders" in sql:
+            result.scalar_one_or_none.return_value = recharge
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = AsyncMock()
+    db.execute = execute
+    db.scalar = AsyncMock(return_value=52)
+
+    locked = await PaymentService._lock_order_then_payment(db, 199)
+
+    assert locked is payment
+    assert len(statements) == 5
+    assert "from payments" in statements[0]
+    assert "from recharge_orders" in statements[1] and "for update" not in statements[1]
+    assert "from customers" in statements[2] and "for update" in statements[2]
+    assert "from recharge_orders" in statements[3] and "for update" in statements[3]
+    assert "from payments" in statements[4] and "for update" in statements[4]
+
+
+@pytest.mark.asyncio
+async def test_recharge_creation_locks_customer_before_recharge_order():
+    from app.services.payment_service import PaymentService
+
+    customer = SimpleNamespace(id=52, status=1)
+    recharge = SimpleNamespace(id=22, customer_id=52)
+    statements: list[str] = []
+
+    async def execute(stmt):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from customers" in sql:
+            result.scalar_one_or_none.return_value = customer
+        elif "from recharge_orders" in sql:
+            result.scalar_one_or_none.return_value = recharge
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+    locked, locked_customer = await PaymentService._lock_customer_then_recharge_order(
+        db,
+        22,
+        owner_customer_id_hint=52,
+        owner_hint_supplied=True,
+    )
+
+    assert locked is recharge
+    assert locked_customer is customer
+    assert len(statements) == 2
+    assert "from customers" in statements[0] and "for update" in statements[0]
+    assert "from recharge_orders" in statements[1] and "for update" in statements[1]
+
+
+@pytest.mark.asyncio
+async def test_recharge_creation_rejects_merged_customer_before_recharge_lock():
+    from app.services.payment_service import PaymentService
+
+    inactive_customer = SimpleNamespace(id=52, status=0)
+    statements: list[str] = []
+
+    async def execute(stmt):
+        sql = str(stmt).lower()
+        statements.append(sql)
+        result = MagicMock()
+        if "from customers" in sql:
+            result.scalar_one_or_none.return_value = inactive_customer
+        else:
+            raise AssertionError(sql)
+        return result
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+    with pytest.raises(AppException) as exc:
+        await PaymentService._lock_customer_then_recharge_order(
+            db,
+            22,
+            owner_customer_id_hint=52,
+            owner_hint_supplied=True,
+        )
+
+    assert exc.value.code == 40962
+    assert len(statements) == 1
+    assert "from recharge_orders" not in statements[0]

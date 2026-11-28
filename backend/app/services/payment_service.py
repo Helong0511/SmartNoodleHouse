@@ -853,17 +853,28 @@ class PaymentService:
         amount: Decimal | None = None,
         cashier_shift_id: int | None = None,
     ) -> tuple[Payment, dict]:
-        locked = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == order.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
+        provider_u = provider.upper()
+        locked, locked_customer = await cls._lock_customer_then_order(
+            db,
+            int(order.id),
+            additional_customer_id=(
+                int(customer_id)
+                if provider_u == "BALANCE" and customer_id is not None
+                else None
+            ),
+            owner_customer_id_hint=getattr(order, "customer_id", None),
+            owner_hint_supplied=True,
+        )
         if not locked:
             raise AppException(40402, "订单不存在")
         order = locked
+        if (
+            provider_u == "BALANCE"
+            and customer_id is not None
+            and order.customer_id is not None
+            and int(customer_id) != int(order.customer_id)
+        ):
+            raise AppException(40301, "余额付款顾客与订单顾客不一致")
 
         if order.payment_status == "PAID":
             raise AppException(40010, "订单已支付")
@@ -893,7 +904,6 @@ class PaymentService:
             money(order.total_amount),
         )
 
-        provider_u = provider.upper()
         if provider_u == "BALANCE":
             channel = "BALANCE"
         else:
@@ -941,8 +951,7 @@ class PaymentService:
             reused = True
             if operator_id is not None:
                 payment.operator_id = operator_id
-            if customer_id is not None:
-                payment.customer_id = customer_id
+            payment.customer_id = customer_id
             if cashier_shift_id is not None:
                 payment.cashier_shift_id = int(cashier_shift_id)
         else:
@@ -971,7 +980,11 @@ class PaymentService:
             if not cid:
                 raise AppException(40040, "余额支付需绑定顾客")
             # 游客/匿名会话不得使用储值财产能力
-            payer = await db.get(Customer, int(cid))
+            payer = (
+                locked_customer
+                if locked_customer is not None and int(locked_customer.id) == int(cid)
+                else await db.get(Customer, int(cid))
+            )
             if not payer or not CustomerService.is_member(payer):
                 raise AppException(40320, "请先开通会员后再使用余额支付", status_code=403)
             # 储值已含赠送，禁止再叠会员折扣/券/代金券
@@ -1141,26 +1154,23 @@ class PaymentService:
         """储值充值：微信/支付宝实付入账后写入本金+赠送金。"""
         from types import SimpleNamespace
 
-        locked = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
-        ).scalar_one_or_none()
-        if not locked:
-            raise AppException(40491, "充值单不存在")
-        recharge = locked
-        if recharge.status == "PAID":
-            raise AppException(40010, "充值单已支付")
-        # 多端/重试可能同时为同一充值单创建支付：先锁充值单并刷新当前状态，
-        # 再锁定读取现有支付单，避免两个请求都看见“无 PENDING”后各建一笔。
-        recharge = (
-            await db.execute(
-                select(RechargeOrder)
-                .where(RechargeOrder.id == int(recharge.id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
+        recharge, _locked_customer = await cls._lock_customer_then_recharge_order(
+            db,
+            int(recharge.id),
+            owner_customer_id_hint=getattr(recharge, "customer_id", None),
+            owner_hint_supplied=True,
+        )
         if recharge is None:
             raise AppException(40491, "充值单不存在")
+        if customer_id is not None and recharge.customer_id is not None and (
+            int(customer_id) != int(recharge.customer_id)
+        ):
+            raise AppException(40301, "充值单顾客归属已变化，拒绝使用旧顾客身份创建支付")
+        # 支付顾客归属始终以锁内刷新后的充值单为准，不能信任请求层旧 customer_id。
+        customer_id = int(recharge.customer_id) if recharge.customer_id is not None else None
+        if recharge.status == "PAID":
+            raise AppException(40010, "充值单已支付")
+        # 顾客锁 + 充值单锁串行化合并与支付单创建；再读取现有支付避免重复创建。
         if recharge.status != "PENDING":
             raise AppException(40012, f"当前充值单状态不可支付: {recharge.status}")
 
@@ -1203,7 +1213,7 @@ class PaymentService:
                 payment_no=generate_no(payment_biz(provider_u), sno, "00"),
                 order_id=None,
                 recharge_order_id=recharge.id,
-                customer_id=customer_id or recharge.customer_id,
+                customer_id=customer_id,
                 provider=provider_u,
                 channel=channel,
                 amount=pay_amount,
@@ -1299,24 +1309,22 @@ class PaymentService:
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
 
-        # 统一充值单锁序：RechargeOrder → Payment，与 _lock_order_then_payment 一致。
-        # 回调入口可能已持有充值单锁；反向先锁 Payment 会与并发结算形成死锁环。
+        # 统一资产锁序：Customer → RechargeOrder → Payment。
+        # create-recharge 即时结果与异步回调均通过同一入口取得顾客协调锁，
+        # 防止合并先迁移充值单后，旧充值回调仍向源顾客储值。
+        locked_p = await cls._lock_order_then_payment(db, int(payment.id))
+        if locked_p is None or int(locked_p.recharge_order_id or 0) != int(recharge.id):
+            raise AppException(40963, "充值支付关联已变化，请回滚并重新查单")
         locked_r = (
             await db.execute(
                 select(RechargeOrder)
-                .where(RechargeOrder.id == recharge.id)
+                .where(RechargeOrder.id == int(recharge.id))
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-        ).scalar_one()
-        locked_p = (
-            await db.execute(
-                select(Payment)
-                .where(Payment.id == payment.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if locked_r is None:
+            raise AppException(40491, "充值单不存在")
         recharge, payment = locked_r, locked_p
         if (
             recharge.status == "PAID"
@@ -1453,10 +1461,123 @@ class PaymentService:
         await db.flush()
 
     @classmethod
+    async def _lock_customer_then_order(
+        cls,
+        db: AsyncSession,
+        order_id: int,
+        *,
+        additional_customer_id: int | None = None,
+        owner_customer_id_hint: int | None = None,
+        owner_hint_supplied: bool = False,
+    ) -> tuple[Order | None, Customer | None]:
+        """统一订单资产锁序：Customer → Order，并在锁后验证顾客归属。"""
+        order_id = int(order_id)
+        if owner_hint_supplied:
+            owner_id = owner_customer_id_hint
+            if owner_id is not None and not isinstance(owner_id, int):
+                owner_id = None
+        else:
+            owner_result = await db.execute(
+                select(Order.customer_id).where(Order.id == order_id)
+            )
+            owner_id = owner_result.scalar_one_or_none()
+            if owner_id is not None and not isinstance(owner_id, int):
+                owner_id = None
+        lock_customer_id = int(owner_id) if owner_id is not None else (
+            int(additional_customer_id) if additional_customer_id is not None else None
+        )
+        customer = None
+        if lock_customer_id is not None:
+            customer = (
+                await db.execute(
+                    select(Customer)
+                    .where(Customer.id == lock_customer_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if customer is None:
+                raise AppException(40962, "支付关联顾客不存在，已暂停结算，请重试或核对")
+            if getattr(customer, "status", None) in (0, 1) and customer.status != 1:
+                raise AppException(40962, "支付关联顾客正在合并或已停用，请重新读取后重试")
+
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            return None, customer
+        order_owner_id = order.customer_id if isinstance(order, Order) else owner_id
+        if (int(order_owner_id) if order_owner_id is not None else None) != (
+            int(owner_id) if owner_id is not None else None
+        ):
+            raise AppException(40963, "订单顾客归属已变化，请回滚并重试支付结算")
+        return order, customer
+
+    @classmethod
+    async def _lock_customer_then_recharge_order(
+        cls,
+        db: AsyncSession,
+        recharge_id: int,
+        *,
+        owner_customer_id_hint: int | None = None,
+        owner_hint_supplied: bool = False,
+    ) -> tuple[RechargeOrder | None, Customer | None]:
+        """充值单资产写入统一按 Customer → RechargeOrder 加锁。"""
+        recharge_id = int(recharge_id)
+        if owner_hint_supplied:
+            owner_id = owner_customer_id_hint
+        else:
+            owner_result = await db.execute(
+                select(RechargeOrder.customer_id).where(RechargeOrder.id == recharge_id)
+            )
+            owner_id = owner_result.scalar_one_or_none()
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
+
+        customer = None
+        if owner_id is not None:
+            customer = (
+                await db.execute(
+                    select(Customer)
+                    .where(Customer.id == int(owner_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if customer is None:
+                raise AppException(40962, "充值顾客不存在，已暂停创建支付，请重新核对")
+            if getattr(customer, "status", None) in (0, 1) and customer.status != 1:
+                raise AppException(40962, "充值顾客正在合并或已停用，请重新读取后重试")
+
+        recharge = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == recharge_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if recharge is None:
+            return None, customer
+        current_owner_id = (
+            recharge.customer_id if isinstance(recharge, RechargeOrder) else owner_id
+        )
+        if (int(current_owner_id) if current_owner_id is not None else None) != (
+            int(owner_id) if owner_id is not None else None
+        ):
+            raise AppException(40963, "充值顾客归属已变化，请回滚并重试充值支付")
+        return recharge, customer
+
+    @classmethod
     async def _lock_order_then_payment(
         cls, db: AsyncSession, payment_id: int
     ) -> Payment | None:
-        """统一锁序：先 Order（若有）再 Payment，降低与关单路径的死锁概率。"""
+        """统一资产锁序：Customer → Order/RechargeOrder → Payment。"""
         peek = (
             await db.execute(
                 select(Payment.order_id, Payment.recharge_order_id).where(Payment.id == int(payment_id))
@@ -1465,21 +1586,47 @@ class PaymentService:
         if peek is None:
             return None
         order_id, recharge_id = peek[0], peek[1]
+
         if order_id:
-            await db.execute(
-                select(Order)
-                .where(Order.id == int(order_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
+            order, _customer = await cls._lock_customer_then_order(db, int(order_id))
+            if order is None:
+                raise AppException(40402, "订单不存在")
         elif recharge_id:
-            await db.execute(
-                select(RechargeOrder)
-                .where(RechargeOrder.id == int(recharge_id))
-                .with_for_update()
-                .execution_options(populate_existing=True)
+            owner_result = await db.execute(
+                select(RechargeOrder.customer_id).where(RechargeOrder.id == int(recharge_id))
             )
-        # FOR UPDATE 是当前读；populate_existing 同步刷新当前 Session 中可能已加载的旧 ORM 快照。
+            owner_id = owner_result.scalar_one_or_none()
+            if owner_id is not None and not isinstance(owner_id, int):
+                owner_id = None
+            if owner_id is not None:
+                customer = (
+                    await db.execute(
+                        select(Customer)
+                        .where(Customer.id == int(owner_id))
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                ).scalar_one_or_none()
+                if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
+                    raise AppException(40962, "充值顾客正在合并或已停用，请重新查单重试")
+            recharge = (
+                await db.execute(
+                    select(RechargeOrder)
+                    .where(RechargeOrder.id == int(recharge_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if recharge is None:
+                raise AppException(40491, "充值单不存在")
+            recharge_owner_id = (
+                recharge.customer_id if isinstance(recharge, RechargeOrder) else owner_id
+            )
+            if (int(recharge_owner_id) if recharge_owner_id is not None else None) != (
+                int(owner_id) if owner_id is not None else None
+            ):
+                raise AppException(40963, "充值顾客归属已变化，请回滚并重试支付结算")
+
         return (
             await db.execute(
                 select(Payment)
@@ -1493,10 +1640,11 @@ class PaymentService:
     async def _lock_order_then_payment_for_refund(
         cls, db: AsyncSession, refund: PaymentRefund
     ) -> tuple[Payment, Order]:
-        """退款成功入账统一按 Order → Payment 加锁，与支付回调/订单状态机保持同序。
+        """在外层已持有 Customer 协调锁的前提下，按 Order → Payment 加锁。
 
-        退款行可能已由回调/补偿任务先锁定；但不得先锁 Payment 再锁 Order，
-        否则会与 _lock_order_then_payment() 形成 Order↔Payment 死锁环。
+        所有调用方必须先经 _lock_order_then_payment() 取得 Customer 锁；
+        此处只负责父订单与支付行顺序，不能独立作为顾客资产写入入口。
+        退款行可能已由回调/补偿任务先锁定，但不得先锁 Payment 再锁 Order。
         """
         order_id = int(refund.order_id) if refund.order_id is not None else 0
         if order_id <= 0:
@@ -1943,14 +2091,12 @@ class PaymentService:
         round_down: bool = False,
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
-        locked = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == order.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
+        locked, _locked_customer = await cls._lock_customer_then_order(
+            db,
+            int(order.id),
+            owner_customer_id_hint=getattr(order, "customer_id", None),
+            owner_hint_supplied=True,
+        )
         if not locked:
             raise AppException(40402, "订单不存在")
         order = locked
@@ -2794,7 +2940,7 @@ class PaymentService:
                     # 全额退：始终交由提交后的 Outbox worker 回收里程碑券。
                     # 不能在当前退款事务内同步计算：order_net_collected 已可能建立
                     # REPEATABLE READ 快照；另一个订单的支付/退款副作用也可能并发。
-                    # Outbox handler 会按 Order -> Customer 锁序串行发券/回收，并在锁后计数。
+                    # Outbox handler 先锁 Customer，再锁 Order/权益行，并在锁后计数。
                     if order.customer_id:
                         from app.services.outbox_worker import enqueue_outbox
 

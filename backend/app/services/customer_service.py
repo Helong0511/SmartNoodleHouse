@@ -515,13 +515,34 @@ class CustomerService:
         """
         if not order or not getattr(order, "id", None):
             return 0
-        # 锁订单再判态，避免与退款状态机竞态
-        locked_order = (
-            await db.execute(select(Order).where(Order.id == int(order.id)).with_for_update())
-        ).scalar_one_or_none()
-        if not locked_order or not locked_order.customer_id:
+        # 与顾客合并统一锁序：先无锁读取归属，再锁 Customer，最后锁 Order。
+        order_id = int(order.id)
+        owner_id = getattr(order, "customer_id", None)
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
+        if owner_id is None:
             return 0
-        order = locked_order
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(owner_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
+            raise AppException(40962, "订单顾客正在合并或已停用，积分发放将由任务重试")
+        locked_order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not locked_order or int(locked_order.customer_id if isinstance(locked_order, Order) else owner_id) != int(owner_id):
+            raise AppException(40963, "订单顾客归属已变化，积分发放事务必须回滚重试")
+        order = locked_order if isinstance(locked_order, Order) else order
         st = (order.status or "").upper()
         pay = (order.payment_status or "").upper()
         if st in ("CANCELLED", "REFUNDED") or pay in ("REFUNDED", "CANCELLED", "UNPAID"):
@@ -535,13 +556,7 @@ class CustomerService:
         ):
             return 0
 
-        customer = (
-            await db.execute(
-                select(Customer).where(Customer.id == int(order.customer_id)).with_for_update()
-            )
-        ).scalar_one_or_none()
-        if not customer:
-            return 0
+        # customer 已在 Order 之前锁定，后续资产写入沿用同一协调锁。
         # 同订单幂等：已有 EARN 流水则仍尝试补扣已成功退款（幂等）
         existed = (
             await db.execute(
@@ -633,15 +648,36 @@ class CustomerService:
         """退款成功：按退款金额扣积分，不超过本单净已发积分。行锁 + point_ledger。"""
         from sqlalchemy import func
 
-        if not order.customer_id:
+        if not order or not getattr(order, "id", None):
+            return 0
+        # Outbox 可能携带旧 ORM 快照；必须按当前订单归属先锁顾客，再锁订单。
+        order_id = int(order.id)
+        owner_id = getattr(order, "customer_id", None)
+        if owner_id is not None and not isinstance(owner_id, int):
+            owner_id = None
+        if owner_id is None:
             return 0
         customer = (
             await db.execute(
-                select(Customer).where(Customer.id == int(order.customer_id)).with_for_update()
+                select(Customer)
+                .where(Customer.id == int(owner_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
-        if not customer:
-            return 0
+        if customer is None or (getattr(customer, "status", None) in (0, 1) and customer.status != 1):
+            raise AppException(40962, "退款订单顾客正在合并或已停用，积分补扣将由任务重试")
+        locked_order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not locked_order or int(locked_order.customer_id if isinstance(locked_order, Order) else owner_id) != int(owner_id):
+            raise AppException(40963, "退款订单顾客归属已变化，积分补扣事务必须回滚重试")
+        order = locked_order if isinstance(locked_order, Order) else order
         if refund_id is not None:
             existed = (
                 await db.execute(

@@ -559,8 +559,9 @@ class SegmentService:
         filt = cls.build_filter(seg.rules_json, store_id=seg.store_id)
         want_bday, want_anniv = cls._day_post_filter_wants(seg.rules_json)
         need_day_post = want_bday is not None or want_anniv is not None
-        await db.execute(delete(CustomerSegmentMember).where(CustomerSegmentMember.segment_id == seg.id))
-        inserted = 0
+        # 先按 Customer.id 升序锁定所有候选顾客，再改写分群成员快照。
+        # 顾客合并同样遵循 Customer → CustomerSegmentMember，不能先 DELETE 成员再锁顾客。
+        member_ids: list[int] = []
         last_id = 0
         while True:
             if not need_day_post:
@@ -571,6 +572,7 @@ class SegmentService:
                             .where(filt, Customer.id > last_id)
                             .order_by(Customer.id)
                             .limit(batch_size)
+                            .with_for_update()
                         )
                     )
                     .scalars()
@@ -578,11 +580,8 @@ class SegmentService:
                 )
                 if not rows:
                     break
-                for cid in rows:
-                    db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(cid)))
-                    inserted += 1
+                member_ids.extend(int(cid) for cid in rows)
                 last_id = int(rows[-1])
-                await db.flush()
                 if len(rows) < batch_size:
                     break
             else:
@@ -593,6 +592,8 @@ class SegmentService:
                             .where(filt, Customer.id > last_id)
                             .order_by(Customer.id)
                             .limit(batch_size)
+                            .with_for_update()
+                            .execution_options(populate_existing=True)
                         )
                     )
                     .scalars()
@@ -600,16 +601,24 @@ class SegmentService:
                 )
                 if not batch:
                     break
-                for c in batch:
+                member_ids.extend(
+                    int(c.id)
+                    for c in batch
                     if cls._customer_matches_day_post_filters(
                         c, want_bday=want_bday, want_anniv=want_anniv
-                    ):
-                        db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(c.id)))
-                        inserted += 1
+                    )
+                )
                 last_id = int(batch[-1].id)
-                await db.flush()
                 if len(batch) < batch_size:
                     break
+
+        await db.execute(
+            delete(CustomerSegmentMember).where(CustomerSegmentMember.segment_id == seg.id)
+        )
+        for cid in member_ids:
+            db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(cid)))
+        inserted = len(member_ids)
+        await db.flush()
         seg.estimated_count = inserted
         seg.materialized_at = naive_local_now()
         await db.flush()

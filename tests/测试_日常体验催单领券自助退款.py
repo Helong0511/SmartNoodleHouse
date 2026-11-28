@@ -407,7 +407,21 @@ async def test_scheduled_pickup_validation_window():
 
     db = MagicMock()
     db.get = AsyncMock(return_value=SimpleNamespace(status=1))
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    # create_order now locks the customer row before checking idempotency.
+    customer_result = MagicMock(scalar_one_or_none=MagicMock(return_value=SimpleNamespace(id=1, status=1)))
+    no_idempotent_order = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    # 每次 create_order 都先锁顾客，再查幂等订单；三个非法预约用例
+    # 分别调用一次 create_order，因此必须为每次调用提供完整的两次查询响应。
+    db.execute = AsyncMock(
+        side_effect=[
+            customer_result,
+            no_idempotent_order,
+            customer_result,
+            no_idempotent_order,
+            customer_result,
+            no_idempotent_order,
+        ]
+    )
 
     # 过早（10 分钟内）
     early = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S")

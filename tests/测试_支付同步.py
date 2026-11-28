@@ -348,6 +348,9 @@ async def test_sync_refund_status并发回调已成功时不得重复执行入�
     db = AsyncMock()
     db.get = AsyncMock(return_value=payment)
     db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        PaymentService, "_lock_order_then_payment", AsyncMock(return_value=payment)
+    )
 
     with patch.object(
         PaymentService, "_query_channel_refund", new_callable=AsyncMock,
@@ -387,6 +390,9 @@ async def test_sync_refund_status使用查单后锁内刷新出来的最新退�
     db = AsyncMock()
     db.get = AsyncMock(return_value=payment)
     db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        PaymentService, "_lock_order_then_payment", AsyncMock(return_value=payment)
+    )
 
     with patch.object(
         PaymentService, "_query_channel_refund", new_callable=AsyncMock,
@@ -632,18 +638,23 @@ async def test_lock_order_then_payment_refreshes_locked_payment_from_database():
     payment = SimpleNamespace(id=88, order_id=99, recharge_order_id=None, status="REFUNDED")
     peek_result = MagicMock()
     peek_result.first.return_value = (99, None)
+    owner_result = MagicMock()
+    owner_result.scalar_one_or_none.return_value = None
     order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = SimpleNamespace(id=99)
     payment_result = MagicMock()
     payment_result.scalar_one_or_none.return_value = payment
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[peek_result, order_result, payment_result])
+    db.execute = AsyncMock(
+        side_effect=[peek_result, owner_result, order_result, payment_result]
+    )
 
     locked = await PaymentService._lock_order_then_payment(db, 88)
 
     assert locked is payment
-    assert db.execute.await_count == 3
-    order_stmt = db.execute.await_args_list[1].args[0]
-    payment_stmt = db.execute.await_args_list[2].args[0]
+    assert db.execute.await_count == 4
+    order_stmt = db.execute.await_args_list[2].args[0]
+    payment_stmt = db.execute.await_args_list[3].args[0]
     assert order_stmt._for_update_arg is not None
     assert order_stmt.get_execution_options().get("populate_existing") is True
     assert payment_stmt._for_update_arg is not None
@@ -782,15 +793,21 @@ async def test_recharge_amount_mismatch_uses_recharge_then_payment_current_locks
 @pytest.mark.asyncio
 async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     stale_recharge = SimpleNamespace(id=121, status="PENDING")
-    stale_payment = SimpleNamespace(id=122, status="PENDING")
+    stale_payment = SimpleNamespace(id=122, status="PENDING", recharge_order_id=121)
     current_recharge = SimpleNamespace(id=121, status="PAID")
-    current_payment = SimpleNamespace(id=122, status="PAID")
+    current_payment = SimpleNamespace(id=122, status="PAID", recharge_order_id=121)
+    peek_result = MagicMock()
+    peek_result.first.return_value = (None, 121)
+    owner_result = MagicMock()
+    owner_result.scalar_one_or_none.return_value = None
     recharge_result = MagicMock()
-    recharge_result.scalar_one.return_value = current_recharge
+    recharge_result.scalar_one_or_none.return_value = current_recharge
     payment_result = MagicMock()
-    payment_result.scalar_one.return_value = current_payment
+    payment_result.scalar_one_or_none.return_value = current_payment
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
+    db.execute = AsyncMock(
+        side_effect=[peek_result, owner_result, recharge_result, payment_result, recharge_result]
+    )
 
     result = await PaymentService._settle_recharge_payment(
         db, payment=stale_payment, recharge=stale_recharge,
@@ -798,8 +815,8 @@ async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
     )
 
     assert result == {"already_paid": True, "status": "PAID"}
-    assert db.execute.await_count == 2
-    for call in db.execute.await_args_list:
+    assert db.execute.await_count == 5
+    for call in db.execute.await_args_list[2:]:
         stmt = call.args[0]
         assert stmt._for_update_arg is not None
         assert stmt.get_execution_options().get("populate_existing") is True
@@ -809,15 +826,21 @@ async def test_recharge_settlement_refreshes_paid_rows_before_duplicate_guard():
 @pytest.mark.asyncio
 async def test_recharge_settlement_never_downgrades_refunded_payment():
     stale_recharge = SimpleNamespace(id=123, status="PENDING")
-    stale_payment = SimpleNamespace(id=124, status="PENDING")
+    stale_payment = SimpleNamespace(id=124, status="PENDING", recharge_order_id=123)
     current_recharge = SimpleNamespace(id=123, status="PENDING")
-    current_payment = SimpleNamespace(id=124, status="REFUNDED")
+    current_payment = SimpleNamespace(id=124, status="REFUNDED", recharge_order_id=123)
+    peek_result = MagicMock()
+    peek_result.first.return_value = (None, 123)
+    owner_result = MagicMock()
+    owner_result.scalar_one_or_none.return_value = None
     recharge_result = MagicMock()
-    recharge_result.scalar_one.return_value = current_recharge
+    recharge_result.scalar_one_or_none.return_value = current_recharge
     payment_result = MagicMock()
-    payment_result.scalar_one.return_value = current_payment
+    payment_result.scalar_one_or_none.return_value = current_payment
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[recharge_result, payment_result])
+    db.execute = AsyncMock(
+        side_effect=[peek_result, owner_result, recharge_result, payment_result, recharge_result]
+    )
 
     with pytest.raises(AppException) as exc:
         await PaymentService._settle_recharge_payment(

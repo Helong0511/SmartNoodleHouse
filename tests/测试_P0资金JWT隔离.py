@@ -355,8 +355,11 @@ async def test_create_payment_blocks_second_pending_channel():
         amount=Decimal("20.00"),
         status="PENDING",
     )
-    locked = MagicMock()
-    locked.scalar_one_or_none = MagicMock(return_value=order)
+    customer = SimpleNamespace(id=9, status=1)
+    customer_locked = MagicMock()
+    customer_locked.scalar_one_or_none = MagicMock(return_value=customer)
+    order_locked = MagicMock()
+    order_locked.scalar_one_or_none = MagicMock(return_value=order)
     pending_result = MagicMock()
     pending_result.scalars.return_value.all.return_value = [pending]
 
@@ -365,7 +368,9 @@ async def test_create_payment_blocks_second_pending_channel():
     async def execute(stmt):
         calls["n"] += 1
         if calls["n"] == 1:
-            return locked
+            return customer_locked
+        if calls["n"] == 2:
+            return order_locked
         return pending_result
 
     db = AsyncMock()

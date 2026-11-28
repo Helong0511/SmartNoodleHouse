@@ -540,6 +540,9 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
             peek = MagicMock()
             peek.first.return_value = (9, None)
             return peek
+        if "from orders" in sql and "for update" not in sql:
+            observed.append("order_owner_preflight")
+            return MagicMock(scalar_one_or_none=MagicMock(return_value=SimpleNamespace(id=9)))
         if "from orders" in sql:
             observed.append("order_lock")
             return MagicMock(scalar_one_or_none=MagicMock(return_value=SimpleNamespace(id=9)))
@@ -577,7 +580,10 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
         )
 
     assert result is row
-    assert observed == ["refund_read", "payment_peek", "order_lock", "payment_lock", "refund_lock"]
+    assert observed == [
+        "refund_read", "payment_peek", "order_owner_preflight",
+        "order_lock", "payment_lock", "refund_lock",
+    ]
     finalize.assert_awaited_once()
 
 

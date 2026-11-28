@@ -10,12 +10,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Store
+from app.models import Customer, Option, OptionGroup, Order, OrderItem, OrderItemOption, Store
 from app.services.customer_service import CustomerService
 from app.services.order_service import OrderPriceCalculator
 
 
 class OrderCreateService:
+    @staticmethod
+    async def _lock_active_customer_for_order(
+        db: AsyncSession, customer_id: int | None
+    ) -> Customer | None:
+        """Acquire the customer merge fence before reading/creating any order rows.
+
+        The lock is held by the caller's transaction through order creation/commit.
+        Customer merge takes the same row lock before migrating orders, so a new
+        order cannot appear behind the merge's order migration scan.
+        """
+        if customer_id is None:
+            return None
+        customer = (
+            await db.execute(
+                select(Customer)
+                .where(Customer.id == int(customer_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not customer or int(customer.status or 0) != 1:
+            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
+        return customer
+
     @staticmethod
     def _should_apply_social_benefit(customer_id: int | None, use_social_benefit: bool) -> bool:
         """公益折扣必须由顾客显式勾选；旧版 social_rule_id 仅兼容接收，不参与资格判断。"""
@@ -263,6 +286,11 @@ class OrderCreateService:
                 raise AppException(40401, "门店不存在")
             if int(store.status or 0) != 1:
                 raise AppException(40302, "该门店当前不可下单")
+
+        # Customer is the serialization fence shared with CustomerMergeService.
+        # Acquire it before idempotency reads or any order/session/asset writes; the
+        # API layer owns commit, so this lock remains held for the complete checkout.
+        await OrderCreateService._lock_active_customer_for_order(db, customer_id)
 
         scoped_key = OrderCreateService._scoped_idempotency_key(
             idempotency_key,
