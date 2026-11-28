@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.dialects import mysql
 
 from app.services.balance_service import BalanceService
 
@@ -12,6 +13,12 @@ def _result(value=None, *, one=None):
     result.scalar_one.return_value = value
     result.scalar_one_or_none.return_value = value
     result.one.return_value = one
+    return result
+
+
+def _rows(rows=()):
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = list(rows)
     return result
 
 
@@ -29,7 +36,7 @@ async def test_split_balance_refunds_cumulatively_restore_exact_gift_and_princip
         _result(customer),                         # lock customer
         _result(None),                             # refund idempotency lookup
         _result(pay_row),                           # original PAY ledger
-        _result(one=(Decimal("0.00"), Decimal("0.00"))),  # prior restores
+        _rows(),                                      # prior restores (locking current read)
         _result(None),                             # store lookup is db.get, not execute
     ])
     db.get = AsyncMock(return_value=SimpleNamespace(store_no="S1"))
@@ -42,13 +49,15 @@ async def test_split_balance_refunds_cumulatively_restore_exact_gift_and_princip
     )
     assert first.delta_gift == Decimal("1.00")
     assert first.delta_principal == Decimal("2.33")
+    prior_query = db.execute.call_args_list[3].args[0]
+    assert "FOR UPDATE" in str(prior_query.compile(dialect=mysql.dialect())).upper()
 
     # 第二笔退款前，数据库中已有第一笔回补流水，累计赠送金目标应精确到 3.00。
     db.execute = AsyncMock(side_effect=[
         _result(customer),
         _result(None),
         _result(pay_row),
-        _result(one=(Decimal("2.33"), Decimal("1.00"))),
+        _rows([SimpleNamespace(delta_principal=Decimal("2.33"), delta_gift=Decimal("1.00"))]),
     ])
     second = await BalanceService.restore_for_refund(
         db, customer_id=7, order_id=90, refund_id=502,
@@ -102,7 +111,7 @@ async def test_balance_refund_cannot_restore_more_than_original_wallet_payment()
         _result(customer),
         _result(None),
         _result(pay_row),
-        _result(one=(Decimal("7.00"), Decimal("3.00"))),
+        _rows([SimpleNamespace(delta_principal=Decimal("7.00"), delta_gift=Decimal("3.00"))]),
     ])
 
     from app.core.exceptions import AppException
