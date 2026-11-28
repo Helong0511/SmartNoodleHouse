@@ -6,7 +6,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, event, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import BalanceLedger, Customer, Order, Payment, PaymentRefund, Store
@@ -92,13 +92,6 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
         )
         await setup.commit()
 
-    competing_customer_lock = asyncio.Event()
-
-    def observe_waiting_customer_lock(_conn, _cursor, statement, _params, _ctx, _many):
-        normalized = statement.upper()
-        if "FOR UPDATE" in normalized and "FROM CUSTOMERS" in normalized:
-            competing_customer_lock.set()
-
     async with maker() as first, maker() as second:
         # Session A owns the serialization row before session B establishes its
         # REPEATABLE READ snapshot and starts waiting for the same customer.
@@ -118,21 +111,36 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
         ).scalars().all()
         assert stale_rows == []
 
-        event.listen(engine.sync_engine, "before_cursor_execute", observe_waiting_customer_lock)
-        try:
-            second_refund = asyncio.create_task(
-                BalanceService.restore_for_refund(
-                    second,
-                    customer_id=customer_id,
-                    order_id=order_id,
-                    refund_id=refund_ids[1],
-                    amount=Decimal("3.33"),
-                    store_id=store_id,
-                )
+        second_refund = asyncio.create_task(
+            BalanceService.restore_for_refund(
+                second, customer_id=customer_id, order_id=order_id,
+                refund_id=refund_ids[1], amount=Decimal("3.33"), store_id=store_id,
             )
-            # Do not use sleeps: prove B reached its customer FOR UPDATE while
-            # A still owns that row lock.
-            await asyncio.wait_for(competing_customer_lock.wait(), timeout=10)
+        )
+        wait_sql = text("""
+            SELECT COUNT(*) FROM performance_schema.data_lock_waits AS w
+            JOIN performance_schema.data_locks AS req
+              ON req.ENGINE = w.ENGINE
+             AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
+            WHERE req.OBJECT_SCHEMA = DATABASE()
+              AND req.OBJECT_NAME = 'customers'
+        """)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 10
+        observed_wait = False
+        try:
+            async with engine.connect() as observer:
+                while loop.time() < deadline:
+                    waiting = int((await observer.execute(wait_sql)).scalar_one())
+                    if waiting > 0:
+                        observed_wait = True
+                        break
+                    if second_refund.done():
+                        await second_refund
+                        break
+                    await asyncio.sleep(0.05)
+            assert observed_wait, "InnoDB data_lock_waits did not show competing customer lock"
+            assert not second_refund.done(), "second refund passed customer lock before first commit"
             first_refund = await BalanceService.restore_for_refund(
                 first,
                 customer_id=customer_id,
@@ -150,7 +158,12 @@ async def test_split_wallet_refunds_see_committed_restore_rows_after_stale_snaps
             assert second_row.delta_principal == Decimal("2.33")
             await second.commit()
         finally:
-            event.remove(engine.sync_engine, "before_cursor_execute", observe_waiting_customer_lock)
+            if not second_refund.done():
+                await first.rollback()
+                try:
+                    await asyncio.wait_for(second_refund, timeout=3)
+                except Exception:
+                    second_refund.cancel()
             if first.in_transaction():
                 await first.rollback()
             if second.in_transaction():
