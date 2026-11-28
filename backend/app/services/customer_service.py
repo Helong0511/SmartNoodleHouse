@@ -730,6 +730,7 @@ class CustomerService:
         同月同选项重复请求不扣分、不重复发券。
         """
         from app.services.coupon_service import CouponService
+        from app.models import CouponTemplate
 
         customer = (
             await db.execute(
@@ -738,17 +739,47 @@ class CustomerService:
         ).scalar_one_or_none()
         if not customer:
             raise AppException(40404, "顾客不存在")
+
+        # Enforce the feature switch at the mutation boundary, not only in the
+        # options-list endpoint; clients can call POST directly.
+        from app.services.system_settings_service import SystemSettingsService
+
+        store_id = int(customer.registered_store_id) if customer.registered_store_id else None
+        enabled = await SystemSettingsService.effective_int(
+            db, "points_exchange_enabled", 0, store_id=store_id
+        )
+        if not enabled:
+            raise AppException(40001, "积分兑换功能暂未开放")
+
         option = await db.get(PointExchangeOption, int(option_id))
         if not option or int(option.status) != 1:
             raise AppException(40404, "兑换选项不存在或已停用")
-        cost = int(option.points_cost)
-        if int(customer.points or 0) < cost:
-            raise AppException(40010, "积分不足")
-
-        # 幂等键：同月同选项只发一次
+        if option.store_id is not None and (
+            store_id is None or int(option.store_id) != store_id
+        ):
+            raise AppException(40404, "积分兑换选项不属于当前门店")
+        cost = int(option.points_cost or 0)
+        if cost <= 0:
+            raise AppException(40001, "积分兑换选项积分配置无效")
+        template = await db.get(CouponTemplate, int(option.template_id))
+        if not template or int(template.status) != 1:
+            raise AppException(40404, "兑换优惠券模板不存在或已停用")
+        # template_visible_to_store(None) is intentionally an HQ/admin
+        # visibility query and therefore cannot be used alone for a customer
+        # with no registered store: a store-bound template or a non-empty HQ
+        # whitelist must fail closed in this customer mutation path.
+        if store_id is None and (
+            template.store_id is not None
+            or bool(getattr(template, "store_whitelist", None))
+        ):
+            raise AppException(40404, "当前门店不可兑换此优惠券")
+        if not CouponService.template_visible_to_store(template, store_id):
+            raise AppException(40404, "当前门店不可兑换此优惠券")
+        # 幂等键：同月同选项只发一次。先查已完成的兑换，再校验当前余额；
+        # 否则顾客首次兑换后又消费积分，网络重试会错误返回“积分不足”，
+        # 而不是返回首次成功发放的优惠券。
         month_key = now_local().strftime("%Y%m")
         req_key = f"PTS:{int(customer.id)}:{int(option.id)}:{month_key}"
-        # 先查是否已发过（issue_by_template_id 内部也查，但提前查可避免不必要的扣分）
         existing_coupon = (
             await db.execute(
                 select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
@@ -761,6 +792,9 @@ class CustomerService:
                 "coupon_id": int(existing_coupon.id),
                 "remaining_points": int(customer.points or 0),
             }
+
+        if int(customer.points or 0) < cost:
+            raise AppException(40010, "积分不足")
 
         # 发券（原子扣库存 + PTS 幂等键）；顾客行 FOR UPDATE 保证同客串行，防重扣分
         coupons = await CouponService.issue_by_template_id(
