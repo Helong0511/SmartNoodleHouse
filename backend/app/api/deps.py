@@ -198,6 +198,9 @@ async def get_user_permissions(
 
 def require_permission(permission: str):
     async def checker(user: CurrentUser, db: DbSession):
+        # system:manage 是平台根权限，不能通过临时委派授予非超管。
+        if permission == "system:manage" and user.role.code != "SUPER_ADMIN":
+            raise AppException(40300, "system:manage 仅超级管理员可用", status_code=403)
         perms = await get_user_permissions(db, user.role_id, user_id=user.id)
         if permission not in perms and user.role.code != "SUPER_ADMIN":
             raise AppException(40300, f"缺少权限: {permission}", status_code=403)
