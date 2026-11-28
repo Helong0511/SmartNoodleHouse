@@ -16,6 +16,11 @@ async def test_super_admin_wallet_adjust_still_checks_customer_store_scope():
         gift_after=Decimal("5.00"),
     )
     db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(
+            scalar_one_or_none=lambda: SimpleNamespace(id=42, status=1)
+        )
+    )
     user = SimpleNamespace(id=1, role=SimpleNamespace(code="SUPER_ADMIN"))
     request = MagicMock()
 
@@ -66,3 +71,39 @@ async def test_super_admin_wallet_adjust_requires_explicit_store():
             db,
             user,
         )
+
+
+
+@pytest.mark.asyncio
+async def test_wallet_adjust_rejects_disabled_customer_before_scope_check():
+    from app.core.exceptions import AppException
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(
+            scalar_one_or_none=lambda: SimpleNamespace(id=42, status=0)
+        )
+    )
+    user = SimpleNamespace(id=1, role=SimpleNamespace(code="SUPER_ADMIN"))
+
+    with patch(
+        "app.api.customers._assert_customer_in_store",
+        new_callable=AsyncMock,
+    ) as assert_customer_scope, patch(
+        "app.api.wallet.BalanceService.adjust",
+        new_callable=AsyncMock,
+    ) as adjust:
+        with pytest.raises(AppException, match="顾客不存在或已停用"):
+            await adjust_balance(
+                AdjustBody(
+                    customer_id=42,
+                    delta_principal=Decimal("10.00"),
+                    store_id=7,
+                ),
+                MagicMock(),
+                db,
+                user,
+            )
+
+    assert_customer_scope.assert_not_awaited()
+    adjust.assert_not_awaited()
