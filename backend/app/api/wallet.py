@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
@@ -44,7 +44,15 @@ class RechargeCreate(BaseModel):
     store_id: int | None = None
     provider: str = Field(description="WECHAT or ALIPAY")
     channel_type: str = "miniprogram"
-    idempotency_key: str | None = Field(default=None, min_length=8, max_length=64)
+    idempotency_key: str = Field(..., min_length=8, max_length=64)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _normalize_idempotency_key(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 8:
+            raise ValueError("充值幂等键至少需要 8 个非空字符")
+        return value
 
 
 class AdjustBody(BaseModel):
@@ -504,25 +512,9 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
         sid = require_bound_store(user, data.store_id)
         if not sid:
             raise AppException(40301, "账号未绑定门店")
+        from app.api.customers import _assert_customer_in_store
 
-    # 与顾客合并共用 Customer-first 锁序：先锁顾客，再验证门店归属。
-    # 否则“先检查归属、后锁顾客”会允许并发合并在检查后迁移顾客，
-    # 随后仍把调账写入旧顾客/错误门店账本。
-    locked_customer = (
-        await db.execute(
-            select(Customer)
-            .where(Customer.id == int(data.customer_id))
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
-    if not locked_customer or int(locked_customer.status or 0) != 1:
-        raise AppException(40401, "顾客不存在或已停用，不能调账")
-
-    # 超管可以指定任意门店，但不能把其他门店顾客的钱包记入当前门店账本。
-    from app.api.customers import _assert_customer_in_store
-
-    await _assert_customer_in_store(db, data.customer_id, int(sid), action="调账")
+        await _assert_customer_in_store(db, data.customer_id, int(sid), action="调账")
     row = await BalanceService.adjust(
         db,
         customer_id=data.customer_id,
@@ -573,53 +565,69 @@ async def create_recharge(
     if not CustomerService.is_member(customer):
         raise AppException(40320, "请先开通会员后再充值", status_code=403)
 
-    pkg = await db.get(RechargePackage, data.package_id)
-    if not pkg or int(pkg.status) != 1:
-        raise AppException(40490, "充值档位不可用")
+    provider_u = str(data.provider or "").strip().upper()
+    if provider_u not in ("WECHAT", "ALIPAY"):
+        raise AppException(40041, "充值仅支持微信或支付宝")
+    channel_type = str(data.channel_type or "miniprogram").strip().lower()
+    if not channel_type:
+        raise AppException(40041, "充值支付渠道类型无效")
+
     store_id = int(data.store_id) if data.store_id else None
     if not store_id:
         raise AppException(40061, "请选择充值门店")
-    store = await db.get(Store, store_id)
-    if not store or store.status != 1:
-        raise AppException(40061, "门店不存在或已停用")
-    if pkg.store_id and int(pkg.store_id) != store_id:
-        raise AppException(40092, "该档位不适用于当前门店")
 
-    ro = None
-    if data.idempotency_key:
-        existed = (
-            await db.execute(
-                select(RechargeOrder).where(RechargeOrder.idempotency_key == data.idempotency_key).limit(1)
-            )
-        ).scalar_one_or_none()
-        if existed:
-            # 幂等键绑定完整充值意图，不能用同一 key 静默复用另一档位/门店/金额。
-            if (
-                int(existed.customer_id) != int(customer.id)
-                or int(existed.package_id) != int(pkg.id)
-                or int(existed.store_id) != int(store_id)
-                or money(existed.pay_amount) != money(pkg.pay_amount)
-                or money(existed.credit_principal) != money(pkg.pay_amount)
-                or money(existed.credit_gift) != money(pkg.gift_amount)
-                or (existed.channel or "").upper() != data.provider.upper()
-            ):
-                raise AppException(40909, "幂等键冲突：充值档位、门店、金额或支付渠道不一致", status_code=409)
-            if existed.status == "PAID":
-                cust = await db.get(Customer, customer.id)
-                return success(
-                    {
-                        **_ro_ser(existed),
-                        "already_paid": True,
-                        "status": "PAID",
-                        "wallet": BalanceService.snapshot(cust) if cust else {},
-                    },
-                    request=request,
-                )
-            ro = existed
+    def _assert_same_recharge_intent(existed: RechargeOrder) -> None:
+        # 幂等键绑定不可变的顾客/档位/门店/渠道身份；重试按已创建充值单快照继续，
+        # 不要求档位或门店仍处于可新建状态，也不重新读取已变更的套餐金额。
+        if (
+            int(existed.customer_id) != int(customer.id)
+            or int(existed.package_id or 0) != int(data.package_id)
+            or int(existed.store_id) != int(store_id)
+            or (existed.channel or "").upper() != provider_u
+        ):
+            raise AppException(40909, "幂等键冲突：充值档位、门店或支付渠道不一致", status_code=409)
 
-    if ro is None:
+    async def _paid_replay(existed: RechargeOrder):
+        if existed.status != "PAID":
+            return None
+        cust = await db.get(Customer, customer.id)
+        return success(
+            {
+                **_ro_ser(existed),
+                "already_paid": True,
+                "status": "PAID",
+                "wallet": BalanceService.snapshot(cust) if cust else {},
+            },
+            request=request,
+        )
+
+    # Resolve the idempotency key before validating whether the package/store
+    # can accept a *new* recharge. Existing pending payments must remain
+    # queryable/retryable after an administrator disables the package/store.
+    ro = (
+        await db.execute(
+            select(RechargeOrder)
+            .where(RechargeOrder.idempotency_key == data.idempotency_key)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if ro is not None:
+        _assert_same_recharge_intent(ro)
+        replay = await _paid_replay(ro)
+        if replay is not None:
+            return replay
+    else:
+        pkg = await db.get(RechargePackage, data.package_id)
+        if not pkg or int(pkg.status) != 1:
+            raise AppException(40490, "充值档位不可用")
+        store = await db.get(Store, store_id)
+        if not store or store.status != 1:
+            raise AppException(40061, "门店不存在或已停用")
+        if pkg.store_id and int(pkg.store_id) != store_id:
+            raise AppException(40092, "该档位不适用于当前门店")
+
         sno = store.store_no or f"S{store.id}"
-        ro = RechargeOrder(
+        candidate = RechargeOrder(
             recharge_no=generate_no("RC", sno, "00"),
             customer_id=customer.id,
             store_id=store_id,
@@ -628,18 +636,35 @@ async def create_recharge(
             credit_principal=money(pkg.pay_amount),
             credit_gift=money(pkg.gift_amount),
             status="PENDING",
-            channel=data.provider.upper(),
+            channel=provider_u,
             idempotency_key=data.idempotency_key,
         )
-        db.add(ro)
-        await db.flush()
-
-    provider_u = data.provider.upper()
-    if provider_u not in ("WECHAT", "ALIPAY"):
-        raise AppException(40041, "充值仅支持微信或支付宝")
+        # 唯一键冲突必须限制在 SAVEPOINT 内；不能让一次网络重试回滚调用方
+        # Session 中的其他工作。冲突后用锁定读取胜出的请求创建的充值单。
+        try:
+            async with db.begin_nested():
+                db.add(candidate)
+                await db.flush()
+            ro = candidate
+        except IntegrityError:
+            ro = (
+                await db.execute(
+                    select(RechargeOrder)
+                    .where(RechargeOrder.idempotency_key == data.idempotency_key)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if ro is None:
+                raise
+            _assert_same_recharge_intent(ro)
+            replay = await _paid_replay(ro)
+            if replay is not None:
+                return replay
 
     extra: dict | None = None
-    channel_l = data.channel_type.lower()
+    channel_l = channel_type
     if provider_u == "WECHAT" and channel_l == "miniprogram":
         from app.api.payments import _wechat_openid_for_customer
 
@@ -657,7 +682,7 @@ async def create_recharge(
         db,
         recharge=ro,
         provider=provider_u,
-        channel_type=data.channel_type,
+        channel_type=channel_type,
         customer_id=customer.id,
         extra=extra,
     )
