@@ -623,6 +623,26 @@ class CustomerService:
         return earned
 
     @staticmethod
+    def points_for_cumulative_refunds(earned_points: int, refunded_amount, order_amount) -> int:
+        """Return the cumulative points clawback for successful refunds.
+
+        Calculate from the order's total earned points and cumulative refunded
+        money, rather than rounding each refund independently. This keeps
+        birthday multipliers symmetric and prevents split-refund rounding drift.
+        """
+        from decimal import ROUND_HALF_UP
+
+        earned = max(0, int(earned_points or 0))
+        base = money(order_amount or 0)
+        refunded = max(Decimal("0"), money(refunded_amount or 0))
+        if earned <= 0 or base <= 0 or refunded <= 0:
+            return 0
+        ratio = min(refunded, base) / base
+        return min(earned, int((Decimal(earned) * ratio).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )))
+
+    @staticmethod
     async def deduct_points_for_refund(
         db: AsyncSession,
         order: Order,
@@ -630,9 +650,7 @@ class CustomerService:
         *,
         refund_id: int | None = None,
     ) -> int:
-        """退款成功：按退款金额扣积分，不超过本单净已发积分。行锁 + point_ledger。"""
-        from sqlalchemy import func
-
+        """退款成功：按本单累计成功退款比例扣回实际发放积分，退款ID幂等。"""
         if not order.customer_id:
             return 0
         customer = (
@@ -656,65 +674,96 @@ class CustomerService:
             ).scalar_one_or_none()
             if existed:
                 return 0
-        # 先确认原订单是否已经产生 EARN 流水。若退款先于延迟积分发放，
-        # 不能提前占用 refund_id；award_points_for_paid_order 后续会再次补扣。
-        earned = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
+
+        # Refunds may precede delayed EARN creation. Do not reserve refund_id
+        # until the EARN ledger exists; award_points_for_paid_order will retry.
+        # Use current/locking reads for every cumulative ledger input. A plain
+        # aggregate can reuse a REPEATABLE READ snapshot established before the
+        # customer-row lock wait, and therefore miss another refund worker's commit.
+        earned_rows = (
+            await db.execute(
+                select(PointLedger)
+                .where(
                     PointLedger.order_id == order.id,
                     PointLedger.entry_type == "EARN",
                 )
+                .with_for_update()
             )
-            or 0
-        )
-        deducted = CustomerService.points_from_amount(refund_amount)
-        if deducted <= 0:
-            # 退款金额折算为 0 分时，仅在原订单已经发放积分后写零值幂等标记。
-            # EARN 尚不存在时保留 refund_id，供延迟发分后的 catch-up 使用。
-            if refund_id is not None and earned > 0:
-                db.add(
-                    PointLedger(
-                        customer_id=customer.id,
-                        order_id=order.id,
-                        refund_id=int(refund_id),
-                        delta=0,
-                        balance_after=int(customer.points or 0),
-                        entry_type="REFUND_DEDUCT",
-                    )
-                )
-                await db.flush()
+        ).scalars().all()
+        earned = sum(int(row.delta or 0) for row in earned_rows)
+        if earned <= 0:
             return 0
-        # 本单净已发积分上限，避免跨单扣光
-        already = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
+
+        from app.models import PaymentRefund
+
+        successful_refunds = (
+            await db.execute(
+                select(PaymentRefund)
+                .where(
+                    PaymentRefund.order_id == int(order.id),
+                    PaymentRefund.status == "SUCCESS",
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        refunded_total = money(
+            sum((money(row.amount) for row in successful_refunds), Decimal("0.00"))
+        )
+        # Defensive support for callers that invoke this method before the
+        # current refund row becomes visible as SUCCESS in this transaction.
+        current_is_success = bool(
+            refund_id is not None
+            and any(int(row.id) == int(refund_id) for row in successful_refunds)
+        )
+        if refund_id is None or not current_is_success:
+            refunded_total += max(Decimal("0"), money(refund_amount or 0))
+
+        target_total = CustomerService.points_for_cumulative_refunds(
+            earned, refunded_total, order.total_amount
+        )
+        deducted_rows = (
+            await db.execute(
+                select(PointLedger)
+                .where(
                     PointLedger.order_id == order.id,
                     PointLedger.entry_type == "REFUND_DEDUCT",
                 )
+                .with_for_update()
             )
-            or 0
+        ).scalars().all()
+        already_deducted = max(
+            0, -sum(int(row.delta or 0) for row in deducted_rows)
         )
-        # already 为负，净可扣 = earned + already
-        remaining = max(0, earned + already)
+        # Assign the incremental clawback to whichever refund is processed now.
+        # The cumulative target is monotonic, so callback order cannot over-deduct.
+        requested = max(0, target_total - already_deducted)
         before = int(customer.points or 0)
-        actual = min(before, deducted, remaining)
+        actual = min(before, requested)
         customer.points = before - actual
-        # A refund may be processed before this order's delayed EARN ledger arrives.
-        # Keep the idempotency key available for award_points_for_paid_order() to
-        # catch up later. If this order has earned points but the current balance
-        # is zero, persist a zero marker so unrelated future earnings are untouched.
-        if actual > 0 or (refund_id is not None and earned > 0):
+        if refund_id is not None:
             db.add(
                 PointLedger(
                     customer_id=customer.id,
                     order_id=order.id,
-                    refund_id=refund_id,
+                    refund_id=int(refund_id),
                     delta=-actual,
                     balance_after=int(customer.points),
                     entry_type="REFUND_DEDUCT",
                 )
             )
-        await CustomerService.recalculate_member_level(db, customer)
+        elif actual > 0:
+            db.add(
+                PointLedger(
+                    customer_id=customer.id,
+                    order_id=order.id,
+                    refund_id=None,
+                    delta=-actual,
+                    balance_after=int(customer.points),
+                    entry_type="REFUND_DEDUCT",
+                )
+            )
+        if actual > 0:
+            await CustomerService.recalculate_member_level(db, customer)
         await db.flush()
         return actual
 
@@ -730,6 +779,7 @@ class CustomerService:
         同月同选项重复请求不扣分、不重复发券。
         """
         from app.services.coupon_service import CouponService
+        from app.models import CouponTemplate
 
         customer = (
             await db.execute(
@@ -738,17 +788,47 @@ class CustomerService:
         ).scalar_one_or_none()
         if not customer:
             raise AppException(40404, "顾客不存在")
+
+        # Enforce the feature switch at the mutation boundary, not only in the
+        # options-list endpoint; clients can call POST directly.
+        from app.services.system_settings_service import SystemSettingsService
+
+        store_id = int(customer.registered_store_id) if customer.registered_store_id else None
+        enabled = await SystemSettingsService.effective_int(
+            db, "points_exchange_enabled", 0, store_id=store_id
+        )
+        if not enabled:
+            raise AppException(40001, "积分兑换功能暂未开放")
+
         option = await db.get(PointExchangeOption, int(option_id))
         if not option or int(option.status) != 1:
             raise AppException(40404, "兑换选项不存在或已停用")
-        cost = int(option.points_cost)
-        if int(customer.points or 0) < cost:
-            raise AppException(40010, "积分不足")
-
-        # 幂等键：同月同选项只发一次
+        if option.store_id is not None and (
+            store_id is None or int(option.store_id) != store_id
+        ):
+            raise AppException(40404, "积分兑换选项不属于当前门店")
+        cost = int(option.points_cost or 0)
+        if cost <= 0:
+            raise AppException(40001, "积分兑换选项积分配置无效")
+        template = await db.get(CouponTemplate, int(option.template_id))
+        if not template or int(template.status) != 1:
+            raise AppException(40404, "兑换优惠券模板不存在或已停用")
+        # template_visible_to_store(None) is intentionally an HQ/admin
+        # visibility query and therefore cannot be used alone for a customer
+        # with no registered store: a store-bound template or a non-empty HQ
+        # whitelist must fail closed in this customer mutation path.
+        if store_id is None and (
+            template.store_id is not None
+            or bool(getattr(template, "store_whitelist", None))
+        ):
+            raise AppException(40404, "当前门店不可兑换此优惠券")
+        if not CouponService.template_visible_to_store(template, store_id):
+            raise AppException(40404, "当前门店不可兑换此优惠券")
+        # 幂等键：同月同选项只发一次。先查已完成的兑换，再校验当前余额；
+        # 否则顾客首次兑换后又消费积分，网络重试会错误返回“积分不足”，
+        # 而不是返回首次成功发放的优惠券。
         month_key = now_local().strftime("%Y%m")
         req_key = f"PTS:{int(customer.id)}:{int(option.id)}:{month_key}"
-        # 先查是否已发过（issue_by_template_id 内部也查，但提前查可避免不必要的扣分）
         existing_coupon = (
             await db.execute(
                 select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
@@ -761,6 +841,9 @@ class CustomerService:
                 "coupon_id": int(existing_coupon.id),
                 "remaining_points": int(customer.points or 0),
             }
+
+        if int(customer.points or 0) < cost:
+            raise AppException(40010, "积分不足")
 
         # 发券（原子扣库存 + PTS 幂等键）；顾客行 FOR UPDATE 保证同客串行，防重扣分
         coupons = await CouponService.issue_by_template_id(
