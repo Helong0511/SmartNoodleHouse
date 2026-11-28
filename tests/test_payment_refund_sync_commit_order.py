@@ -10,7 +10,7 @@ from app.api import payments as payment_api
 @pytest.mark.asyncio
 async def test_sync_refund_commits_before_websocket_notification(monkeypatch):
     events = []
-    row = SimpleNamespace(id=7, refund_no="RF-7", order_id=9, amount="12.00", status="PROCESSING")
+    row = SimpleNamespace(id=7, refund_no="RF-7", order_id=9, payment_id=11, amount="12.00", status="PROCESSING")
     order = SimpleNamespace(id=9, order_no="OD-9", store_id=3)
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
@@ -31,19 +31,22 @@ async def test_sync_refund_commits_before_websocket_notification(monkeypatch):
     db.commit = AsyncMock(side_effect=commit)
     db.get = AsyncMock(return_value=order)
     monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", AsyncMock(side_effect=sync_refund_status))
+    async def audit(*_args, **_kwargs):
+        events.append("audit")
+    monkeypatch.setattr(payment_api.AuditService, "log_staff", audit)
     monkeypatch.setattr(payment_api, "assert_order_store_access", lambda *_: None)
     monkeypatch.setattr(payment_api.ws_manager, "notify_order_event", notify)
     monkeypatch.setattr(payment_api, "success", lambda data, request=None: data)
 
     response = await payment_api.sync_refund("RF-7", request=MagicMock(), db=db, user=SimpleNamespace(id=1))
-    assert events == ["sync", "commit", "notify"]
+    assert events == ["sync", "audit", "commit", "notify"]
     assert response["status"] == "SUCCESS"
     db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_sync_refund_websocket_failure_does_not_fail_committed_sync(monkeypatch):
-    row = SimpleNamespace(id=8, refund_no="RF-8", order_id=10, amount="5.00", status="PROCESSING")
+    row = SimpleNamespace(id=8, refund_no="RF-8", order_id=10, payment_id=12, amount="5.00", status="PROCESSING")
     order = SimpleNamespace(id=10, order_no="OD-10", store_id=4)
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
@@ -60,6 +63,7 @@ async def test_sync_refund_websocket_failure_does_not_fail_committed_sync(monkey
         raise RuntimeError("websocket unavailable")
 
     monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", sync_refund_status)
+    monkeypatch.setattr(payment_api.AuditService, "log_staff", AsyncMock())
     monkeypatch.setattr(payment_api, "assert_order_store_access", lambda *_: None)
     monkeypatch.setattr(payment_api.ws_manager, "notify_order_event", notify)
     monkeypatch.setattr(payment_api, "success", lambda data, request=None: data)
@@ -67,3 +71,25 @@ async def test_sync_refund_websocket_failure_does_not_fail_committed_sync(monkey
     response = await payment_api.sync_refund("RF-8", request=MagicMock(), db=db, user=SimpleNamespace(id=1))
     assert response["status"] == "SUCCESS"
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_refund_rejects_missing_order_before_provider_query(monkeypatch):
+    row = SimpleNamespace(id=9, refund_no="RF-9", order_id=99, payment_id=13, amount="8.00", status="UNKNOWN")
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = row
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.get = AsyncMock(return_value=None)
+    db.commit = AsyncMock()
+    sync = AsyncMock()
+    audit = AsyncMock()
+    monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", sync)
+    monkeypatch.setattr(payment_api.AuditService, "log_staff", audit)
+
+    with pytest.raises(payment_api.AppException) as exc:
+        await payment_api.sync_refund("RF-9", request=MagicMock(), db=db, user=SimpleNamespace(id=1))
+    assert exc.value.status_code == 404
+    sync.assert_not_awaited()
+    audit.assert_not_awaited()
+    db.commit.assert_not_awaited()

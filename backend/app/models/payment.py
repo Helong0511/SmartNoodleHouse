@@ -63,11 +63,17 @@ class PaymentRefund(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_pr_status_succeeded_at", "status", "succeeded_at"),
         Index("ix_pr_next_retry_at_status", "next_retry_at", "status"),
+        Index("ix_pr_cashier_shift_status", "cashier_shift_id", "status"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     refund_no: Mapped[str] = mapped_column(String(40), unique=True)
     payment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("payments.id"), index=True)
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
+    cashier_shift_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        ForeignKey("cashier_shifts.id", name="fk_payment_refunds_cashier_shift_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     reason: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
@@ -120,7 +126,7 @@ class PosRefundRequest(Base, TimestampMixin):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     executed_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     reason: Mapped[str] = mapped_column(String(255))
-    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
     # 顾客自助申请时为 NULL（小程序未开始制作订单的全额退款申请）
     requested_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
     reviewed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))

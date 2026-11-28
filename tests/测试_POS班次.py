@@ -145,3 +145,58 @@ async def test_shift_totals_use_current_read_and_include_late_callback_payment()
     assert "cashier_shift_id" in compiled
     assert stats["total_wechat"] == Decimal("15.00")
     assert stats["total_amount"] == Decimal("15.00")
+
+
+@pytest.mark.asyncio
+async def test_my_today_summary_scopes_cash_refunds_to_effective_store():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=SimpleNamespace(store_id=7))
+    db.scalar = AsyncMock(return_value=Decimal("2.00"))
+    stats = {
+        "total_cash": Decimal("10.00"),
+        "total_wechat": Decimal("0.00"),
+        "total_alipay": Decimal("0.00"),
+        "total_amount": Decimal("10.00"),
+    }
+    with patch.object(
+        PosShiftService, "get_open_shift", new_callable=AsyncMock, return_value=None
+    ), patch(
+        "app.services.pos_shift_service._aggregate_payments",
+        new_callable=AsyncMock,
+        return_value=stats,
+    ):
+        result = await PosShiftService.my_today_summary(db, operator_id=9)
+
+    query = db.scalar.await_args.args[0]
+    assert "cashier_shifts.store_id" in str(query)
+    assert result["total_cash_refunds"] == "2.00"
+
+
+@pytest.mark.asyncio
+async def test_my_today_summary_does_not_filter_store_for_unbound_operator():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=SimpleNamespace(store_id=None))
+    db.scalar = AsyncMock(return_value=Decimal("2.00"))
+    stats = {
+        "total_cash": Decimal("10.00"),
+        "total_wechat": Decimal("0.00"),
+        "total_alipay": Decimal("0.00"),
+        "total_amount": Decimal("10.00"),
+    }
+    with patch.object(
+        PosShiftService, "get_open_shift", new_callable=AsyncMock, return_value=None
+    ), patch(
+        "app.services.pos_shift_service._aggregate_payments",
+        new_callable=AsyncMock,
+        return_value=stats,
+    ):
+        await PosShiftService.my_today_summary(db, operator_id=9)
+
+    query = db.scalar.await_args.args[0]
+    assert "cashier_shifts.store_id" not in str(query)

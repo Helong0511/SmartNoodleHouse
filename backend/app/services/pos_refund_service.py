@@ -378,7 +378,13 @@ class PosRefundService:
             if getattr(row, "refund_id", None)
             else None
         )
-        if linked_refund and linked_refund.status in (
+        if getattr(row, "refund_id", None) and linked_refund is None:
+            # A durable refund_id whose row disappeared is not equivalent to a
+            # pre-channel failure. The provider may already have accepted the refund.
+            # Keep the request blocked for reconciliation; never make it retryable.
+            row.status = "RECONCILIATION_REQUIRED"
+            row.fail_reason = "关联退款单不存在，无法确认渠道是否受理，禁止重试并需人工核对"[:255]
+        elif linked_refund and linked_refund.status in (
             "PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"
         ):
             # 退款单已提交：外部渠道可能已受理，必须保持处理中并交给查单/回调。
@@ -389,8 +395,8 @@ class PosRefundService:
             if row.status != "SUCCESS":
                 row.fail_reason = f"部分退款成功 ¥{money(row.executed_amount or 0)}，剩余请重试"[:255]
         else:
-            # 没有已绑定退款单，或渠道明确终态失败；PaymentService 的安全边界保证
-            # 外部请求前先提交退款单及关联，因此此时可标记失败并由新审批重新执行。
+            # No refund row was ever linked, or the linked channel result is a
+            # definitive failure; only these cases may be retried safely.
             row.status = "FAILED"
             row.fail_reason = (
                 f"退款执行失败（已退 ¥{money(row.executed_amount or 0)}）: {error}"
@@ -420,6 +426,12 @@ class PosRefundService:
         if not row:
             raise AppException(40404, "退款申请不存在")
         assert_store_access(user, row.store_id)
+        # Segregation of duties: the staff member who requested a POS refund
+        # must not approve/execute that same request, even if they are a manager.
+        # Customer self-service requests have requested_by=None and remain approvable.
+        requested_by = getattr(row, "requested_by", None)
+        if requested_by is not None and int(requested_by) == int(user.id):
+            raise AppException(40301, "退款申请人不能审批自己的退款申请")
         # PROCESSING 但尚未绑定 refund_id，表示首个审批请求已提交认领事务、
         # 正在创建第一笔渠道退款单。另一个审批请求即使在锁等待后读到该状态，
         # 也必须直接返回；不能因 refund_id 暂为空而再次分配并发起退款。
@@ -446,7 +458,15 @@ class PosRefundService:
                     .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
-            if linked_refund and linked_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
+            if linked_refund is None:
+                # A persisted link with no corresponding refund row is an integrity
+                # anomaly. Never treat it as permission to issue another channel refund.
+                row.status = "RECONCILIATION_REQUIRED"
+                row.fail_reason = "关联退款单不存在，禁止重复发起退款，需核对支付渠道及账务记录"
+                await db.flush()
+                await db.commit()
+                return row
+            if linked_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
                 await db.refresh(row)
                 return row
         # PROCESSING：仅在上一笔已明确结束后，才允许继续处理剩余金额。

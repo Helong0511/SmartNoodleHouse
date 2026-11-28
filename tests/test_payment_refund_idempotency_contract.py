@@ -44,3 +44,9 @@ def test_refund_ui_persists_same_request_key_before_network_call() -> None:
     assert "readRefundAttempt(String(row.payment_no))" in source
     assert "sessionStorage.setItem" in source
     assert "sessionStorage.removeItem" in source
+
+
+def test_abnormal_refund_reason_is_provider_neutral() -> None:
+    source = (ROOT / "backend/app/services/payment_service.py").read_text(encoding="utf-8")
+    assert "退款渠道返回异常，需在对应支付平台核实后重新查询" in source
+    assert "微信退款异常：需要在微信商户平台处理异常退款后再查询确认" not in source

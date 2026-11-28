@@ -2859,7 +2859,7 @@ class PaymentService:
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status
             row.fail_reason = row.fail_reason or fail_reason or (
-                "微信退款异常：需要在微信商户平台处理异常退款后再查询确认" if new_status == "ABNORMAL" else new_status
+                "退款渠道返回异常，需在对应支付平台核实后重新查询" if new_status == "ABNORMAL" else new_status
             )
         elif new_status == "UNKNOWN":
             # 保留 UNKNOWN，不得升格为 SUCCESS；由 query / 定时补偿恢复
@@ -2896,6 +2896,36 @@ class PaymentService:
         pos_refund_execution_token: str | None = None,
         pos_refund_execution_epoch: int | None = None,
     ) -> PaymentRefund:
+        # Cash POS refunds share the cashier-shift fence with checkout and shift close.
+        # Acquire shift BEFORE Order/Payment locks to keep the global lock order consistent.
+        cash_shift_id = None
+        if (str(getattr(payment, "provider", None) or "").upper() == "CASH" and getattr(payment, "order_id", None) is not None):
+            idem_preflight = str(idempotency_key or "").strip() or None
+            if idem_preflight:
+                existing = (
+                    await db.execute(
+                        select(PaymentRefund).where(PaymentRefund.idempotency_key == idem_preflight)
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    if (
+                        int(existing.payment_id) != int(payment.id)
+                        or money(existing.amount) != money(amount)
+                        or str(existing.reason or "") != str(reason or "")
+                    ):
+                        raise AppException(40955, "退款幂等键已被不同的支付单或退款参数使用")
+                    existing._idempotent_replay = True
+                    return existing
+            order_hint = await db.get(Order, int(payment.order_id))
+            if order_hint and (order_hint.channel or "").upper() == "POS":
+                if operator_id is None:
+                    raise AppException(40070, "POS 现金退款必须由当前开班员工执行")
+                from app.services.pos_shift_service import PosShiftService
+                cash_shift = await PosShiftService.require_open_shift_for_update(
+                    db, int(operator_id), store_id=int(order_hint.store_id)
+                )
+                cash_shift_id = int(cash_shift.id)
+
         # Keep refund-row locks behind the shared Order/RechargeOrder → Payment
         # lock order. Callback and compensation paths use the same order before
         # locking PaymentRefund, preventing a refund-row/payment-row deadlock.
@@ -2997,6 +3027,7 @@ class PaymentService:
             reason=reason,
             status="PENDING",
             operator_id=operator_id,
+            cashier_shift_id=cash_shift_id,
             idempotency_key=idem_key,
         )
         db.add(row)
@@ -3038,10 +3069,12 @@ class PaymentService:
             pos_request.execution_lease_until = None
             pos_request.fail_reason = None
 
-        # 短事务：落库 PENDING 退款单和 POS 关联并释放行锁后再调第三方
+        # 第三方退款先短事务提交 PENDING 再请求渠道；本地 CASH POS 退款没有外部副作用，
+        # 必须在持有班次锁的同一事务内完成 SUCCESS，不能在交班与退款之间留空窗。
         refund_id = row.id
         payment_id = payment.id
-        await db.commit()
+        if cash_shift_id is None:
+            await db.commit()
 
         provider_inst = cls.get_provider(payment.provider) if (payment.provider or "").upper() not in ("CASH", "BALANCE") else None
         try:

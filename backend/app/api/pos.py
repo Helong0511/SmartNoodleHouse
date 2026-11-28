@@ -368,13 +368,16 @@ async def approve_pos_refund(
     row = await PosRefundService.approve_and_execute(
         db, user=user, request_id=request_id, remark=body.remark
     )
-    audit_store_id: int | None = None
+    # Audit attribution must survive non-terminal outcomes too (PROCESSING/FAILED).
+    # The request's store is authoritative for the POS workflow; a loaded order may
+    # confirm it on SUCCESS, but must not be the only source of the audit scope.
+    audit_store_id: int | None = int(row.store_id) if getattr(row, "store_id", None) is not None else None
     if row.status == "SUCCESS":
         from app.models import Order
 
         order = await db.get(Order, row.order_id)
-        if order:
-            audit_store_id = int(order.store_id) if order.store_id else None
+        if order and order.store_id is not None:
+            audit_store_id = int(order.store_id)
             await ws_manager.notify_order_event(
                 "ORDER_REFUNDED",
                 {

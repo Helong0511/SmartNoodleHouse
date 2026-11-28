@@ -961,6 +961,7 @@ CREATE TABLE IF NOT EXISTS `payment_refunds` (
   `refund_no` varchar(40) NOT NULL COMMENT '退款单号',
   `payment_id` bigint UNSIGNED NOT NULL COMMENT '原支付单 → payments.id',
   `order_id` bigint UNSIGNED NOT NULL COMMENT '关联订单 → orders.id',
+  `cashier_shift_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT 'POS现金退款执行班次 → cashier_shifts.id',
   `amount` decimal(10, 2) NOT NULL COMMENT '退款金额',
   `reason` varchar(255) NULL DEFAULT NULL COMMENT '退款原因',
   `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/SUCCESS/FAILED/CLOSED',
@@ -982,9 +983,11 @@ CREATE TABLE IF NOT EXISTS `payment_refunds` (
   INDEX `idx_refunds_operator`(`operator_id` ASC) USING BTREE,
   INDEX `idx_refunds_succeeded`(`status` ASC, `succeeded_at` ASC) USING BTREE,
   INDEX `idx_refunds_retry`(`status` ASC, `next_retry_at` ASC) USING BTREE,
+  INDEX `ix_pr_cashier_shift_status`(`cashier_shift_id` ASC, `status` ASC) USING BTREE,
   INDEX `fk_refund_order`(`order_id` ASC) USING BTREE,
   CONSTRAINT `fk_refund_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_refund_payment` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_payment_refunds_cashier_shift_id` FOREIGN KEY (`cashier_shift_id`) REFERENCES `cashier_shifts` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_refund_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付退款单表' ROW_FORMAT = Dynamic;
 -- ----------------------------
@@ -1153,7 +1156,7 @@ CREATE TABLE IF NOT EXISTS `pos_refund_requests` (
   `amount` decimal(10, 2) NOT NULL COMMENT '申请退款金额（元）',
   `executed_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '已成功执行退款合计（组合分摊）',
   `reason` varchar(255) NOT NULL COMMENT '申请原因',
-  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/REJECTED/CANCELLED/SUCCESS/FAILED',
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/RECONCILIATION_REQUIRED/REJECTED/CANCELLED/SUCCESS/FAILED',
   `requested_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '申请人（收银员；顾客自助申请时为 NULL）→ users.id',
   `reviewed_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '审批人 → users.id',
   `reviewed_at` datetime(3) NULL DEFAULT NULL COMMENT '审批时间',

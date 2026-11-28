@@ -13,7 +13,9 @@
       <div class="summary">
         <div class="sum-item"><span>班次</span><b>{{ report.shift_count }}</b></div>
         <div class="sum-item"><span>备用金合计</span><b>¥{{ report.total_opening_float }}</b></div>
-        <div class="sum-item"><span>现金</span><b>¥{{ report.total_cash }}</b></div>
+        <div class="sum-item"><span>现金收款</span><b>¥{{ report.total_cash }}</b></div>
+        <div class="sum-item"><span>现金退款</span><b>−¥{{ report.total_cash_refunds || '0.00' }}</b></div>
+        <div class="sum-item"><span>预期现金</span><b>¥{{ report.expected_cash || '0.00' }}</b></div>
         <div class="sum-item"><span>微信</span><b>¥{{ report.total_wechat }}</b></div>
         <div class="sum-item"><span>支付宝</span><b>¥{{ report.total_alipay }}</b></div>
         <div class="sum-item highlight"><span>收款总计</span><b>¥{{ report.total_amount }}</b></div>
@@ -24,8 +26,14 @@
         <el-table-column prop="opening_float" label="备用金" width="100">
           <template #default="{ row }">¥{{ row.opening_float }}</template>
         </el-table-column>
-        <el-table-column prop="total_cash" label="现金" width="100">
+        <el-table-column prop="total_cash" label="现金收款" width="100">
           <template #default="{ row }">¥{{ row.total_cash }}</template>
+        </el-table-column>
+        <el-table-column prop="total_cash_refunds" label="现金退款" width="100">
+          <template #default="{ row }">−¥{{ row.total_cash_refunds || '0.00' }}</template>
+        </el-table-column>
+        <el-table-column prop="expected_cash" label="预期现金" width="110">
+          <template #default="{ row }">¥{{ row.expected_cash || '0.00' }}</template>
         </el-table-column>
         <el-table-column prop="total_wechat" label="微信" width="100">
           <template #default="{ row }">¥{{ row.total_wechat }}</template>
