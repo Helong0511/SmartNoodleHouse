@@ -61,3 +61,24 @@ def test_alipay_refund_callback_queries_provider_before_opening_db_write_transac
         "_apply_refund_callback must consume the pre-fetched provider result, "
         "not issue HTTP while the receipt transaction is open"
     )
+
+
+def test_recharge_query_settlement_does_not_prelock_recharge_before_customer_lock():
+    source = inspect.getsource(PaymentService._settle_from_query)
+    recharge_read = source.index("await db.get(RechargeOrder")
+    settle = source.index("await cls._settle_recharge_payment")
+    assert recharge_read < settle
+    assert "select(RechargeOrder)" not in source, (
+        "query settlement must read RechargeOrder without a locking SELECT; "
+        "the ordinary Order FOR UPDATE used for order payments is unrelated"
+    )
+
+
+def test_recharge_callback_does_not_prelock_recharge_before_customer_lock():
+    source = inspect.getsource(PaymentService._apply_recharge_callback)
+    recharge_read = source.index("await db.get(RechargeOrder")
+    settle = source.index("await cls._settle_recharge_payment")
+    assert recharge_read < settle
+    assert "select(RechargeOrder)" not in source, (
+        "callback settlement must read RechargeOrder without a locking SELECT"
+    )
