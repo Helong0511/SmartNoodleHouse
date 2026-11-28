@@ -1811,11 +1811,11 @@ class PaymentService:
             return
         # 储值充值单：无餐饮 order_id
         if getattr(payment, "recharge_order_id", None) and not getattr(payment, "order_id", None):
-            recharge = (
-                await db.execute(
-                    select(RechargeOrder).where(RechargeOrder.id == payment.recharge_order_id).with_for_update()
-                )
-            ).scalar_one_or_none()
+            # 这里只做无锁读取以取得充值单 ID；统一结算入口会重新按
+            # Customer → RechargeOrder → Payment 当前读加锁并校验归属。
+            # 不能在此先锁 RechargeOrder，否则会与顾客合并的 Customer-first
+            # 锁序形成 RechargeOrder ↔ Customer 死锁。
+            recharge = await db.get(RechargeOrder, int(payment.recharge_order_id))
             if not recharge:
                 raise AppException(40491, "充值单不存在")
             await cls._settle_recharge_payment(
@@ -2602,13 +2602,10 @@ class PaymentService:
             raise AppException(40302, "支付金额不匹配")
 
         if parsed["status"] == "PAID":
-            recharge = (
-                await db.execute(
-                    select(RechargeOrder)
-                    .where(RechargeOrder.id == payment.recharge_order_id)
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
+            # 先无锁读取充值单快照；_settle_recharge_payment 会按统一
+            # Customer → RechargeOrder → Payment 顺序重新锁定并刷新。
+            # 回调路径不能预先锁 RechargeOrder。
+            recharge = await db.get(RechargeOrder, int(payment.recharge_order_id))
             if not recharge:
                 raise AppException(40491, "充值单不存在")
             payment.callback_raw = {"receipt": receipt}
