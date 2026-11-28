@@ -69,14 +69,14 @@ class UserCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=100)
     role_id: int
     store_id: int | None = None
-    status: int = 1
+    status: int = Field(default=1, strict=True, ge=0, le=1)
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     role_id: int | None = None
     store_id: int | None = None
-    status: int | None = None
+    status: int | None = Field(default=None, strict=True, ge=0, le=1)
     clear_store: bool = False
 
 
@@ -115,14 +115,28 @@ async def _load_user_with_role(db, user_id: int) -> User:
     return u
 
 
-def _assert_can_assign_role(actor: User, role: Role) -> None:
+async def _role_permission_codes(db, role_id: int) -> set[str]:
+    """返回角色直接持有的权限；不包含临时委派，防止权限二次扩散。"""
+    return set(
+        (
+            await db.execute(
+                select(Permission.code)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .where(RolePermission.role_id == role_id)
+            )
+        ).scalars().all()
+    )
+
+
+async def _assert_can_assign_role(db, actor: User, role: Role) -> None:
     if actor.role.code == "SUPER_ADMIN":
         return
     if role.code in STORE_ADMIN_FORBIDDEN_ROLES:
         raise AppException(40310, "无权分配该角色")
-    if role.code == "STORE_ADMIN" and actor.role.code != "SUPER_ADMIN":
-        # 门店管理员可以建收银/厨房，一般不建其他店长；允许本店再建 STORE_ADMIN 也可
-        pass
+    actor_codes = await _role_permission_codes(db, actor.role_id)
+    target_codes = await _role_permission_codes(db, role.id)
+    if not target_codes.issubset(actor_codes):
+        raise AppException(40310, "不能分配包含自身未持有权限的角色")
 
 
 @router.get("/roles", dependencies=[require_permission("user:read")])
@@ -215,6 +229,12 @@ async def create_role(data: RoleCreate, request: Request, db: DbSession, user: C
     db.add(role)
     await db.flush()
     codes = sorted({c.strip() for c in data.permission_codes if c and c.strip()})
+    if "system:manage" in codes:
+        raise AppException(40315, "system:manage 仅可由超级管理员角色持有")
+    if user.role.code != "SUPER_ADMIN":
+        grantable_codes = await _role_permission_codes(db, user.role_id)
+        if not set(codes).issubset(grantable_codes):
+            raise AppException(40315, "不能创建包含自身角色未持有权限的角色")
     if codes:
         perms = list(
             (await db.execute(select(Permission).where(Permission.code.in_(codes)))).scalars().all()
@@ -255,6 +275,16 @@ async def create_delegation(
     if user.role.code != "SUPER_ADMIN":
         if not user.store_id or delegatee.store_id != user.store_id:
             raise AppException(40300, "只能委派本店员工", status_code=403)
+        grantable_codes = await _role_permission_codes(db, user.role_id)
+    else:
+        grantable_codes = set(
+            (await db.execute(select(Permission.code))).scalars().all()
+        )
+    requested_codes = {str(code).strip() for code in data.permission_codes if str(code).strip()}
+    if "system:manage" in requested_codes:
+        raise AppException(40315, "system:manage 不可通过临时委派授予")
+    if not requested_codes.issubset(grantable_codes):
+        raise AppException(40315, "不能委派自身角色未持有的权限")
     try:
         row = await RoleDelegationService.create(
             db,
@@ -386,6 +416,10 @@ async def update_role_permissions(
         .all()
     )
     new_codes = set(wanted)
+    if user.role.code != "SUPER_ADMIN":
+        grantable_codes = await _role_permission_codes(db, user.role_id)
+        if not new_codes.issubset(grantable_codes):
+            raise AppException(40315, "不能授予自身角色未持有的权限")
 
     # 全量替换
     existing_rps = list(
@@ -491,7 +525,7 @@ async def create_user(data: UserCreate, request: Request, db: DbSession, user: C
         raise AppException(40081, f"用户名「{username}」已存在")
 
     role = await _get_role(db, data.role_id)
-    _assert_can_assign_role(user, role)
+    await _assert_can_assign_role(db, user, role)
 
     if user.role.code == "SUPER_ADMIN":
         sid = int(data.store_id) if data.store_id else None
@@ -575,7 +609,7 @@ async def update_user(
                 target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
     if data.role_id is not None:
         role = await _get_role(db, data.role_id)
-        _assert_can_assign_role(user, role)
+        await _assert_can_assign_role(db, user, role)
         if role.id != target.role_id:
             perm_changes["role_id"] = {"from": target.role_id, "to": role.id, "role_code": role.code}
             target.role_id = role.id
