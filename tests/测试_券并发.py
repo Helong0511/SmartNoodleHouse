@@ -30,6 +30,12 @@ def _mock_tmml(**kw):
     return m
 
 
+def _template_lock_result(template):
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = template
+    return result
+
+
 def _mock_customer():
     c = MagicMock()
     c.id = 10
@@ -61,10 +67,10 @@ async def test_issue_quota_insufficient():
     """remaining=2 但 qty=3 → 报库存不足，不写入。"""
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
-    db.get = AsyncMock(side_effect=[_mock_customer(), _mock_tmml(remaining=2, total_quota=10)])
+    db.get = AsyncMock(return_value=_mock_customer())
     upd_result = MagicMock()
     upd_result.rowcount = 0  # 库存不足
-    db.execute = AsyncMock(return_value=upd_result)
+    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=2, total_quota=10)), upd_result])
     db.flush = AsyncMock()
     db.rollback = AsyncMock()
 
@@ -85,17 +91,17 @@ async def test_issue_stale_loaded_remaining_does_not_oversell():
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
     # 加载到内存的 remaining=10（旧快照），本次请求 qty=3
-    db.get = AsyncMock(side_effect=[_mock_customer(), _mock_tmml(remaining=10, total_quota=10)])
+    db.get = AsyncMock(return_value=_mock_customer())
 
-    # 第 1 次 execute：client_request_id 幂等回查 → 空
+    # 第 1 次 execute：模板行锁；第 2 次 execute：client_request_id 幂等回查 → 空
     scalars_empty = MagicMock()
     scalars_empty.all = MagicMock(return_value=[])
     sel_result = MagicMock()
     sel_result.scalars = MagicMock(return_value=scalars_empty)
-    # 第 2 次 execute：原子扣减 UPDATE，DB 当前 remaining 已不足 → 0 行
+    # 第 3 次 execute：原子扣减 UPDATE，DB 当前 remaining 已不足 → 0 行
     upd_result = MagicMock()
     upd_result.rowcount = 0
-    db.execute = AsyncMock(side_effect=[sel_result, upd_result])
+    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=10, total_quota=10)), sel_result, upd_result])
     db.flush = AsyncMock()
 
     with pytest.raises(AppException) as ei:
@@ -104,7 +110,7 @@ async def test_issue_stale_loaded_remaining_does_not_oversell():
         )
     assert ei.value.code == 40070
     # 扣减必须是带守卫的批量 UPDATE（WHERE remaining >= qty 由 DB 判定），而非按内存值 ORM flush
-    stmt = db.execute.call_args_list[1].args[0]
+    stmt = db.execute.call_args_list[2].args[0]
     assert isinstance(stmt, Update)
     # 拒绝发生在写券之前：不得进入发券 savepoint
     assert db.begin_nested.call_count == 0
@@ -115,7 +121,7 @@ async def test_issue_quota_ok_atomic_decrement():
     """remaining=5, qty=2 → 原子 UPDATE 成功，写入 2 张。"""
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
-    db.get = AsyncMock(side_effect=[_mock_customer(), _mock_tmml(remaining=5, total_quota=10)])
+    db.get = AsyncMock(return_value=_mock_customer())
 
     # SELECT existing by client_request_id → 空列表
     scalars_empty = MagicMock()
@@ -125,7 +131,7 @@ async def test_issue_quota_ok_atomic_decrement():
     # UPDATE result
     upd_result = MagicMock()
     upd_result.rowcount = 1
-    db.execute = AsyncMock(side_effect=[exec_result, upd_result])
+    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=5, total_quota=10)), exec_result, upd_result])
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
@@ -144,20 +150,20 @@ async def test_issue_idempotent_returns_existing():
     existing_cc = MagicMock(id=99, client_request_id="REQ-002")
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
-    db.get = AsyncMock(side_effect=[_mock_customer(), _mock_tmml(remaining=5)])
+    db.get = AsyncMock(return_value=_mock_customer())
     scalars = MagicMock()
     scalars.all = MagicMock(return_value=[existing_cc])
     exec_result = MagicMock()
     exec_result.scalars = MagicMock(return_value=scalars)
-    db.execute = AsyncMock(return_value=exec_result)
+    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=5)), exec_result])
 
     issued = await CouponService.issue_by_template_id(
         db, 10, 1, quantity=1, client_request_id="REQ-002"
     )
     assert len(issued) == 1
     assert issued[0].id == 99
-    # 只执行了 1 次 SELECT（幂等回查），不应有 UPDATE 库存
-    assert db.execute.await_count == 1
+    # 模板行锁 + 1 次幂等回查，不应有库存 UPDATE
+    assert db.execute.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -165,15 +171,15 @@ async def test_issue_unlimited_quota_skips_decrement():
     """remaining=None → 不限量，跳过库存扣减。"""
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
-    db.get = AsyncMock(side_effect=[_mock_customer(), _mock_tmml(remaining=None, total_quota=None)])
-    db.execute = AsyncMock()
+    db.get = AsyncMock(return_value=_mock_customer())
+    db.execute = AsyncMock(return_value=_template_lock_result(_mock_tmml(remaining=None, total_quota=None)))
     db.flush = AsyncMock()
     db.commit = AsyncMock()
 
     issued = await CouponService.issue_by_template_id(db, 10, 1, quantity=1)
     assert len(issued) == 1
-    # 不限量且无 client_request_id → 不执行任何 SELECT/UPDATE
-    assert db.execute.await_count == 0
+    # 不限量仍需锁模板行，但不执行库存 UPDATE
+    assert db.execute.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -181,7 +187,7 @@ async def test_issue_integrity_error_refunds_quota():
     """coupon_no 冲突时回补库存。"""
     db = MagicMock()
     db.begin_nested = _mock_begin_nested()
-    db.get = AsyncMock(side_effect=[_mock_customer(), _mock_tmml(remaining=5, total_quota=10)])
+    db.get = AsyncMock(return_value=_mock_customer())
     # SELECT existing → 空
     scalars_empty = MagicMock()
     scalars_empty.all = MagicMock(return_value=[])
@@ -192,7 +198,7 @@ async def test_issue_integrity_error_refunds_quota():
     upd_result.rowcount = 1
     # rollback 后回补 UPDATE
     refund_result = MagicMock()
-    db.execute = AsyncMock(side_effect=[exec_result, upd_result, refund_result])
+    db.execute = AsyncMock(side_effect=[_template_lock_result(_mock_tmml(remaining=5, total_quota=10)), upd_result, refund_result])
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
 
@@ -204,8 +210,8 @@ async def test_issue_integrity_error_refunds_quota():
     with pytest.raises(AppException) as ei:
         await CouponService.issue_by_template_id(db, 10, 1, quantity=2)
     assert ei.value.code == 50020
-    # 验证回补库存的 UPDATE 被执行（扣减 + 回补 = 2 次 execute，无 client_request_id 故无 SELECT）
-    assert db.execute.await_count == 2
+    # 模板锁 + 扣减 + 回补，共 3 次 execute；无 client_request_id 不执行幂等 SELECT
+    assert db.execute.await_count == 3
 
 
 @pytest.mark.asyncio
