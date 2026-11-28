@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -31,6 +32,7 @@ class Payment(Base, TimestampMixin):
         Index("ix_payments_operator_paid_at", "operator_id", "paid_at"),
         Index("ix_payments_paid_at_status", "paid_at", "status"),
         Index("ix_payments_order_id_status", "order_id", "status"),
+        Index("ix_payments_cashier_shift_status", "cashier_shift_id", "status"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     payment_no: Mapped[str] = mapped_column(String(40), unique=True, index=True)
@@ -40,6 +42,11 @@ class Payment(Base, TimestampMixin):
     )
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
     operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    cashier_shift_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        ForeignKey("cashier_shifts.id", name="fk_payments_cashier_shift_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     provider: Mapped[str] = mapped_column(String(20))
     channel: Mapped[str] = mapped_column(String(30))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
@@ -77,7 +84,11 @@ class PaymentRefund(Base, TimestampMixin):
 
 class CashierShift(Base, TimestampMixin):
     __tablename__ = "cashier_shifts"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(mysql.BIGINT(unsigned=True), "mysql"),
+        primary_key=True,
+        autoincrement=True,
+    )
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     operator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     opening_float: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))

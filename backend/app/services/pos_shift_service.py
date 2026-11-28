@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,7 +44,57 @@ async def _aggregate_payments(
     since: datetime,
     until: datetime | None = None,
     store_id: int | None = None,
+    cashier_shift_id: int | None = None,
 ) -> dict[str, Decimal]:
+    if cashier_shift_id is not None:
+        # 交班必须使用 current read：先前的普通 SELECT 可能已建立 RR 快照，
+        # 普通聚合可能看不到 pending 查询之后刚提交的支付回调。
+        q = select(Payment).where(
+            Payment.status == _PAID,
+            or_(
+                Payment.cashier_shift_id == int(cashier_shift_id),
+                and_(
+                    Payment.cashier_shift_id.is_(None),
+                    Payment.paid_at >= since,
+                    Payment.paid_at < until if until is not None else True,
+                ),
+            ),
+        )
+        if operator_id is not None:
+            q = q.where(Payment.operator_id == int(operator_id))
+        if store_id is not None:
+            q = q.where(
+                or_(
+                    Payment.order_id.in_(
+                        select(Order.id).where(Order.store_id == int(store_id))
+                    ),
+                    Payment.recharge_order_id.in_(
+                        select(RechargeOrder.id).where(RechargeOrder.store_id == int(store_id))
+                    ),
+                )
+            )
+        payments = (await db.execute(q.with_for_update())).scalars().all()
+        totals = {"CASH": Decimal("0"), "WECHAT": Decimal("0"), "ALIPAY": Decimal("0")}
+        other = Decimal("0")
+        for payment in payments:
+            provider = (payment.provider or "").upper()
+            amount = _money(payment.amount)
+            if provider in totals:
+                totals[provider] += amount
+            else:
+                other += amount
+        cash = totals["CASH"]
+        wechat = totals["WECHAT"]
+        alipay = totals["ALIPAY"]
+        total_amount = cash + wechat + alipay + other
+        return {
+            "total_cash": cash,
+            "total_wechat": wechat,
+            "total_alipay": alipay,
+            "total_other": other,
+            "total_amount": total_amount,
+        }
+
     q = select(Payment.provider, func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.status == _PAID,
         Payment.paid_at >= since,
@@ -112,6 +162,22 @@ class PosShiftService:
         return shift
 
     @classmethod
+    async def require_open_shift_for_update(
+        cls,
+        db: AsyncSession,
+        operator_id: int,
+        *,
+        store_id: int | None = None,
+    ) -> CashierShift:
+        """收银交易入口锁定班次行，和交班互斥；锁保持到本事务提交。"""
+        shift = await cls.get_open_shift_for_update(db, operator_id)
+        if not shift:
+            raise AppException(40070, "请先开班后再收银")
+        if store_id is not None and int(shift.store_id) != int(store_id):
+            raise AppException(40071, "当前班次门店与订单门店不一致，请先交班后重新开班")
+        return shift
+
+    @classmethod
     async def get_open_shift_for_update(
         cls, db: AsyncSession, operator_id: int
     ) -> CashierShift | None:
@@ -162,6 +228,7 @@ class PosShiftService:
             since=ensure_local_aware(shift.opened_at),
             until=until,
             store_id=int(shift.store_id),
+            cashier_shift_id=int(shift.id),
         )
         shift.total_cash = stats["total_cash"]
         shift.total_wechat = stats["total_wechat"]
@@ -188,6 +255,31 @@ class PosShiftService:
             raise AppException(40414, "班次不存在")
         if locked.status != "OPEN":
             raise AppException(40014, "班次已交班")
+        # 兼容迁移前尚未绑定班次的待支付单，避免升级窗口内迟到回调漏账。
+        pending = (
+            await db.execute(
+                select(Payment.id)
+                .where(
+                    Payment.status == "PENDING",
+                    Payment.provider.in_(("WECHAT", "ALIPAY")),
+                    or_(
+                        Payment.cashier_shift_id == int(locked.id),
+                        and_(
+                            Payment.cashier_shift_id.is_(None),
+                            Payment.operator_id == int(locked.operator_id),
+                            Payment.created_at >= ensure_local_aware(locked.opened_at),
+                        ),
+                    ),
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        if pending:
+            raise AppException(
+                40909,
+                "仍有微信/支付宝支付待确认，请先查单或等待回调完成后再交班",
+                status_code=409,
+            )
         stats = await cls._fill_shift_totals(db, locked)
         locked.status = "CLOSED"
         locked.closed_at = now_local()
@@ -310,8 +402,14 @@ class PosShiftService:
             .where(
                 Payment.operator_id == int(shift.operator_id),
                 Payment.status == _PAID,
-                Payment.paid_at >= since,
-                Payment.paid_at < until,
+                or_(
+                    Payment.cashier_shift_id == int(shift.id),
+                    and_(
+                        Payment.cashier_shift_id.is_(None),
+                        Payment.paid_at >= since,
+                        Payment.paid_at < until,
+                    ),
+                ),
             )
             .distinct()
         )
