@@ -5,7 +5,7 @@ import asyncio
 import uuid
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -39,12 +39,6 @@ async def test_concurrent_recharge_idempotency_insert_isolated_by_savepoint(db_s
         store_id, customer_id = store.id, customer.id
         await setup.commit()
 
-    competing_insert = asyncio.Event()
-
-    def observe_insert(_conn, _cursor, statement, _parameters, _context, _many):
-        if statement.lstrip().upper().startswith("INSERT INTO RECHARGE_ORDERS"):
-            competing_insert.set()
-
     async with maker() as winner, maker() as loser:
         # Both transactions establish an ordinary missing-key read first.
         assert await winner.scalar(
@@ -69,31 +63,44 @@ async def test_concurrent_recharge_idempotency_insert_isolated_by_savepoint(db_s
         )
         await winner.flush()
 
-        event.listen(engine.sync_engine, "before_cursor_execute", observe_insert)
-        try:
-            async def losing_insert():
-                with pytest.raises(IntegrityError):
-                    async with loser.begin_nested():
-                        loser.add(
-                            RechargeOrder(
-                                recharge_no=f"RLOS-{suffix[:28]}",
-                                customer_id=customer_id,
-                                store_id=store_id,
-                                pay_amount="10.00",
-                                credit_principal="10.00",
-                                credit_gift="0.00",
-                                status="PENDING",
-                                channel="WECHAT",
-                                idempotency_key=idem,
-                            )
-                        )
-                        await loser.flush()
+        async def losing_insert():
+            with pytest.raises(IntegrityError):
+                async with loser.begin_nested():
+                    loser.add(RechargeOrder(
+                        recharge_no=f"RLOS-{suffix[:28]}", customer_id=customer_id,
+                        store_id=store_id, pay_amount="10.00", credit_principal="10.00",
+                        credit_gift="0.00", status="PENDING", channel="WECHAT",
+                        idempotency_key=idem,
+                    ))
+                    await loser.flush()
 
-            task = asyncio.create_task(losing_insert())
-            await asyncio.wait_for(competing_insert.wait(), timeout=10)
+        task = asyncio.create_task(losing_insert())
+        wait_sql = text("""
+            SELECT COUNT(*) FROM performance_schema.data_lock_waits AS w
+            JOIN performance_schema.data_locks AS req
+              ON req.ENGINE = w.ENGINE
+             AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
+            WHERE req.OBJECT_SCHEMA = DATABASE()
+              AND req.OBJECT_NAME = 'recharge_orders'
+        """)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 10
+        observed_wait = False
+        try:
+            async with engine.connect() as observer:
+                while loop.time() < deadline:
+                    waiting = int((await observer.execute(wait_sql)).scalar_one())
+                    if waiting > 0:
+                        observed_wait = True
+                        break
+                    if task.done():
+                        await task
+                        break
+                    await asyncio.sleep(0.05)
+            assert observed_wait, "InnoDB data_lock_waits did not show competing recharge INSERT"
+            assert not task.done(), "competing recharge INSERT completed before winner commit"
             await winner.commit()
             await asyncio.wait_for(task, timeout=15)
-
             # A normal RR snapshot could miss the newly committed winner.
             # The production recovery path uses a locking/current read.
             winner_row = (
@@ -110,7 +117,12 @@ async def test_concurrent_recharge_idempotency_insert_isolated_by_savepoint(db_s
             assert await loser.scalar(select(Store.id).where(Store.id == store_id)) == store_id
             await loser.commit()
         finally:
-            event.remove(engine.sync_engine, "before_cursor_execute", observe_insert)
+            if task is not None and not task.done():
+                await winner.rollback()
+                try:
+                    await asyncio.wait_for(task, timeout=3)
+                except Exception:
+                    task.cancel()
             if winner.in_transaction():
                 await winner.rollback()
             if loser.in_transaction():
